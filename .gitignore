@@ -1,0 +1,31 @@
+# ============================================
+# 后端
+# ============================================
+/survey-backend/target/
+/survey-backend/.idea/
+/survey-backend/.mvn/
+/survey-backend/*.iml
+/survey-backend/logs/
+/survey-backend/src/main/resources/application-local.yml
+/survey-backend/*.log
+
+# ============================================
+# 前端
+# ============================================
+/survey-frontend/node_modules/
+/survey-frontend/dist/
+/survey-frontend/dist-ssr/
+/survey-frontend/.vscode/
+/survey-frontend/.idea/
+/survey-frontend/.env.local
+/survey-frontend/.env.*.local
+/survey-frontend/*.log
+/survey-frontend/npm-debug.log*
+
+# ============================================
+# 通用
+# ============================================
+.DS_Store
+Thumbs.db
+*.sw?
+*.iml

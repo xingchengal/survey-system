@@ -1,0 +1,9 @@
+# ============================================
+# 生产环境配置（通过 --spring.profiles.active=prod 激活）
+# ============================================
+
+# ========== 关闭 MyBatis SQL 日志 ==========
+mybatis:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+    map-underscore-to-camel-case: true

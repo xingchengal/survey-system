@@ -1,0 +1,55 @@
+# ========== 服务器配置 ==========
+server:
+  port: 8080
+
+# ========== Spring 配置 ==========
+spring:
+  # 数据源
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/survey_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+    username: root
+    password: ${DB_PASSWORD:your-db-password}
+
+  # Jackson 日期格式
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+# ========== MyBatis 配置 ==========
+mybatis:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
+
+# ========== PageHelper 分页 ==========
+pagehelper:
+  helper-dialect: mysql
+  reasonable: true
+  support-methods-arguments: true
+  params: count=countSql
+
+# ========== Knife4j 接口文档 ==========
+# 注：Spring Boot 4 需使用 knife4j-next 社区版
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-footer: false
+    enable-footer-custom: true
+    footer-custom-content: Copyright © 2026 问卷调查系统
+
+# ========== AI 生成问卷配置 ==========
+ai:
+  qwen:
+    # 硅基流动（SiliconFlow）
+    base-url: https://api.siliconflow.cn/v1
+    api-key: ${QWEN_API_KEY:your-api-key}
+    model: Qwen/Qwen2.5-7B-Instruct
+
+# ========== JWT 配置 ==========
+jwt:
+  # 密钥（至少 32 个字符，生产环境请换成随机字符串）
+  secret: ${JWT_SECRET:change-me-in-production-32chars-min}
+  # token 有效期（毫秒）：7 天
+  expiration: 604800000
