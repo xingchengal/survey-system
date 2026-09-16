@@ -280,22 +280,22 @@ survey-system/
 > 📌 把你的截图放到 `docs/screenshots/` 目录，替换下面的占位符
 
 ### 登录页
-![登录页](docs/screenshots/login.png)
+![登录页](docs/screenshots/login.PNG)
 
 ### 管理员看板
-![管理员看板](docs/screenshots/admin-dashboard.png)
+![管理员看板](docs/screenshots/admin-dashboard.PNG)
 
 ### 问卷编辑器（含逻辑跳转）
-![问卷编辑器](docs/screenshots/survey-edit.png)
+![问卷编辑器](docs/screenshots/survey-edit.PNG)
 
 ### 数据统计
-![数据统计](docs/screenshots/statistics.png)
+![数据统计](docs/screenshots/statistics.PNG)
 
 ### AI 生成问卷
-![AI生成](docs/screenshots/ai-generate.png)
+![AI生成](docs/screenshots/ai-generate.PNG)
 
 ### 接口文档
-![接口文档](docs/screenshots/api-doc.png)
+![接口文档](docs/screenshots/api-doc.PNG)
 
 ---
 
