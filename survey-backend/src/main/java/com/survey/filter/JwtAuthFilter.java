@@ -33,13 +33,20 @@ public class JwtAuthFilter implements Filter {
 
         String uri = request.getRequestURI();
 
-        // 白名单放行
+        // ★ 关键：只拦截 /api/ 开头的接口
+        // 其他（静态资源、SPA 路由、首页）一律放行
+        if (!uri.startsWith("/api/")) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        // 白名单放行（无需登录就能访问的接口）
         if (isWhiteList(uri)) {
             chain.doFilter(request, response);
             return;
         }
 
-        // 拿 token
+        // 从 Authorization 头拿 token
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             writeJson(response, 401, "未登录或 token 缺失");
@@ -57,7 +64,7 @@ public class JwtAuthFilter implements Filter {
         String role = claims.get("role", String.class);
         String username = claims.get("username", String.class);
 
-        // ★ 包装 request，重写 X-User-Id / X-User-Role
+        // 包装 request，覆盖 X-User-Id / X-User-Role 请求头
         HeaderRewriteRequestWrapper wrapper = new HeaderRewriteRequestWrapper(request);
         wrapper.setHeader("X-User-Id", userId != null ? String.valueOf(userId) : "");
         wrapper.setHeader("X-User-Role", role != null ? role : "");
@@ -72,6 +79,9 @@ public class JwtAuthFilter implements Filter {
         response.getWriter().write("{\"success\":false,\"code\":" + code + ",\"message\":\"" + message + "\"}");
     }
 
+    /**
+     * 白名单（无需登录就能访问的 API）
+     */
     private boolean isWhiteList(String uri) {
         return uri.startsWith("/api/user/login")
                 || uri.startsWith("/api/user/register")
@@ -80,12 +90,6 @@ public class JwtAuthFilter implements Filter {
                 || uri.startsWith("/api/question/list/")
                 || uri.startsWith("/api/answer/submit-share/")
                 || uri.startsWith("/api/announcement/active")
-                || uri.startsWith("/api/health")
-                || uri.startsWith("/v3/")
-                || uri.startsWith("/swagger-ui")
-                || uri.startsWith("/doc.html")
-                || uri.startsWith("/webjars")
-                || uri.startsWith("/favicon")
-                || uri.startsWith("/error");
+                || uri.startsWith("/api/health");
     }
 }

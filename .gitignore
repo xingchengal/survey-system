@@ -29,3 +29,11 @@
 Thumbs.db
 *.sw?
 *.iml
+
+
+# ============================================
+# 构建产物（不上传）
+# ============================================
+/survey-frontend/dist/
+/survey-backend/src/main/resources/static/
+/survey-backend/target/

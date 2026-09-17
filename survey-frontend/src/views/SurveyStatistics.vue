@@ -243,10 +243,41 @@ export default {
       return q ? q.title : `题目 #${questionId}`
     },
 
-    // 导出 Excel
-    exportExcel() {
-      window.open(`http://localhost:8080/api/answer/export/${this.surveyId}`, '_blank')
-    }
+    // 导出 Excel（用 fetch 下载，自动带 token）
+    async exportExcel() {
+      try {
+        const res = await fetch(`/api/answer/export/${this.surveyId}`)
+        if (!res.ok) {
+          ElMessage.error('导出失败：' + res.status)
+          return
+        }
+
+        // 从响应头取文件名
+        const disposition = res.headers.get('Content-Disposition')
+        let filename = '答卷数据.xlsx'
+        if (disposition) {
+          const match = disposition.match(/filename=([^;]+)/)
+          if (match) {
+            filename = decodeURIComponent(match[1].replace(/["']/g, '').trim())
+          }
+        }
+
+        // 下载
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+
+        ElMessage.success('导出成功')
+      } catch (e) {
+        ElMessage.error('导出失败：' + e.message)
+      }
+    },
   }
 }
 </script>
