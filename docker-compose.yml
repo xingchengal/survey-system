@@ -1,0 +1,57 @@
+# ============================================================
+# 问卷系统 · 一键启动（MySQL 8 + 应用）
+#   1) copy .env.example .env   然后填好三个值
+#   2) docker compose up --build        （首次要几分钟：下 Node/Maven 依赖）
+#   3) 浏览器打开 http://localhost:8080
+# ============================================================
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: survey-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请先在 .env 里设置 DB_PASSWORD}
+      MYSQL_DATABASE: survey_db
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+    ports:
+      # ★ 映射到 3307：避免与本机已装的 MySQL（3306）冲突
+      - "3307:3306"
+    volumes:
+      - survey-mysql-data:/var/lib/mysql
+      # 首次启动自动建表（12 张表 + 唯一索引 uk_survey_user）
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: survey-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # ★ 必须显式用 prod：容器里没有 application-local.yml
+      SPRING_PROFILES_ACTIVE: prod
+      TZ: Asia/Shanghai
+      # 覆盖 application.yaml 里写死的 localhost —— 容器内走服务名 mysql
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/survey_db?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?请先在 .env 里设置 DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?请先在 .env 里设置 JWT_SECRET（至少 32 字符）}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+    ports:
+      - "8080:8080"
+
+volumes:
+  survey-mysql-data:

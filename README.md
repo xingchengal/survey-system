@@ -250,6 +250,30 @@ npm run dev
 
 ---
 
+## 🐳 Docker 一键启动（演示 / 答辩推荐）
+
+数据库、后端、前端一起起；前端 `dist` 已打进 jar，所以**只有一个应用容器**：
+
+```bash
+copy .env.example .env      # Git Bash: cp .env.example .env
+# 编辑 .env：DB_PASSWORD、JWT_SECRET（≥32 字符）、QWEN_API_KEY（可留空）
+docker compose up --build
+```
+
+首次构建要几分钟（下载 Node 与 Maven 依赖并完整编译一次），之后 `docker compose up` 秒起。
+
+| 项 | 说明 |
+|---|---|
+| 应用地址 | <http://localhost:8080> —— 前端与接口同源，不需要再跑 Vite |
+| 数据库 | 容器内 3306，宿主机映射 **3307**（避开本机已装的 MySQL） |
+| 建表 | 首次启动自动执行 `sql/init.sql`（12 张表 + 唯一索引） |
+| 数据持久化 | 存在 `survey-mysql-data` 卷里：`docker compose down` 不丢，`down -v` 才清空 |
+| 建管理员 | 先注册账号，再 `UPDATE t_user SET role='admin' WHERE username='你的账号';` |
+| 改了代码 | 重新 `docker compose up --build` |
+
+> 只想要"一个进程"的本地形态也可以不用 Docker：把 `npm run build` 的 `dist/*` 拷进
+> `survey-backend/src/main/resources/static/`，然后只跑后端 `8080`。
+
 ## 📁 项目结构
 
 ```

@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.vscode
+**/node_modules
+**/target
+**/dist
+**/*.log
+survey-backend/logs
+survey-backend/src/main/resources/application-local.yml
+docs/screenshots
