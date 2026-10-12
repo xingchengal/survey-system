@@ -1,0 +1,20 @@
+root = true
+
+# 统一编辑器基础规范 —— 装了 EditorConfig 插件的编辑器（VSCode 需装扩展）会自动遵守。
+# 目的：避免"有人用 4 空格、有人用 Tab、有人 CRLF 有人 LF"造成的无意义 diff。
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 2
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Markdown 里行尾空格是有意义的（换行），不要自动删
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows 批处理必须是 CRLF，否则可能执行异常
+[*.bat]
+end_of_line = crlf

@@ -9,7 +9,7 @@
           </div>
           <div class="stat-content">
             <div class="stat-label">普通用户</div>
-            <div class="stat-value" style="color:#409eff;">{{ stats.users }}</div>
+            <div class="stat-value color-primary">{{ stats.users }}</div>
           </div>
         </el-card>
       </el-col>
@@ -20,7 +20,7 @@
           </div>
           <div class="stat-content">
             <div class="stat-label">问卷总数</div>
-            <div class="stat-value" style="color:#67c23a;">{{ stats.total }}</div>
+            <div class="stat-value color-success">{{ stats.total }}</div>
           </div>
         </el-card>
       </el-col>
@@ -42,7 +42,7 @@
           </div>
           <div class="stat-content">
             <div class="stat-label">草稿</div>
-            <div class="stat-value" style="color:#e6a23c;">{{ stats.draft }}</div>
+            <div class="stat-value color-warning">{{ stats.draft }}</div>
           </div>
         </el-card>
       </el-col>
@@ -53,7 +53,7 @@
           </div>
           <div class="stat-content">
             <div class="stat-label">总答卷</div>
-            <div class="stat-value" style="color:#f56c6c;">{{ stats.responses }}</div>
+            <div class="stat-value color-danger">{{ stats.responses }}</div>
           </div>
         </el-card>
       </el-col>
@@ -64,20 +64,20 @@
           </div>
           <div class="stat-content">
             <div class="stat-label">访客次数</div>
-            <div class="stat-value" style="color:#8e44ad;">{{ stats.views }}</div>
+            <div class="stat-value color-purple">{{ stats.views }}</div>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
     <!-- ==================== 第一行：饼图 + 趋势图 ==================== -->
-    <el-row :gutter="20" style="margin-top: 20px;">
+    <el-row class="mt-20" :gutter="20">
       <!-- 左：问卷状态分布 -->
       <el-col :span="10">
         <el-card style="height: 380px;">
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: bold;">📊 问卷状态分布</span>
+            <div class="flex-between">
+              <span class="text-bold">📊 问卷状态分布</span>
               <el-tag size="small" type="info">共 {{ stats.total }} 份</el-tag>
             </div>
           </template>
@@ -90,8 +90,8 @@
       <el-col :span="14">
         <el-card style="height: 380px;">
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: bold;">📈 问卷创建趋势（近7天）</span>
+            <div class="flex-between">
+              <span class="text-bold">📈 问卷创建趋势（近7天）</span>
               <el-tag size="small" type="success">近7天新增 {{ recent7DaysTotal }} 份</el-tag>
             </div>
           </template>
@@ -101,23 +101,18 @@
     </el-row>
 
     <!-- ==================== 第二行：回收量排行 + 系统概况 ==================== -->
-    <el-row :gutter="20" style="margin-top: 20px;">
+    <el-row class="mt-20" :gutter="20">
       <!-- 左：问卷回收量排行榜 -->
       <el-col :span="14">
         <el-card style="height: 420px;">
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: bold;">🏆 问卷回收量排行 TOP 10</span>
+            <div class="flex-between">
+              <span class="text-bold">🏆 问卷回收量排行 TOP 10</span>
               <el-tag size="small" type="warning">按答卷数排序</el-tag>
             </div>
           </template>
-          <el-table
-            :data="ranking.slice(0, 10)"
-            :show-header="true"
-            stripe
-            style="width: 100%;"
-            max-height="340"
-          >
+          <el-table class="w-full" :data="ranking.slice(0, 10)" :show-header="true"
+            stripe max-height="340">
             <el-table-column label="排名" width="70" align="center">
               <template #default="{ $index }">
                 <span :class="['rank-badge', $index < 3 ? 'rank-top' : '']">{{ $index + 1 }}</span>
@@ -133,7 +128,7 @@
             </el-table-column>
             <el-table-column label="答卷数" width="200" align="center">
               <template #default="{ row }">
-                <div style="display: flex; align-items: center;">
+                <div class="flex-center">
                   <el-progress
                     :percentage="Math.min(100, row.responseCount / maxResponse * 100)"
                     :stroke-width="10"
@@ -156,7 +151,7 @@
       <el-col :span="10">
         <el-card style="height: 420px;">
           <template #header>
-            <span style="font-weight: bold;">⚙️ 系统概况</span>
+            <span class="text-bold">⚙️ 系统概况</span>
           </template>
 
           <!-- 系统健康度圆环 -->
@@ -190,12 +185,19 @@
 </template>
 
 <script>
-import * as echarts from 'echarts'
-import { ElMessage } from 'element-plus'
-import { UserFilled, Document, Promotion, EditPen, ChatDotRound, View } from '@element-plus/icons-vue'
+// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
+//   本页用到：饼图、折线图、仪表盘，以及 graphic.LinearGradient 做渐变填充
+import echarts from '../utils/echarts'
+// ★ 统一接口层：本页只调 **2 个接口方法**（systemOverview + listWithResponseCount）——
+//   概况 1 次、问卷列表 1 次；每份问卷的答卷数由后端批量 GROUP BY 一次带回，
+//   而不是逐份 count（那会是 1 概况 + 1 列表 + N 次逐份答卷数请求）。
+//   注意这里不 import ElMessage：catch 里的失败提示统一由 src/api/http.js 弹出，
+//   页面层重复弹会一次失败弹两个框。
+import api from '../api'
+// 本页图标均为模板标签形式，已由 main.js 全局注册，无需 import
 
+// 图标已在 main.js 全局注册，不再重复注册（View 是 HTML 保留标签名）
 export default {
-  components: { UserFilled, Document, Promotion, EditPen, ChatDotRound, View },
   data() {
     return {
       stats: { users: 0, total: 0, published: 0, draft: 0, ended: 0, responses: 0, views: 0 },
@@ -244,31 +246,29 @@ export default {
   methods: {
     async loadAll() {
       try {
-        // 1. 系统概况
-        const overviewRes = await fetch('/api/survey/system-overview')
-        this.stats = await overviewRes.json()
+        // 1. 系统概况：api.survey.systemOverview() 内部走 http.get
+        //    （统一带 token、统一按状态码判成败）。
+        this.stats = await api.survey.systemOverview()
 
-        // 2. 问卷列表
-        const listRes = await fetch('/api/survey/list')
-        const surveys = await listRes.json()
+        // 2. 问卷列表 + 每份的答卷数（一次请求拿到，替代逐份 count 的 N+1 做法）
+        //    逐份做法是 `for (const s of surveys) { await api.answer.count(s.id) }` ——
+        //    n 份问卷就要 n 次**串行**往返（10 份 = 1+1+10 次请求，越往后越慢，
+        //    问卷上百时这个页面要转很久）。后端本来就批量算好了答卷数，
+        //    只是缺一个"问卷 + 答卷数一起返回"的端点，本页用的就是这个端点。
+        const rows = await api.survey.listWithResponseCount()
 
-        // 3. 为每份问卷查询答卷数
-        const ranking = []
-        for (const s of surveys) {
-          const countRes = await fetch(`/api/answer/count/${s.id}`)
-          const count = await countRes.json()
-          ranking.push({
-            title: s.title,
-            status: s.status,
-            createdTime: s.createdTime,
-            responseCount: count
-          })
-        }
+        // 3. 组装排行（字段与逐份查询时一致）
+        const ranking = rows.map(s => ({
+          title: s.title,
+          status: s.status,
+          createdTime: s.createdTime,
+          responseCount: s.responseCount
+        }))
         ranking.sort((a, b) => b.responseCount - a.responseCount)
         this.ranking = ranking
 
-        // 4. 计算近7天趋势
-        this.calcTrend(surveys)
+        // 4. 计算近7天趋势（只用到 createdTime，rows 里已经带了）
+        this.calcTrend(rows)
 
         // 5. 渲染图表
         this.$nextTick(() => {
@@ -277,8 +277,9 @@ export default {
           this.initHealth()
         })
       } catch (e) {
+        // ★ 失败提示由 src/api/http.js 统一弹出（非 2xx / 网络异常都会弹），
+        //   页面层再弹一次会重复，所以这里只留控制台日志便于排查，属于流程控制。
         console.error(e)
-        ElMessage.error('加载数据失败')
       }
     },
 

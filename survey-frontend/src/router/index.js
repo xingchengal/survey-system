@@ -1,5 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '../layouts/AdminLayout.vue'
+// ★ 登录态统一从 utils/auth 读，不要各处直接 JSON.parse localStorage
+//   （原因见 utils/auth.js 的类注释：解析失败会导致整个应用白屏）
+import { getUser, isLoggedIn, homePathFor } from '../utils/auth'
 
 const routes = [
   // ===== 公开页面 =====
@@ -26,11 +29,13 @@ const routes = [
   {
     path: '/',
     component: AdminLayout,
+    // 访问根路径时按角色分流；未登录去登录页。
+    // ★ 必须走 utils/auth.getUser()：裸 JSON.parse 时 localStorage 的值一旦被写坏，
+    //   访问 / 就直接白屏；getUser() 解析失败按"未登录"处理。
     redirect: () => {
-      const userStr = localStorage.getItem('user')
-      if (!userStr) return '/login'
-      const user = JSON.parse(userStr)
-      return user.role === 'admin' ? '/dashboard' : '/my/dashboard'
+      const user = getUser()
+      if (!user) return '/login'
+      return homePathFor(user.role)
     },
     children: [
       // ---- 管理员专属 ----
@@ -135,28 +140,48 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
+/**
+ * 路由守卫 —— 前端权限的「体验层」。
+ *
+ * ⚠️ 重要认知：前端的角色判断**不可信**（localStorage 是明文、可随意修改），
+ *    它只负责"别把不该看到的菜单显示出来"，真正的权限防线全在后端
+ *    （JwtAuthFilter 校验 token，各接口再做归属/角色校验）。
+ *
+ * ★ 这里必须守住四条不变量：
+ *   1. 登录态只能走 utils/auth.getUser()：直接 `JSON.parse(localStorage.getItem('user'))`
+ *      没有 try-catch，值被写坏时守卫抛异常 → **整个应用白屏**，连登录页都进不去。
+ *   2. 放行条件是 isLoggedIn()（token 与 user **同时存在**），不能只看 user：
+ *      若 token 已失效而 user 还在，用户能进页面但每个请求都 401、然后再被踢回登录页。
+ *   3. 已登录用户访问 /login、/register 时直接回自己的首页，
+ *      否则"登录成功后又手滑回到登录页"。
+ *   4. 无权限时跳转的目标路径统一由 auth.homePathFor() 计算，不要两处各写一遍三元表达式。
+ */
 router.beforeEach((to, from, next) => {
-  const userStr = localStorage.getItem('user')
-  const user = userStr ? JSON.parse(userStr) : null
+  const loggedIn = isLoggedIn()
+  const user = getUser()
 
-  // 公开页直接放行
+  // 1. 已登录还想去登录/注册页 → 直接回自己的首页
+  if (to.meta.public && loggedIn && (to.name === 'Login' || to.name === 'Register')) {
+    next(homePathFor(user.role))
+    return
+  }
+
+  // 2. 其它公开页（如匿名答题 /s/:shareCode）直接放行
   if (to.meta.public) {
     next()
     return
   }
 
-  // 未登录 → 跳登录
-  if (!user) {
+  // 3. 未登录 / 登录态不完整（有 user 没 token 等）→ 跳登录
+  if (!loggedIn) {
     next('/login')
     return
   }
 
-  // 权限校验
+  // 4. 角色校验：meta.roles 不含当前角色就是没权限，跳回各自的首页
   const allowedRoles = to.meta.roles
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    // 没权限 → 跳回各自首页
-    next(user.role === 'admin' ? '/dashboard' : '/my/dashboard')
+    next(homePathFor(user.role))
     return
   }
 

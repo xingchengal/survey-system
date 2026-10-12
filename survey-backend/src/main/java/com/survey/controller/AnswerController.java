@@ -1,6 +1,8 @@
 package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
+import com.survey.common.SurveyStatus;
+import com.survey.common.BizException;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Question;
@@ -8,6 +10,7 @@ import com.survey.entity.Survey;
 import com.survey.service.AnswerService;
 import com.survey.service.QuestionService;
 import com.survey.service.SurveyService;
+import com.survey.common.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -18,10 +21,58 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.util.*;
 
+/**
+ * 答卷管理：提交答卷、按问卷/题目查询答卷与统计、导出 Excel。
+ *
+ * ── 谁在调我 ──────────────────────────────────────────
+ *   SurveyFillByCode.vue    → 匿名答题页提交（/submit-share/{code}）
+ *   SurveyStatistics.vue    → 统计页：答卷数、单题统计、填空题文本、答卷列表、
+ *                             单份答卷详情、导出 Excel
+ *   SystemStatistics.vue    → 管理员系统统计页取"每份问卷的答卷数"走的是
+ *                             GET /api/survey/list-with-response-count（不再逐个调本类的
+ *                             /count/{surveyId} —— 否则问卷一多就是几百次串行往返）
+ *
+ * ── 权限矩阵（详见 docs/问卷系统-端点权限审计表.md，随仓库入库）──
+ *   公开(白名单) : POST /submit-share/{shareCode}  —— 匿名访客凭分享码提交
+ *   需登录       : POST /submit/{surveyId} —— 登录态提交。★ **前端当前没有页面调用它，但它有意保留**：
+ *                  它是"答题人身份落库（t_answer.user_id）/ 答卷防重 / 我的答题历史"的实现路径，
+ *                  删掉会把这条路径一起堵死。完整理由（含答卷防重的现状说明）写在下面
+ *                  submit() 的 javadoc 里 —— **改它之前先读那段**。
+ *   需登录+归属  : GET /count|/statistics|/texts|/list|/detail|/export
+ *
+ * ── 两条重要约定（改这几个端点前务必看）──────────────────
+ *   1. 归属校验集中在私有方法 requireSurveyOwnership()：admin 直接放行，
+ *      否则要求问卷的 userId 等于当前登录用户，不通过就抛异常。
+ *      ★ 为什么要放行 admin：下面 6 个端点给的都是"某一份问卷的答卷数据"，
+ *        管理员要能看全站任意一份问卷的统计与导出；若这里只认作者，
+ *        管理员一打开别人的问卷统计就会 400。
+ *   2. 提交答卷前必须校验问卷「已发布(status==1)」：两个提交方法各查一次，
+ *      而「问卷不存在 / 不在回收站 / 未发布 / **同一登录用户未交过** / 空答卷 / 超条数 /
+ *      题目归属 / 同题去重 / 单题长度」这些更硬的不变量
+ *      已全部收进 AnswerService.submit()（唯一落库入口，见那边的四道校验）。
+ *      statistics()/texts() 拿到的是 questionId，需要用 questionService.getById() 反查 surveyId；
+ *      detail() 拿到的是 answerId，需要用 answerService.getAnswerById() 反查。
+ */
 @Tag(name = "答卷管理", description = "答卷提交、查询、统计、导出 Excel")
 @RestController
 @RequestMapping("/api/answer")
 public class AnswerController {
+
+    /**
+     * 单次 Excel 导出的答卷份数上限。
+     * ★ 为什么是 5000：导出会把全部明细读进内存再拼二维表，按每份 5~10 条明细估算，
+     *   5000 份约 3~5 万行，是"用户能接受、内存也扛得住"的平衡点。
+     *   超过就明确拒绝，而不是硬撑到 OOM。
+     */
+    private static final int MAX_EXPORT_RESPONSES = 5000;
+
+    /**
+     * 单次导出允许的**明细行数**上限（内存预检的真正口径）。
+     * ★ 内存占用取决于 答卷份数 × 每题行数，只卡份数挡不住"题多 × 答卷多"的组合：
+     *   5000 × 300 = 150 万行，足以把堆打满。
+     *   这里按行数取一个与"5000 份中等问卷（10 题）"同量级的值。
+     */
+    private static final int MAX_EXPORT_DETAILS = 50000;
 
     @Autowired
     private AnswerService answerService;
@@ -32,11 +83,65 @@ public class AnswerController {
     @Autowired
     private QuestionService questionService;
 
+    /**
+     * ★ 归属校验：确认当前登录用户就是这份问卷的作者（管理员放行）。
+     * 这 6 个“查看答卷数据”的接口若只验“是否登录”、不验“这份问卷是不是你的”，
+     * 任何登录用户只要改一下 URL 里的 id，就能看别人的答卷数量、选项分布、
+     * 填空题原文甚至导出整份 Excel（横向越权）。
+     */
+    private Survey requireSurveyOwnership(Integer surveyId, Integer userId, String role) {
+        Survey survey = surveyService.getById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (Role.isAdmin(role)) {
+            return survey;
+        }
+        if (userId == null || survey.getUserId() == null || !survey.getUserId().equals(userId)) {
+            throw new BizException("无权查看他人问卷的数据");
+        }
+        return survey;
+    }
+
+    /**
+     * 登录用户提交答卷。
+     *
+     * ★★ 本端点**有意保留**（前端零调用也先别删）—— 下一个人看到"前端零调用"时很可能想删掉它：
+     *
+     *   ① **它是"登录身份"唯一的写入路径**。另一条入口 {@code submit-share} 走的是
+     *      {@code answerService.submit(survey.getId(), null, details)} —— **userId 恒为 null**。
+     *      若只剩那一条，{@code t_answer.user_id} 就退化成"永远为 NULL 的死列"，
+     *      而它本该记录的正是"**谁**答的"。
+     *   ② **它是「我的答题历史」、实名问卷/内部评议的前提**（答卷防重已另行实现，见下）：
+     *      这些都要先有"答题人身份"落库。
+     *      删掉它等于把这些功能的**实现路径**一起堵死（将来得先恢复端点、再补读写逻辑）。
+     *   ③ 成本极低：守卫（未发布 / 回收站 / 归属）全在 {@code AnswerService.submit} 里，
+     *      限流与审计也已就位（见下），多这一个端点不增加维护负担。
+     *
+     *   ★ **防重已实现**（见 {@code AnswerService.submit} 的第四道校验）：登录用户对同一问卷
+     *     重复提交 → 400「你已经提交过这份问卷」；用例在 {@code AnswerServiceGuardTest}
+     *     （含"匿名侧不查重"的回归断言）。
+     *     ★ **匿名侧有意不拦**：按 IP 去重会误伤 NAT 后的同网用户（出口 IP 相同即被判重复），
+     *       所以匿名重复提交不在这一层拦。
+     *
+     *   ★ 与匿名入口的分工：本端点要求**已发布(status=1)**；匿名那条凭分享码。
+     *     两者最终都进 {@code AnswerService.submit}，那里还有更硬的守卫（非空 / 条数上限 /
+     *     不在回收站 / 已发布 / 题目归属 / 同题去重 / 单题长度）。
+     *
+     *   ★ 限流：{@code RateLimitInterceptor} 对 {@code /api/answer/submit/} 按**登录用户** 60 次/分。
+     *     若撤掉它，脚本可无限次提交答卷灌库，把统计口径直接冲垮。
+     */
     @Operation(summary = "提交答卷（登录用户）")
     @PostMapping("/submit/{surveyId}")
     public String submit(@PathVariable Integer surveyId,
                          @RequestBody List<AnswerDetail> details,
                          @RequestHeader(value = "X-User-Id", required = false) Integer userId) {
+        // ★ 与下面 submitByShareCode 保持一致：只有【已发布】(status=1) 的问卷才收答卷。
+        //   （"回收站里的问卷不能收答卷"由 AnswerService.submit 的四道校验兜住 —— 不变量收口在 Service，
+        //     这里的判断只是为了给出更早、更明确的 400 文案。）
+        Survey survey = surveyService.getById(surveyId);
+        if (survey == null) throw new BizException("问卷不存在");
+        if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
         answerService.submit(surveyId, userId, details);
         return "提交成功";
     }
@@ -46,48 +151,98 @@ public class AnswerController {
     public String submitByShareCode(@PathVariable String shareCode,
                                     @RequestBody List<AnswerDetail> details) {
         Survey survey = surveyService.getByShareCode(shareCode);
-        if (survey == null) return "问卷不存在";
-        if (survey.getStatus() == null || survey.getStatus() != 1) return "问卷未发布";
+        if (survey == null) throw new BizException("问卷不存在");
+        if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
         answerService.submit(survey.getId(), null, details);
         return "提交成功";
     }
 
     @Operation(summary = "查询某问卷的答卷数量")
     @GetMapping("/count/{surveyId}")
-    public int count(@PathVariable Integer surveyId) {
+    public int count(@PathVariable Integer surveyId,
+                     @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                     @RequestHeader(value = "X-User-Role", required = false) String role) {
+        requireSurveyOwnership(surveyId, userId, role);
         return answerService.countResponses(surveyId);
     }
 
     @Operation(summary = "选择题选项分布统计")
     @GetMapping("/statistics/{questionId}")
-    public List<Map<String, Object>> statistics(@PathVariable Integer questionId) {
+    public List<Map<String, Object>> statistics(@PathVariable Integer questionId,
+                                                @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                                                @RequestHeader(value = "X-User-Role", required = false) String role) {
+        Question question = questionService.getById(questionId);
+        if (question == null) {
+            throw new BizException("题目不存在");
+        }
+        requireSurveyOwnership(question.getSurveyId(), userId, role);
         return answerService.countQuestion(questionId);
     }
 
     @Operation(summary = "填空题的文字回答列表")
     @GetMapping("/texts/{questionId}")
-    public List<String> texts(@PathVariable Integer questionId) {
+    public List<String> texts(@PathVariable Integer questionId,
+                              @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                              @RequestHeader(value = "X-User-Role", required = false) String role) {
+        Question question = questionService.getById(questionId);
+        if (question == null) {
+            throw new BizException("题目不存在");
+        }
+        requireSurveyOwnership(question.getSurveyId(), userId, role);
         return answerService.listTextAnswers(questionId);
     }
 
     @Operation(summary = "查询某问卷的所有答卷")
     @GetMapping("/list/{surveyId}")
-    public List<Answer> listAnswers(@PathVariable Integer surveyId) {
+    public List<Answer> listAnswers(@PathVariable Integer surveyId,
+                                    @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                                    @RequestHeader(value = "X-User-Role", required = false) String role) {
+        requireSurveyOwnership(surveyId, userId, role);
         return answerService.listAnswersBySurveyId(surveyId);
     }
 
     @Operation(summary = "查询某份答卷的详细内容")
     @GetMapping("/detail/{answerId}")
-    public List<AnswerDetail> detail(@PathVariable Integer answerId) {
+    public List<AnswerDetail> detail(@PathVariable Integer answerId,
+                                     @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                                     @RequestHeader(value = "X-User-Role", required = false) String role) {
+        Answer answer = answerService.getAnswerById(answerId);
+        if (answer == null) {
+            throw new BizException("答卷不存在");
+        }
+        requireSurveyOwnership(answer.getSurveyId(), userId, role);
         return answerService.listDetailsByAnswerId(answerId);
     }
 
     @Operation(summary = "导出某问卷的答卷为 Excel")
     @GetMapping("/export/{surveyId}")
     public void export(@PathVariable Integer surveyId,
+                       @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                       @RequestHeader(value = "X-User-Role", required = false) String role,
                        HttpServletResponse response) throws IOException {
-        Survey survey = surveyService.getById(surveyId);
-        if (survey == null) return;
+        Survey survey = requireSurveyOwnership(surveyId, userId, role);
+
+        // ★ 下面会把该问卷的**全部**答卷明细读进内存（allDetails → answerMap → rows 三层结构），
+        //   十万级明细（含长文本回答）足以把堆撑爆 —— 而导出是个"顺手点一下"的操作，
+        //   不该有能力拖垮整个服务。
+        //   这里先做一次**廉价的 COUNT 预检**（单条 SQL，不加载数据），超过上限直接拒绝：
+        //   宁可让用户看到一句明确提示，也不要让服务 OOM。
+        //   ★ 若要支持更大数据量，正确做法是**按 answerId 分页查询 + EasyExcel 分批
+        //     writer.write(batch, sheet)**（EasyExcel 本身支持），而不是把上限调大。
+        // ★ 真正占内存的是**明细行数**而不是**答卷份数**（= 份数 × 每题行数）——
+        //   5000 份 × 300 题 = 150 万行明细被读进 List，再被 answerMap 与 rows 各复制一份，
+        //   只卡份数挡不住这种组合放大。所以两个口径**都查**（各一条廉价 COUNT，双保险）：
+        //   份数上限防止"答卷极多"，明细行数上限防止"题多 × 答卷多"。
+        int responseCount = answerService.countResponses(surveyId);
+        if (responseCount > MAX_EXPORT_RESPONSES) {
+            throw new BizException("该问卷已有 " + responseCount + " 份答卷，单次最多导出 "
+                    + MAX_EXPORT_RESPONSES + " 份。建议分批导出（或直接在数据库侧导出）");
+        }
+        int detailCount = answerService.countDetails(surveyId);
+        if (detailCount > MAX_EXPORT_DETAILS) {
+            throw new BizException("该问卷的答卷明细共 " + detailCount + " 行，单次最多导出 "
+                    + MAX_EXPORT_DETAILS + " 行。建议分批导出（或直接在数据库侧导出）");
+        }
 
         List<Question> questions = questionService.getQuestionsBySurveyId(surveyId);
         List<AnswerDetail> allDetails = answerService.listDetailsBySurveyId(surveyId);
@@ -117,8 +272,21 @@ public class AnswerController {
 
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         response.setCharacterEncoding("utf-8");
-        String fileName = URLEncoder.encode(survey.getTitle() + "_答卷数据", "UTF-8");
-        response.setHeader("Content-Disposition", "attachment;filename=" + fileName + ".xlsx");
+
+        // ★ 文件名编码（两层硬约束，写错就会下载到一串 %E4%BD%A0... 的乱码名）：
+        //   直接把 URLEncoder.encode(中文, "UTF-8") 拼进 filename 是不行的：
+        //     1) HTTP 头里的 filename 参数按 RFC 6266 只能是 ASCII/ISO-8859-1，
+        //        塞进去的百分号串浏览器**不会**自动还原，于是下载下来的就是 "xxx%%%%.xlsx"；
+        //     2) 想传中文名必须用 RFC 5987 的 filename*=UTF-8''<百分号编码>，
+        //        并且要再给一个 ASCII 的 filename 作为老浏览器的兜底。
+        //   正确写法（现代浏览器优先读 filename*，中文名能正常显示）：
+        //     attachment; filename="survey_1_answers.xlsx"; filename*=UTF-8''%E4%BD%A0...
+        //   ★ 注意 URLEncoder 会把空格编成 "+"，而 RFC 5987 里空格必须是 "%20"，所以要替换。
+        String baseName = survey.getTitle() + "_答卷数据";
+        String encodedName = URLEncoder.encode(baseName, "UTF-8").replace("+", "%20");
+        String asciiName = "survey_" + surveyId + "_answers.xlsx";
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"" + asciiName + "\"; filename*=UTF-8''" + encodedName + ".xlsx");
 
         EasyExcel.write(response.getOutputStream())
                 .head(head)

@@ -1,0 +1,121 @@
+# 前端架构与后端契约
+
+> 生成时间：2026-10-08；**后端为基准**。
+> **用途**：接手前端前先读这份 —— 它讲清"前端怎么起、数据怎么流、和后端哪一层对齐"。
+> **配套**：项目级说明在 `IdeaProjects/README.md`；后端约定在 `docs/问卷系统-交接文档.md`；
+> 接口权限矩阵在 `docs/问卷系统-端点权限审计表.md`。
+
+---
+
+## 一、怎么起（★ 含一个沙箱/受限环境的坑）
+
+| 命令 | 作用 |
+|---|---|
+| `npm install` | 装依赖（`package.json` 与 `package-lock.json` 都在库里） |
+| `npm run dev` | 起 Vite 开发服务器：**5173**，并把 `/api` 代理到后端 **8080**（见 `vite.config.js`） |
+| `npm run build` | 生产构建到 `dist/`（部署方式是"dist 拷进后端 static"的同源单包） |
+| `npm run lint` / `npm run lint:check` | ESLint（`--fix` / 只检查） |
+| `npm run format` | Prettier 格式化 `src/**/*.{js,vue,css}` |
+
+### ★ 「`npm run dev` 起不来」的两种完全不同原因
+
+**先分清是哪种，别乱改 `package.json`**：
+
+1. **`package.json` 真的丢了/损坏** → 报错会是 `ENOENT: no such file or directory, open '...package.json'`
+   或 `npm error Missing script: "dev"`。
+   ★ 本项目**没有这个问题**：`package.json`（764 字节）与 `package-lock.json`（95KB）都在，
+   `dev` / `build` / `lint` / `lint:check` / `format` 五个脚本齐全。
+2. **受限环境（如沙箱）禁止子进程管道** → 报错长这样：
+   ```
+   failed to load config from .../vite.config.js
+   Error: Build failed with 1 error:
+   [plugin externalize-deps] Error: spawn EPERM
+     at optimizeSafeRealPathSync (vite/dist/node/chunks/node.js)
+   ```
+   这是 Vite 在 Windows 上会 `exec` 一次系统命令来求真实路径，被沙箱拒了（与 `vite build` 的
+   spawn EPERM 是同一个坑）。**绕过办法**（5173/5199 都能听、模块转换与 `/api` 代理都正常）：
+   ```powershell
+   npx vite --configLoader native --port 5173
+   ```
+   普通开发机上直接 `npm run dev` 即可，**不需要**这个参数。
+
+> 验证要点：`/` 返回 index.html 且注入了 `/@vite/client`；
+> `/src/main.js` 返回 `text/javascript`（说明走了转换）；`/api/health` 经 5173 代理能拿到后端 200。
+
+---
+
+## 二、目录与分层
+
+```
+src/
+├── api/                 ← ★ 唯一出口：所有 HTTP 调用都在这里（页面里不允许裸 fetch）
+│   ├── http.js          ← 请求客户端：带 token、只看 HTTP 状态码判成败、统一弹错误、401 统一处理
+│   ├── index.js         ← 汇总出口（api.survey.xxx / api.user.xxx / ...）
+│   └── {survey,user,answer,question,ai,notification,announcement,log,demo,captcha}.js
+├── layouts/AdminLayout.vue   ← 后台壳：侧边栏（按角色出菜单）+ 顶栏（通知轮询 30s + 公告弹窗）
+├── router/index.js      ← 18 条具名路由 + `beforeEach` 守卫（登录态与 meta.roles）
+├── utils/
+│   ├── auth.js          ← 登录态读写（token / refreshToken / user 三个 localStorage key）
+│   └── echarts.js       ← ECharts 按需注册（pie/bar/line/gauge + title/tooltip/legend/grid + Canvas）
+├── views/               ← 17 个页面（全部 **Options API**，0 个 `<script setup>`）
+├── styles/common.css    ← 全站工具类/语义类/设计令牌（在内联样式清理时建立）
+└── main.js              ← 挂 Element Plus + 路由 + **按需注册 34 个图标**
+```
+
+### 数据流（三层，别越层）
+
+```
+views/*.vue  →  src/api/*.js  →  src/api/http.js  →  fetch  →  (Vite 代理)  →  后端 8080
+   页面只管          路径与参数          token / 状态码 / 错误提示 / 401
+   "拿数据/交给谁"
+```
+
+**约定**：页面里**不写裸 `fetch`、不拼 URL、不看 `data.success`、不比对中文文案**。
+后端已经把失败统一成"非 2xx + `{success:false,code,message}`"，前端只看状态码。
+
+---
+
+## 三、与后端对齐的几条硬约定（改动前必看）
+
+| 主题 | 后端行为 | 前端应对 |
+|---|---|---|
+| 失败响应 | `GlobalExceptionHandler` 统一 `{success:false, code, message, timestamp}`，400/401/403/413/429/500 语义严格区分 | `http.js` **只看 `response.ok`**；message 直接取自响应体 |
+| 401 | `JwtAuthFilter` 写出（未登录 / token 无效 / 账号已注销 / 登录状态已失效 四种文案） | 有 `refreshToken` 时**先静默续期并重放原请求**；续不动才清 `token`+`refreshToken`+`user` 并跳 `/login`；`silent: true` 的调用不跳不弹 |
+| 成功响应 | **不统一**：有的是裸字符串（`"删除成功"`、`"ok"`），有的是 `{success,message}`，有的是实体/列表/`PageResult{total,list,pageNum,pageSize}` | 按各接口实际返回类型处理；分页一律 `data.list \|\| []` + `data.total \|\| 0` |
+| 白名单（**10 个分支 / 11 个端点**，免登录） | `/api/user/login`、`/register`、`/user/refresh`、`/captcha/`、`/survey/share/`、`/survey/view/`、`/question/list/`、`/answer/submit-share/`、`/announcement/active`、`/health` | 匿名答题页只调这几条。**要不要带 `silent` 按端点区分**：轮询 / 附带统计 / 匿名查问卷的要带（避免未登录时被"登录过期"打断），而匿名**提交**答卷（`api/answer.js` 的 `submitByShareCode`）**故意不传** `silent` —— 提交失败必须让访客看到原因 |
+| 角色 | `role === "admin"`；端点用 `@RequireAdmin`（非管理员 **400「无权限」**） | `router` 的 `meta.roles` + 菜单 `v-if` 只是**体验层**，真防线在后端 |
+| 归属 | `OwnershipGuard`（管理员放行 / 本人）；失败 400 + 中文文案 | 页面把 400 的 message 直接展示即可，不要自己编文案 |
+| 限流（`RateLimitInterceptor` 共 **9 条**） | 429 + `{message:"操作过于频繁，请稍后再试"}`（登录 10/分/IP、AI 1/30s/用户、view 30/分/IP、匿名提交 30/分/IP、**登录态提交 60/分/用户**、health 60/分/IP、滑块取图 20/分/IP、滑块判定 120/分/IP、refresh 30/分/IP） | 429 不特殊处理也能弹出正确文案；**不要**把 429 当 500 |
+| 文本上限 | 见 `common/TextLimits`（标题 200 / 描述 500 / 题干 500 / 选项 500 / 单题回答 1000 / 公告标题 200 / 公告正文 16000 / 用户名与昵称 50） | 前端 `maxlength` 应当**等于或大于**后端上限（更严 = 用户明明合法却填不进去） |
+| 请求体上限 | >4MB → **413** | 头像 base64 那条路的**真实生效上限是解码后 2MB**（见 `common/AvatarValidator`：base64 字符串长度 3MB 只是廉价的第一道闸，**解码后 2MB 才是真正的界**；两者超限都是 400 + message） |
+| 头像格式 | `common/AvatarValidator`：只收 `data:image/(png\|jpeg\|gif);base64,...`，且**解码后魔数必须与声明一致** | 前端选图就按 PNG/JPG/GIF + ≤2MB 拦（`*Profile.vue` 的 `handleFileChange`），并统一经 `components/AvatarCropper.vue` 裁成 320×320 PNG 再提交 |
+| 状态机 | 回收站问卷不能编辑/发布/收答卷/设模板；已结束问卷要**先延长截止时间**才能重新发布；`update` 的 SQL **不含** status/shareCode | 按钮显示条件要与这些守卫一致；已结束的问卷要给"延长结束时间"的路径 |
+| Excel 导出 | `Content-Disposition: attachment; filename="survey_1_answers.xlsx"; filename*=UTF-8''<百分号编码>` | `http.download()` 优先解析 `filename*`，两个分支都做一次 decode；`filename=` 那条是**防御性兼容**（后端现在统一只产生 `filename*`，不会再出现编码后的中文名） |
+
+---
+
+## 四、认证与路由
+
+- **localStorage 三个 key**：`token`（JWT）、`refreshToken`（勾了"记住我"才有，7 天有效，
+  只用来换新的 access token）与 `user`（`{id,username,nickname,role,...}`）。
+  `utils/auth.js` 是唯一出口；`api/http.js` 里的常量必须与之保持一致 ——
+  三处 key 名一旦不一致，就会出现"清不干净 → 退出登录后刷新页面又自动登录"。
+- **路由守卫**（`router/index.js` 的 `beforeEach`）：
+  1. 已登录访问 `/login`、`/register` → 按角色回首页；
+  2. `meta.public`（`/login`、`/register`、`/s/:shareCode`）→ 放行；
+  3. 未登录或不完整（有 user 没 token）→ `/login`；
+  4. `meta.roles` 不含当前角色 → 回自己的首页。
+- **前端的 role 判断只是体验层**：localStorage 可篡改，改 role 最多看到空页面/一堆 400，
+  拿不到数据。**撤销管理员后前端不会自动感知**（菜单会留到下次登录），这是已知的体验层局限。
+
+---
+
+## 五、维护提示（改动前必看）
+
+1. **图标是按需注册的**（`main.js` 里 34 个）。页面里用到新图标，必须在 `main.js` 的 import 与
+   `icons` 对象里各补一行；另外 `:icon="X"` 这类**属性变量形式**需要该 `.vue` 自己 import。
+   两种情况互不覆盖，漏了会渲染不出来（控制台提示组件未注册）。
+2. **ECharts 是按需注册的**（`utils/echarts.js`）。新图表类型/组件要补进 `echarts.use([...])`。
+3. **创建问卷时不要传 `status`/`shareCode`/`isTemplate`/`deleted`** —— 服务端一律忽略并强制归零（草稿）。
+4. **分享码由服务端独占**：`/survey/update` 传 `shareCode` 会被忽略；发布（`/publish/{id}`）才会生成。
+5. **别在页面里删掉 `silent`**：轮询（通知未读、健康检查）与匿名页的调用需要它来抑制提示与跳转。

@@ -1,0 +1,100 @@
+# ============================================================
+# 持续集成：每次 push / PR 自动编译 + 跑测试
+# ============================================================
+# ★ 为什么加它（评审【工程性·低】"无 CI 流水线与静态检查插件"）：
+#   本项目最脆弱的是安全逻辑（PBKDF2 平滑迁移、三级可见性、白名单身份注入），
+#   而这些地方历史上正是"反复出问题又被修回来"。没有 CI 时，任何破坏性改动
+#   都只能靠人工发现 —— 现在至少有编译 + 单测这两道自动闸门。
+#
+# ★ 关于测试范围（重要，第十六轮改过写法）：
+#   **默认跑全部纯单元测试**，唯一被排除的是 SurveyBackendApplicationTests
+#   （`@SpringBootTest contextLoads`，需要真实 MySQL，CI 无库必然失败）——
+#   排除规则写在 `survey-backend/pom.xml` 的 maven-surefire-plugin `<excludes>` 里，
+#   所以这里直接 `./mvnw test` 即可。要把它纳入，需先配 Testcontainers 或 H2。
+#
+#   ★ 为什么改成"默认全跑"（第十六轮的真实教训）：
+#     原来这里是 `-Dtest=UserServiceTest,JwtAuthFilterTest,...` **逐个列类名**。两个毛病：
+#       ① **新增测试类必须手工加进这个列表**，忘了就静默不跑 ——
+#          第十六轮新增的 `SurveyControllerRoutingTest`（专门防"端点被误删"的回归测试）
+#          就是这么漏掉的，而且这个列表当时已经落后 3 轮（缺 TextLimits/SqlLikeEscaper/
+#          AnswerServiceGuard 三个类），是用户提醒才发现；
+#       ② 列表里的类一旦重命名/删除，CI 会直接**编译失败**，报错还指向 CI 而不是代码。
+#     现在新增测试类**不需要改这个文件**，也不会再静默漏跑。
+#
+# ★ 关于"静态检查"这一步（评审【工程性·低】建议加 Checkstyle / Spotless / 覆盖率）：
+#   **本机离线仓库里没有这些插件**（checkstyle-maven-plugin / spotless-maven-plugin /
+#   jacoco-maven-plugin 均不存在），而沙箱不允许联网写 ~/.m2，所以这一轮无法接入。
+#   替代做法是把纯单测补到覆盖面够用（当前 **99 个用例 / 11 个测试类**），把新增的安全/路由逻辑纳入闸门 ——
+#   这些正是历史上反复出问题的地方。接入静态检查插件需要一次联网构建，
+#   留给下一轮或你自己在有网的机器上做。
+#
+# ★ 关于前端构建：
+#   前端用 Vite 8 + Node 22，构建只验证"能打包"，不做视觉/交互测试。
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: # 允许在 Actions 页面手动触发
+
+jobs:
+  backend:
+    name: 后端编译 + 单元测试（JDK 17）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: survey-backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # ★ 为什么这里用 ./mvnw 而不是 setup-java 提供的 mvn（第十二轮改动）：
+      #   ① CI 本身就是一次"干净 clone"，用 wrapper 能把 **"Maven Wrapper 是否完整可用"
+      #      变成自动化闸门** —— 这正是它实际出过问题的地方：
+      #      根 .gitignore 里的 `/survey-backend/.mvn/` 让 maven-wrapper.properties 进不了库，
+      #      于是"本地能跑、别人 clone 后 mvnw 直接不可用"，而且没有任何提示。
+      #   ② 锁定 Maven 版本（wrapper 声明的是 3.9.16），避免"本地能过、CI 不过"的版本差异。
+      #   ★ 两个前置条件（本轮都已具备）：
+      #     · .mvn/wrapper/maven-wrapper.properties 必须入库；
+      #     · mvnw 在 git 索引里必须带可执行位（100755），否则 Linux 上 `./mvnw` 会 Permission denied。
+      - name: 编译（Maven Wrapper）
+        run: ./mvnw -B -q -DskipTests compile
+
+      # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了那个连库的测试，
+      #   其余测试类**全部自动纳入**（含本轮新增的 SurveyControllerRoutingTest）。
+      #   当前应为 **99 个用例 / 11 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
+      - name: 单元测试（不依赖数据库，Maven Wrapper）
+        run: ./mvnw -B test
+
+  frontend:
+    name: 前端构建（Node 22）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: survey-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: survey-frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: ESLint 检查
+        run: npx eslint .
+
+      - name: 构建
+        run: npx vite build

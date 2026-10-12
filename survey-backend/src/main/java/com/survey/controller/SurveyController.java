@@ -1,20 +1,58 @@
 package com.survey.controller;
 
+import com.survey.common.SurveyStatus;
+import com.survey.annotation.RequireAdmin;
 import com.survey.annotation.OperationLog;
+import com.survey.common.BizException;
 import com.survey.common.PageResult;
 import com.survey.entity.Survey;
-import com.survey.service.AnswerService;
 import com.survey.service.SurveyService;
 import com.survey.service.UserService;
+import com.survey.common.OwnershipGuard;
+import com.survey.common.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+/**
+ * 问卷管理：问卷的增删改查、发布、复制、回收站、模板、统计。共 **19** 个端点。
+ * （★ 另有 4 个被其它端点完全覆盖的单词式端点（GET /list、GET /statistics、GET /recycle、
+ *   DELETE /delete/{id}）已下线，它们的 URL 仍由 REMOVED_LITERAL_PATHS 显式挡着 ——
+ *   不挡就会被 /{id} 吞掉，见 getOne() 上方注释。）
+ *
+ * ── 谁在调我（前端页面）────────────────────────────────
+ *   MySurveys.vue          → 我的问卷、新建、AI生成、模板广场、复制、发布、二维码
+ *   SurveyEdit.vue         → 编辑问卷（改标题/描述/时间）
+ *   SurveyStatistics.vue   → 单份问卷的答题统计
+ *   MyDashboard.vue        → 个人统计 /my-statistics
+ *   Dashboard.vue / SystemStatistics.vue / AdminProfile.vue → 系统统计与总览
+ *   AdminSurveyList.vue    → 管理员分页查全部问卷
+ *   Recycle.vue            → 回收站
+ *   SurveyFillByCode.vue   → 匿名访客凭分享码打开问卷、记访问量
+ *
+ * ── 权限矩阵（详见 docs/问卷系统-端点权限审计表.md，随仓库入库）──
+ *   公开(白名单) : GET /share/{code}、POST /view/{code}
+ *   需登录       : /add、/my、/my-statistics、/templates、/from-template/{id}、/recycle/page
+ *   需登录+归属  : /update、/publish/{id}、/copy/{id}、
+ *                  /recycle/{id}、/restore/{id}、/permanent/{id}、GET /{id}
+ *   需管理员     : /list-with-response-count、/page、/system-overview、/set-template/{id}
+ *
+ * ── 三条贯穿全类的约定（改代码时请遵守）──────────────────
+ *   1. 归属以登录身份为准：/add 会用 X-User-Id 覆盖请求体里的 userId，/update 会强制
+ *      沿用原 userId —— 客户端无法把问卷挂到别人名下；
+ *   2. 分享码由服务端独占管理：/update 无条件沿用数据库旧值，客户端传了也会被忽略；
+ *   3. 权限失败统一抛异常（走 GlobalExceptionHandler → 400 + 统一 JSON），不要 return null。
+ */
 @Tag(name = "问卷管理", description = "问卷的增删改查、发布、复制、回收站、统计等")
 @RestController
 @RequestMapping("/api/survey")
@@ -24,9 +62,6 @@ public class SurveyController {
     private SurveyService surveyService;
 
     @Autowired
-    private AnswerService answerService;
-
-    @Autowired
     private UserService userService;
 
     // ==================== 基础 CRUD ====================
@@ -34,28 +69,27 @@ public class SurveyController {
     @OperationLog("创建问卷")
     @Operation(summary = "新增问卷")
     @PostMapping("/add")
-    public Survey add(@RequestBody Survey survey) {
-        if (survey.getStatus() == null) survey.setStatus(0);
+    public Survey add(@RequestBody Survey survey,
+                      @RequestHeader("X-User-Id") Integer userId) {
+        if (survey.getStatus() == null) survey.setStatus(SurveyStatus.DRAFT.code());
         if (survey.getViewCount() == null) survey.setViewCount(0);
+        // ★ isTemplate / deleted 必须落地成 0，而不是 NULL —— 前端新建问卷的请求体里
+        //   没有这两个字段，MyBatis 会把 null 原样写进列；而库里确实存在
+        //   `is_template IS NULL` 的问卷（统计侧 Java 判断 `isTemplate == null || == 0`
+        //   所以还能算对，但任何写死 `is_template = 0` 的 SQL 都会漏掉它们，是埋着的坑）。
+        // ★ 归属以登录身份为准，不信任请求体里的 userId（否则可以伪造到别人名下）。
+        //   isTemplate / deleted / status / shareCode 的"服务端独占"归零统一下沉在
+        //   SurveyService.createSurvey()（唯一的 INSERT 入口），这里不重复写 ——
+        //   免得以后新增创建途径时只改一处、留下漏网的字段。
+        survey.setUserId(userId);
         return surveyService.createSurvey(survey);
     }
 
-    @OperationLog("删除问卷")
-    @Operation(summary = "删除问卷（彻底删除）")
-    @DeleteMapping("/delete/{id}")
-    public String delete(@PathVariable Integer id,
-                         @RequestHeader("X-User-Id") Integer userId,
-                         @RequestHeader("X-User-Role") String role) {
-        Survey survey = surveyService.getById(id);
-        if (survey == null) return "问卷不存在";
-        if (!"admin".equals(role) && !survey.getUserId().equals(userId)) {
-            return "无权限删除他人问卷";
-        }
-        int result = surveyService.deleteSurvey(id);
-        return result > 0 ? "删除成功" : "删除失败";
-    }
-
-    // ★ 修复问题 7：把 required 改为默认 true（默认就是 true，去掉 required=false）
+    // ★ 这里**不要**再加"不经回收站直接彻底删除"的端点：
+    //   它与 DELETE /permanent/{id} **语义重叠但约束更松** —— permanent 强制要求
+    //   "问卷必须已在回收站里"（防止手滑一个请求把正常问卷彻底删掉），而那样一条**不要求**，
+    //   直接绕过回收站。前端的删除流程统一是"移入回收站 → 彻底删除"两步，
+    //   留着它等于留了一条绕过保护的旁路（对应的 SurveyService.deleteSurvey() 同样不保留）。
     @OperationLog("更新问卷")
     @Operation(summary = "更新问卷（含标题、描述、时间等）")
     @PutMapping("/update")
@@ -63,40 +97,80 @@ public class SurveyController {
                          @RequestHeader("X-User-Id") Integer userId,
                          @RequestHeader("X-User-Role") String role) {
         Survey old = surveyService.getById(survey.getId());
-        if (old == null) return "问卷不存在";
+        if (old == null) throw new BizException("问卷不存在");
 
         // ★ 硬校验：只要不是管理员，且不是自己的问卷，就拒绝
-        if (!"admin".equals(role) && !old.getUserId().equals(userId)) {
-            return "无权限修改他人问卷";
-        }
+        OwnershipGuard.requireOwnerOrAdmin(old, userId, role, "修改");
 
-        survey.setUserId(old.getUserId());
-        if (survey.getShareCode() == null) {
-            survey.setShareCode(old.getShareCode());
-        }
+        // ★ 分享码由服务端独占管理：一律沿用数据库里的旧值，不接受客户端传来的 shareCode。
+        //   若只在 shareCode == null 时才沿用旧值，客户端传了就会被采纳 ——
+        //   可以把分享码改成别人已有的值（撞唯一索引报错）或抢注一个自己想要的码。
+        // ★ **回收站里的问卷不能被编辑** —— 只校验归属、不看 deleted 的话，
+        //   移入回收站的问卷照样能改标题/时间，与发布、按 id 读、提交答卷那三处的口径不一致
+        //   （那三处都挡了），所以这里必须过 requireNotInRecycleBin。
+        OwnershipGuard.requireNotInRecycleBin(old, "编辑");
+
+        // ★ 关键不变量由 SQL 承担，不靠这里的回填：SurveyMapper.update 的 SET 列表里
+        //   **根本没有** user_id / status / share_code —— 即使忘了回填，这次更新也不可能碰到它们。
+        //   ★ 若有人把这三列加回 SET 列表：它是静态字段 UPDATE，客户端没传的字段会被写成 NULL，
+        //   "只改标题"的局部提交就会把 status 写成 NULL（那份问卷从此谁也答不了），
+        //   而且能靠传 status=1 绕过 /publish 假装已发布、却没有分享码。
+        //   状态变更走专用方法（publish / updateStatusAndShareCode / 回收站与定时任务），
+        //   归属与分享码在各自的入口处理。
+        //   ★ 前端零影响：SurveyEdit.vue 保存时本来就回带 status，发布走独立的 api.survey.publish()。
         int result = surveyService.updateSurvey(survey);
-        return result > 0 ? "修改成功" : "修改失败";
+        if (result <= 0) throw new BizException("修改失败");
+        return "修改成功";
     }
 
     // ==================== 查询 ====================
 
-    @Operation(summary = "查询所有问卷（管理员）")
-    @GetMapping("/list")
-    public List<Survey> list() {
-        return surveyService.listAll();
+    // ★ 这里**不要**再加"不分页地列出全部问卷"的端点：
+    //   它的两个用途都已有更合适的端点 —— 系统统计页要"问卷 + 每份答卷数"，已由下面的
+    //   /list-with-response-count 一次 GROUP BY 提供；管理端要按题/描述/状态筛选，走 /page。
+    //   ★ 否则就是"清单分叉"：同一份数据三个端点，字段口径各写一遍，改一处就有一处对不上。
+    /**
+     * 问卷列表 + 每份的答卷数（管理员，一次请求）。
+     *
+     * ★ 存在的理由：系统统计页要"每份问卷的答卷数"，若前端 for 循环逐个
+     *   await api.answer.count(id)，问卷一多就是几百次**串行**往返。
+     *   后端早就有批量统计 countResponsesBySurveyIds()（一次 GROUP BY），
+     *   缺的只是"把问卷与答卷数一起吐出来"的端点，前端只能自己循环。
+     *   现在整页 SQL 条数恒为 2（列表 1 条 + 分组统计 1 条），与问卷数量无关。
+     *
+     * 返回结构：id/title/status/createdTime（原样带出）+ 本端点独有的 responseCount ——
+     *   所以前端把循环换成一次调用即可，其它消费方不受影响。
+     * 列表含模板（数据源 SurveyService.listAll() → mapper.findAll()，与 getSystemOverview() 同源）。
+     */
+    @Operation(summary = "问卷列表（含每份答卷数，管理员）")
+    @GetMapping("/list-with-response-count")
+    @RequireAdmin
+    public List<Map<String, Object>> listWithResponseCount() {
+        List<Survey> surveys = surveyService.listAll();
+        // 一次 GROUP BY 拿到全部答卷数（key = surveyId；没有答卷的问卷不会出现在 Map 里）
+        Map<Integer, Integer> counts = surveyService.countResponsesBySurveyIds(surveys);
+
+        List<Map<String, Object>> rows = new ArrayList<>(surveys.size());
+        for (Survey s : surveys) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", s.getId());
+            row.put("title", s.getTitle());
+            row.put("status", s.getStatus());
+            row.put("createdTime", s.getCreatedTime());
+            row.put("responseCount", counts.getOrDefault(s.getId(), 0));
+            rows.add(row);
+        }
+        return rows;
     }
 
     @Operation(summary = "分页查询全部问卷（管理员，支持搜索+状态筛选）")
     @GetMapping("/page")
+    @RequireAdmin
     public PageResult<Survey> pageSurveys(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Integer status,
-            @RequestHeader("X-User-Role") String role) {
-        if (!"admin".equals(role)) {
-            throw new RuntimeException("无权限");
-        }
+            @RequestParam(required = false) Integer status) {
         return surveyService.pageAllSurveys(pageNum, pageSize, keyword, status);
     }
 
@@ -106,13 +180,49 @@ public class SurveyController {
         return surveyService.listByUserId(userId);
     }
 
+    /**
+     * 已下线端点的「单段字面量」路径 —— 必须在这里显式挡掉，否则会被下面的 {@code /{id}} 吞掉。
+     *
+     * 集合里现有 **4** 个元素：{@code list}、{@code statistics}、{@code recycle}、{@code delete}。
+     *   这些端点在 Spring 的路由里原本是"字面量路径"，优先级高于 {@code /{id}}；下线之后，
+     *   同一个 URL 只能匹配到 {@code /{id}}，于是老的调用方/书签/文档里点进来
+     *   会先被判"参数「id」格式不正确"（400）—— 文案指向一个根本不存在的"id 参数"，
+     *   而不是如实说"这个端点已经没有了"。
+     *   ★ 为什么要在这里挡而不是靠 404：Spring 的路径变量绑定发生在进入方法体之前，
+     *     {@code @PathVariable Integer} 遇到非数字直接抛 MethodArgumentTypeMismatchException，
+     *     方法体里的任何判断都来不及执行（那 4 个 400 就是这么来的）。
+     *   ★ 若以后又删掉某个单词式端点，把它的名字加进这个集合即可。
+     */
+    private static final Set<String> REMOVED_LITERAL_PATHS =
+            Set.of("list", "statistics", "recycle", "delete");
+
     @Operation(summary = "根据ID查询问卷")
     @GetMapping("/{id}")
-    public Survey getOne(@PathVariable Integer id) {
-        Survey survey = surveyService.getById(id);
-        if (survey == null) {
-            throw new RuntimeException("问卷不存在，ID：" + id);
+    public Survey getOne(@PathVariable String id,
+                         @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                         @RequestHeader(value = "X-User-Role", required = false) String role) {
+        // ① 先挡「已下线的字面量端点」：给一句如实的 404 文案，而不是"参数 id 格式不正确"
+        if (REMOVED_LITERAL_PATHS.contains(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "该端点已下线（GET /api/survey/" + id + " 不再存在），请改用对应的替代端点");
         }
+        // ② 再把 id 解析成整数 —— 非数字路径（如探测脚本乱试的 /api/survey/abc）给 400
+        Integer surveyId;
+        try {
+            surveyId = Integer.valueOf(id);
+        } catch (NumberFormatException e) {
+            throw new BizException("问卷 ID 必须是数字");
+        }
+
+        Survey survey = surveyService.getById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在，ID：" + surveyId);
+        }
+        // ★ 这里不做校验的话，任何登录用户遍历 id 就能读到全站问卷（含别人的草稿）。
+        //   现在：管理员可读任意；本人可读自己的；已发布（status=1）的问卷对**其它登录用户**也可读
+        //   （与分享链接的口径一致）。★ 但本端点**不在 JwtAuthFilter 白名单**里，匿名请求会先被 401
+        //   挡住 —— 它是"需登录"的端点，别按公开接口的假设去改它。
+        OwnershipGuard.requireVisible(survey, userId, role, "无权限查看他人未发布的问卷");
         return survey;
     }
 
@@ -124,7 +234,6 @@ public class SurveyController {
 
     // ==================== 发布 / 复制 ====================
 
-    // ★ 修复问题 7：publish 也做硬校验
     @OperationLog("发布问卷")
     @Operation(summary = "发布问卷（生成分享码）")
     @PostMapping("/publish/{id}")
@@ -132,11 +241,13 @@ public class SurveyController {
                           @RequestHeader("X-User-Id") Integer userId,
                           @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
-        if (survey == null) return null;
-
-        if (!"admin".equals(role) && !survey.getUserId().equals(userId)) {
-            return null;
+        // ★ 权限不足时抛异常，而不是 return null：
+        //   return null 会被序列化成空响应体，前端没法区分"问卷不存在"和"无权限"；
+        //   getOne 等接口用的是抛异常（走 GlobalExceptionHandler → 400 + 统一 JSON），这里与它们对齐。
+        if (survey == null) {
+            throw new BizException("问卷不存在，ID：" + id);
         }
+        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "发布");
         return surveyService.publish(id);
     }
 
@@ -147,45 +258,25 @@ public class SurveyController {
                        @RequestHeader("X-User-Id") Integer userId,
                        @RequestHeader("X-User-Role") String role) {
         Survey old = surveyService.getById(id);
-        if (old == null) return null;
-        if (!"admin".equals(role) && !old.getUserId().equals(userId)) {
-            return null;
+        // ★ 同上：统一抛异常，前端才能拿到明确的失败原因
+        if (old == null) {
+            throw new BizException("问卷不存在，ID：" + id);
         }
+        OwnershipGuard.requireOwnerOrAdmin(old, userId, role, "复制");
         return surveyService.copySurvey(id, userId);
     }
 
     // ==================== 统计 ====================
 
-    @Operation(summary = "系统统计（管理员看板）")
-    @GetMapping("/statistics")
-    public Map<String, Object> statistics() {
-        List<Survey> all = surveyService.listAll();
-        // 排除模板
-        List<Survey> normalSurveys = all.stream()
-                .filter(s -> s.getIsTemplate() == null || s.getIsTemplate() == 0)
-                .collect(java.util.stream.Collectors.toList());
-
-        long total = normalSurveys.size();
-        long published = normalSurveys.stream().filter(s -> s.getStatus() != null && s.getStatus() == 1).count();
-        long draft = normalSurveys.stream().filter(s -> s.getStatus() == null || s.getStatus() == 0).count();
-        long ended = normalSurveys.stream().filter(s -> s.getStatus() != null && s.getStatus() == 2).count();
-
-        int responses = 0;
-        for (Survey s : normalSurveys) {
-            responses += answerService.countResponses(s.getId());
-        }
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("total", total);
-        result.put("published", published);
-        result.put("draft", draft);
-        result.put("ended", ended);
-        result.put("responses", responses);
-        return result;
-    }
-
+    // ★ 这里**不要**再加"系统统计"的独立端点（已在 /system-overview 里）：
+    //   ① 管理端看板走 /system-overview，个人统计走 /my-statistics，没有消费方；
+    //   ② 它会是 /system-overview 的**真子集** —— total/published/draft/ended/responses
+    //      五个字段 system-overview 全都有，只少一个 views 与 users；
+    //   ③ 状态计数统一走 countByStatus()：多一个入口就多一份需要同步的口径，
+    //      少一个入口就少一次口径漂移的机会。
     @Operation(summary = "系统总览（含用户数、访客次数）")
     @GetMapping("/system-overview")
+    @RequireAdmin
     public Map<String, Object> systemOverview() {
         Map<String, Object> result = surveyService.getSystemOverview();
         result.put("users", userService.countNormalUsers());
@@ -197,6 +288,7 @@ public class SurveyController {
     public Map<String, Object> myStatistics(@RequestHeader("X-User-Id") Integer userId) {
         return surveyService.getUserStatistics(userId);
     }
+
 
     // ==================== 访问记录 ====================
 
@@ -216,12 +308,11 @@ public class SurveyController {
                                 @RequestHeader("X-User-Id") Integer userId,
                                 @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
-        if (survey == null) return "问卷不存在";
-        if (!"admin".equals(role) && !survey.getUserId().equals(userId)) {
-            return "无权限";
-        }
+        if (survey == null) throw new BizException("问卷不存在");
+        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
         int result = surveyService.moveToRecycle(id, userId);
-        return result > 0 ? "已移入回收站" : "操作失败";
+        if (result <= 0) throw new BizException("操作失败");
+        return "已移入回收站";
     }
 
     @OperationLog("恢复问卷")
@@ -231,12 +322,11 @@ public class SurveyController {
                           @RequestHeader("X-User-Id") Integer userId,
                           @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
-        if (survey == null) return "问卷不存在";
-        if (!"admin".equals(role) && !survey.getUserId().equals(userId)) {
-            return "无权限";
-        }
+        if (survey == null) throw new BizException("问卷不存在");
+        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
         int result = surveyService.restoreFromRecycle(id);
-        return result > 0 ? "已恢复" : "操作失败";
+        if (result <= 0) throw new BizException("操作失败");
+        return "已恢复";
     }
 
     @OperationLog("彻底删除问卷")
@@ -246,24 +336,18 @@ public class SurveyController {
                                   @RequestHeader("X-User-Id") Integer userId,
                                   @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
-        if (survey == null) return "问卷不存在";
-        if (!"admin".equals(role) && !survey.getUserId().equals(userId)) {
-            return "无权限";
-        }
+        if (survey == null) throw new BizException("问卷不存在");
+        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
         int result = surveyService.permanentDelete(id);
-        return result > 0 ? "已彻底删除" : "删除失败";
+        if (result <= 0) throw new BizException("删除失败");
+        return "已彻底删除";
     }
 
-    @Operation(summary = "查询回收站（普通用户看自己的，管理员看全部）")
-    @GetMapping("/recycle")
-    public List<Survey> recycle(@RequestHeader("X-User-Id") Integer userId,
-                                @RequestHeader("X-User-Role") String role) {
-        if ("admin".equals(role)) {
-            return surveyService.listAllRecycle();
-        }
-        return surveyService.listRecycleByUserId(userId);
-    }
-
+    // ★ 这里**不要**再加"不分页地查回收站"的端点（用下面的 /recycle/page）：
+    //   回收站页（Recycle.vue）用的是 /recycle/page（支持标题搜索 + 分页）；
+    //   而**一次返回全量回收站**在数据量大时既慢又会把响应体撑大。
+    //   ★ 注意：SurveyService 里**没有** listAllRecycle / listRecycleByUserId 这两个方法，
+    //   要加回端点得连 Service/Mapper 一起补，别只加一层空壳。
     @Operation(summary = "分页查询回收站（支持搜索）")
     @GetMapping("/recycle/page")
     public PageResult<Survey> pageRecycle(
@@ -272,7 +356,7 @@ public class SurveyController {
             @RequestParam(required = false) String keyword,
             @RequestHeader("X-User-Id") Integer userId,
             @RequestHeader("X-User-Role") String role) {
-        if ("admin".equals(role)) {
+        if (Role.isAdmin(role)) {
             return surveyService.pageRecycleAll(pageNum, pageSize, keyword);
         }
         return surveyService.pageRecycleByUser(userId, pageNum, pageSize, keyword);
@@ -297,12 +381,19 @@ public class SurveyController {
     @OperationLog("设为模板")
     @Operation(summary = "设为模板 / 取消模板（管理员）")
     @PutMapping("/set-template/{id}")
+    @RequireAdmin
     public String setTemplate(@PathVariable Integer id,
                               @RequestParam Integer isTemplate,
-                              @RequestParam(required = false) String category,
-                              @RequestHeader("X-User-Role") String role) {
-        if (!"admin".equals(role)) return "无权限";
+                              @RequestParam(required = false) String category) {
+        // ★ is_template 只允许 0/1：若接受任意整数，
+        //   调一次 ?isTemplate=2 就会产生一份"既不是模板也不是普通问卷"的记录 ——
+        //   findTemplates 要求 = 1、管理员列表要求 IS NULL OR = 0 ——
+        //   它会从**两个列表里同时消失**，只能在数据库里靠 id 找回来。
+        if (isTemplate == null || (isTemplate != 0 && isTemplate != 1)) {
+            throw new BizException("isTemplate 只能是 0（取消模板）或 1（设为模板）");
+        }
         int r = surveyService.setTemplate(id, isTemplate, category);
-        return r > 0 ? "操作成功" : "操作失败";
+        if (r <= 0) throw new BizException("操作失败");
+        return "操作成功";
     }
 }

@@ -1,8 +1,8 @@
 <template>
   <div>
     <!-- 顶部栏 -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0;">📝 我的问卷</h2>
+    <div class="page-header">
+      <h2 class="m-0">📝 我的问卷</h2>
       <div style="display: flex; gap: 12px;">
         <el-button
           class="ai-btn"
@@ -27,7 +27,7 @@
       <el-dropdown @command="handleSort">
         <span style="cursor: pointer; color: #606266; display: flex; align-items: center; font-size: 14px;">
           {{ sortText }}
-          <el-icon style="margin-left: 4px;"><Sort /></el-icon>
+          <el-icon class="ml-4"><Sort /></el-icon>
         </span>
         <template #dropdown>
           <el-dropdown-menu>
@@ -42,7 +42,7 @@
       <el-dropdown @command="handleStatus">
         <span style="cursor: pointer; color: #606266; display: flex; align-items: center; font-size: 14px;">
           {{ statusText }}
-          <el-icon style="margin-left: 4px;"><Sort /></el-icon>
+          <el-icon class="ml-4"><Sort /></el-icon>
         </span>
         <template #dropdown>
           <el-dropdown-menu>
@@ -114,7 +114,7 @@
         </div>
 
         <div class="col-created">
-          <el-icon style="margin-right: 4px;"><Calendar /></el-icon>
+          <el-icon class="mr-4"><Calendar /></el-icon>
           {{ row.createdTime }}
         </div>
 
@@ -122,7 +122,13 @@
           <el-tooltip content="编辑" placement="top">
             <el-button type="primary" :icon="Edit" circle size="small" @click="handleEdit(row)" />
           </el-tooltip>
-          <el-tooltip v-if="row.status === 0" content="发布" placement="top">
+          <!-- ★ 只要不是"已发布"就给发布入口，否则会出现"后端能救、界面无路可走"的 UI 死路
+                （后端是允许"延长（或清空）截止时间后重新发布"的）：
+                  · 草稿（含 status 为 NULL 的历史数据，后端一律视为草稿）→ 发布
+                  · 已结束 → 重新发布；若截止时间还在过去，后端会返回明确文案
+                    「问卷已结束，如需重新开放请先延长结束时间」，由 http.js 弹出
+                status 的判定与上面徽标的口径一致（NULL 也算草稿）。 -->
+          <el-tooltip v-if="row.status !== 1" :content="row.status === 2 ? '重新发布（需先延长截止时间）' : '发布'" placement="top">
             <el-button type="success" :icon="Promotion" circle size="small" @click="handlePublish(row)" />
           </el-tooltip>
           <el-tooltip v-if="row.status === 1 || row.status === 2" content="分享" placement="top">
@@ -151,14 +157,14 @@
       :show-close="!aiLoading"
     >
       <template #header>
-        <div style="display: flex; align-items: center;">
+        <div class="flex-center">
           <el-icon style="color: #8e44ad; margin-right: 8px; font-size: 22px;"><MagicStick /></el-icon>
           <span style="font-weight: bold; font-size: 17px;">AI 创建问卷</span>
           <el-tag type="warning" size="small" style="margin-left: 12px;">Qwen2.5-7B</el-tag>
         </div>
       </template>
 
-      <el-alert type="info" :closable="false" style="margin-bottom: 20px;">
+      <el-alert class="mb-20" type="info" :closable="false">
         <template #title>
           <strong>💡 使用说明</strong>
         </template>
@@ -212,12 +218,13 @@
     <el-dialog v-model="createDialogVisible" title="新建问卷" width="900px" top="8vh">
       <el-tabs v-model="createTab">
         <el-tab-pane label="✏️ 空白创建" name="blank">
-          <el-form :model="newForm" label-width="80px" style="margin-top: 20px; max-width: 500px;">
+          <el-form class="form-panel" :model="newForm" label-width="80px">
             <el-form-item label="标题">
-              <el-input v-model="newForm.title" placeholder="请输入问卷标题" />
+              <!-- ★ maxlength 与后端 TextLimits.SURVEY_TITLE(200) / SURVEY_DESCRIPTION(500) 对齐，否则超长只有提交后吃 400 -->
+              <el-input v-model="newForm.title" placeholder="请输入问卷标题" maxlength="200" show-word-limit />
             </el-form-item>
             <el-form-item label="描述">
-              <el-input v-model="newForm.description" type="textarea" :rows="3" placeholder="请输入问卷描述（选填）" />
+              <el-input v-model="newForm.description" type="textarea" :rows="3" placeholder="请输入问卷描述（选填）" maxlength="500" show-word-limit />
             </el-form-item>
           </el-form>
           <div style="text-align: right; margin-top: 20px;">
@@ -228,7 +235,6 @@
 
         <el-tab-pane label="📋 从模板创建" name="template">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-            <!-- ★ 这里改成 :value -->
             <el-radio-group v-model="templateCategory" size="default">
               <el-radio-button value="全部">全部</el-radio-button>
               <el-radio-button
@@ -250,7 +256,7 @@
                 @keyup.enter="loadTemplates"
                 @clear="loadTemplates"
               />
-              <el-button type="primary" style="margin-left: 8px;" @click="loadTemplates">搜索</el-button>
+              <el-button class="ml-8" type="primary" @click="loadTemplates">搜索</el-button>
             </div>
           </div>
 
@@ -280,7 +286,7 @@
 
     <!-- ========== 分享对话框 ========== -->
     <el-dialog v-model="shareVisible" title="分享问卷" width="550px">
-      <p style="color: #666;">把下面的链接发给需要填写的人，他们无需登录即可填写：</p>
+      <p class="text-secondary">把下面的链接发给需要填写的人，他们无需登录即可填写：</p>
       <el-input v-model="shareLink" readonly style="margin-top: 10px;">
         <template #append>
           <el-button @click="copyLink">复制链接</el-button>
@@ -288,7 +294,7 @@
       </el-input>
 
       <div style="text-align: center; margin-top: 20px;">
-        <p style="color: #666;">手机扫一扫直接填写：</p>
+        <p class="text-secondary">手机扫一扫直接填写：</p>
         <canvas ref="qrCanvas" style="border: 1px solid #eee; padding: 8px;"></canvas>
       </div>
     </el-dialog>
@@ -300,12 +306,18 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, CopyDocument, Edit, Promotion, Share, DataAnalysis, Delete,
-  Sort, Search, Calendar, Timer, AlarmClock, MagicStick, Loading
+  Search, MagicStick
 } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
+// ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
+//   http.js 统一带 Authorization: Bearer token、统一按 HTTP 状态码判成败、统一弹后端 message，
+//   页面只关心「调哪个接口、拿到什么数据」。
+//   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
+import api from '../api'
 
+// 图标已在 main.js 里全局注册，这里不再重复注册
+// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
-  components: { Plus, Search, MagicStick, Loading },
   data() {
     return {
       surveys: [],
@@ -338,13 +350,8 @@ export default {
       Share: markRaw(Share),
       DataAnalysis: markRaw(DataAnalysis),
       Delete: markRaw(Delete),
-      Sort: markRaw(Sort),
       Search: markRaw(Search),
-      Calendar: markRaw(Calendar),
-      Timer: markRaw(Timer),
-      AlarmClock: markRaw(AlarmClock),
-      MagicStick: markRaw(MagicStick),
-      Loading: markRaw(Loading)
+      MagicStick: markRaw(MagicStick)
     }
   },
   computed: {
@@ -358,7 +365,12 @@ export default {
     filteredSurveys() {
       let list = [...this.surveys]
       if (this.statusFilter !== 'all') {
-        list = list.filter(s => s.status === Number(this.statusFilter))
+        // ★ 不能用**严格相等** `s.status === Number(statusFilter)`：全项目的口径是
+        //   "**NULL 视为草稿**"（common/SurveyStatus.isDraft），而 NULL !== 0，
+        //   否则会出现"列表里明明标着草稿、点'草稿'筛选却找不到它"。
+        //   这里按后端同一口径：选草稿时同时收 NULL。
+        const want = Number(this.statusFilter)
+        list = list.filter(s => (want === 0 ? (s.status == null || s.status === 0) : s.status === want))
       }
       if (this.keyword.trim()) {
         const kw = this.keyword.trim().toLowerCase()
@@ -398,11 +410,11 @@ export default {
   },
   methods: {
     async loadSurveys() {
+      //   只保留 try/catch 避免非 2xx 抛出的 ApiError 变成未捕获异常。
       try {
-        const res = await fetch('/api/survey/my')
-        this.surveys = await res.json()
+        this.surveys = await api.survey.my()
       } catch {
-        ElMessage.error('加载问卷失败')
+        // 提示已由接口层统一弹出；这里什么都不做，列表保持原样，用户可手动刷新重试
       }
     },
 
@@ -422,19 +434,16 @@ export default {
         ElMessage.warning('请输入问卷标题')
         return
       }
-      const user = JSON.parse(localStorage.getItem('user') || '{}')
+      // ★ 请求体**不传 userId**（也不需要读本地用户）：归属由服务端按 JWT 里的 X-User-Id 决定，
+      //   客户端传什么都会被覆盖。
       try {
-        const res = await fetch('/api/survey/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user.id,
-            title: this.newForm.title,
-            description: this.newForm.description,
-            status: 0
-          })
+        // ★ 请求体只留真正的业务字段：userId 与 status 都被服务端**无条件忽略/覆盖**
+        //   （归属取 JWT 里的 X-User-Id；status/shareCode/isTemplate/deleted 由 createSurvey 强制归零），
+        //   传了会让人误以为"客户端能指定归属或初始状态"。
+        const data = await api.survey.add({
+          title: this.newForm.title,
+          description: this.newForm.description
         })
-        const data = await res.json()
         if (data.id) {
           ElMessage.success('创建成功，即将进入编辑页')
           this.createDialogVisible = false
@@ -442,7 +451,7 @@ export default {
           this.$router.push(`/my/surveys/${data.id}/edit`)
         }
       } catch {
-        ElMessage.error('创建失败')
+        // 失败提示由接口层统一弹出；这里不关弹窗，用户可以改完标题再试
       }
     },
 
@@ -457,23 +466,18 @@ export default {
         ElMessage.warning('请输入问卷主题')
         return
       }
+      // ★ 慢接口：后端 OkHttp 的 read 超时是 120 秒（配置在 service/QwenClient.java），
+      //   免费额度排队时可能等十几秒 —— 接口层没有设任何超时，页面这里保留 aiLoading 转圈提示，
+      //   绝不能加 AbortController / 短超时。
       this.aiLoading = true
       try {
-        const res = await fetch('/api/ai/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.aiForm)
-        })
-        const data = await res.json()
-        if (data.success && data.surveyId) {
-          ElMessage.success('AI 问卷生成成功！')
-          this.aiDialogVisible = false
-          this.$router.push(`/my/surveys/${data.surveyId}/edit`)
-        } else {
-          ElMessage.error(data.message || '生成失败')
-        }
+        // ★ api.ai.generate(topic, extra) 已经与后端契约对齐（后端读的是 topic / extra 两个字段）。
+        const data = await api.ai.generate(this.aiForm.topic, this.aiForm.extra)
+        ElMessage.success('AI 问卷生成成功！')
+        this.aiDialogVisible = false
+        this.$router.push(`/my/surveys/${data.surveyId}/edit`)
       } catch {
-        ElMessage.error('请求异常，请检查后端日志')
+        // 网络异常 / 4xx / 5xx 的提示已由接口层统一弹出
       } finally {
         this.aiLoading = false
       }
@@ -483,12 +487,9 @@ export default {
     async loadTemplates() {
       this.templateLoading = true
       try {
-        const params = new URLSearchParams()
-        if (this.templateKeyword.trim()) params.append('keyword', this.templateKeyword.trim())
-        const res = await fetch(`/api/survey/templates?${params.toString()}`)
-        this.templates = await res.json()
+        this.templates = await api.survey.templates({ keyword: this.templateKeyword.trim() })
       } catch {
-        ElMessage.error('加载模板失败')
+        // 加载模板失败：提示由接口层统一弹出
       } finally {
         this.templateLoading = false
       }
@@ -496,17 +497,17 @@ export default {
 
     async useTemplate(tpl) {
       try {
-        const res = await fetch(`/api/survey/from-template/${tpl.id}`, { method: 'POST' })
-        const data = await res.json()
+        const data = await api.survey.fromTemplate(tpl.id)
         if (data && data.id) {
           ElMessage.success('已从模板创建，即将进入编辑页')
           this.createDialogVisible = false
           this.$router.push(`/my/surveys/${data.id}/edit`)
         } else {
+          // 保留：必须拿到新问卷 id 才能跳编辑页，拿不到就按失败提示（这是业务字段判断，不是中文比对）
           ElMessage.error('创建失败')
         }
       } catch {
-        ElMessage.error('请求异常')
+        // 请求失败提示由接口层统一弹出
       }
     },
 
@@ -518,8 +519,7 @@ export default {
         type: 'info'
       }).then(async () => {
         try {
-          const res = await fetch(`/api/survey/copy/${row.id}`, { method: 'POST' })
-          const data = await res.json()
+          const data = await api.survey.copy(row.id)
           if (data && data.id) {
             ElMessage.success('复制成功，即将进入编辑页')
             this.$router.push(`/my/surveys/${data.id}/edit`)
@@ -527,7 +527,7 @@ export default {
             ElMessage.error('复制失败')
           }
         } catch {
-          ElMessage.error('请求异常')
+          // 提示由接口层统一弹出
         }
       }).catch(() => {})
     },
@@ -537,22 +537,39 @@ export default {
     },
 
     handlePublish(row) {
-      ElMessageBox.confirm(`确定发布「${row.title}」吗？发布后将生成分享链接。`, '提示', {
-        confirmButtonText: '确定发布',
-        cancelButtonText: '取消',
-        type: 'info'
-      }).then(async () => {
+      // ★ 已结束的问卷也能走这里，但**必须先延长/清空截止时间**（后端 SurveyService.publish
+      //   会校验 endTime 是否已到未来）。与其让用户点了才吃 400，不如先告诉他该做什么。
+      if (row.status === 2 && row.endTime && new Date(String(row.endTime).replace(/-/g, '/')).getTime() <= Date.now()) {
+        ElMessageBox.confirm(
+          `「${row.title}」已过截止时间（${row.endTime}）。要重新开放，需要先把截止时间改到未来（或清空）。现在去编辑页修改吗？`,
+          '该问卷已结束',
+          { confirmButtonText: '去修改截止时间', cancelButtonText: '取消', type: 'warning' }
+        ).then(() => {
+          this.$router.push(`/my/surveys/${row.id}/edit`)
+        }).catch(() => {})
+        return
+      }
+
+      const isReopen = row.status === 2
+      ElMessageBox.confirm(
+        isReopen
+          ? `确定重新发布「${row.title}」吗？它会回到"已发布"状态，原有的分享码继续有效。`
+          : `确定发布「${row.title}」吗？发布后将生成分享链接。`,
+        '提示',
+        { confirmButtonText: isReopen ? '确定重新发布' : '确定发布', cancelButtonText: '取消', type: 'info' }
+      ).then(async () => {
         try {
-          const res = await fetch(`/api/survey/publish/${row.id}`, { method: 'POST' })
-          const data = await res.json()
+          //   shareCode 是后端发布后生成的业务字段，
+          //   拿到它才说明发布成功（也可能后端按需生成，所以这个判断保留）。
+          const data = await api.survey.publish(row.id)
           if (data && data.shareCode) {
-            ElMessage.success('发布成功')
+            ElMessage.success(isReopen ? '已重新发布' : '发布成功')
             this.loadSurveys()
           } else {
             ElMessage.error('发布失败')
           }
         } catch {
-          ElMessage.error('请求异常')
+          // 提示由接口层统一弹出
         }
       }).catch(() => {})
     },
@@ -594,16 +611,14 @@ export default {
         type: 'warning'
       }).then(async () => {
         try {
-          const res = await fetch(`/api/survey/recycle/${row.id}`, { method: 'PUT' })
-          const msg = await res.text()
-          if (msg === '已移入回收站') {
-            ElMessage.success('已移入回收站')
-            this.loadSurveys()
-          } else {
-            ElMessage.error(msg)
-          }
+          // ★ api.survey.recycle(row.id) 是 PUT（不是 POST，见 src/api/survey.js），
+          //   成败只看 HTTP 状态码 —— 不要退回"比对后端中文文案"的写法，
+          //   否则后端措辞改一个字，前端就静默失效。
+          await api.survey.recycle(row.id)
+          ElMessage.success('已移入回收站')
+          this.loadSurveys()
         } catch {
-          ElMessage.error('操作失败')
+          // 失败提示由接口层统一弹出
         }
       }).catch(() => {})
     }

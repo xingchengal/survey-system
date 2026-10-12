@@ -2,14 +2,14 @@
   <div style="max-width: 800px; margin: 0 auto;">
     <el-card>
       <template #header>
-        <div style="display: flex; align-items: center;">
+        <div class="flex-center">
           <el-icon style="color: #e6a23c; margin-right: 8px; font-size: 20px;"><Warning /></el-icon>
           <span style="font-weight: bold; font-size: 16px;">演示数据管理</span>
           <el-tag type="warning" size="small" style="margin-left: 12px;">测试专用</el-tag>
         </div>
       </template>
 
-      <el-alert type="warning" :closable="false" style="margin-bottom: 20px;">
+      <el-alert class="mb-20" type="warning" :closable="false">
         <template #title><strong>⚠️ 请谨慎操作</strong></template>
         此功能用于系统演示和答辩准备。<br>
         「生成」按钮会<strong>追加</strong>新数据；<br>
@@ -21,7 +21,7 @@
         <el-descriptions :column="1" border>
           <el-descriptions-item label="测试用户">20 个（demo_userN，密码 123456）</el-descriptions-item>
           <el-descriptions-item label="问卷数据">30 份（单选/多选/填空）</el-descriptions-item>
-          <el-descriptions-item label="答卷数据">每份已发布问卷 5~20 份答卷</el-descriptions-item>
+          <el-descriptions-item label="答卷数据">每份已发布问卷 3~8 份答卷</el-descriptions-item>
         </el-descriptions>
       </div>
 
@@ -63,10 +63,17 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Warning, MagicStick, SuccessFilled, Delete, CircleCloseFilled } from '@element-plus/icons-vue'
+// ★ 统一接口层：本页的请求一律走 src/api/（自动带 token、自动 parse JSON、失败统一弹提示）。
+//   路径提示：index.js 把 demo.js 的命名导出提到了顶层，所以是
+//   api.demo.init() / api.demo.reset()（演示数据）。
+import api from '../api'
+// MagicStick / Delete 用于属性变量形式（:icon="..."），必须 import；
+// Warning / SuccessFilled / CircleCloseFilled 是模板标签形式，由 main.js 全局注册即可
+import { MagicStick, Delete } from '@element-plus/icons-vue'
 
+// 图标已在 main.js 里全局注册，这里不再重复注册
+// （重复注册会触发 vue/no-unused-components 报错；模板里的 <Warning /> 等不受影响）
 export default {
-  components: { Warning, MagicStick, SuccessFilled, Delete, CircleCloseFilled },
   data() {
     return {
       loading: false,
@@ -78,6 +85,8 @@ export default {
     }
   },
   methods: {
+    // ===== 生成演示数据：追加一批（不是幂等操作，所以按钮文案强调"追加"）=====
+    // 关联：结果写进 initResult，模板用它渲染绿色结果卡片（批次/用户数/问卷数）。
     handleInit() {
       ElMessageBox.confirm('将追加一批新演示数据，确定继续吗？', '确认生成', {
         confirmButtonText: '确定生成',
@@ -87,18 +96,20 @@ export default {
         this.loading = true
         this.initResult = null
         try {
-          const res = await fetch('/api/demo/init', { method: 'POST' })
-          const data = await res.json()
-          this.initResult = data
+          // 失败（非 2xx / 网络异常 / 401）直接 throw，落到下面的 catch。
+          this.initResult = await api.demo.init()
           ElMessage.success('演示数据生成成功！')
         } catch {
-          ElMessage.error('生成失败')
+          // ★ 失败提示已由 src/api/http.js 统一弹出（ElMessage.error），这里不再重复弹，
+          //   只保留 finally 里的 loading 复位。
         } finally {
           this.loading = false
         }
       }).catch(() => {})
     },
 
+    // ===== 重置演示数据：两次确认后才发请求（后端会按 demo_user 前缀精确回收）=====
+    // 关联：结果写进 resetResult，模板用它渲染红色结果卡片（删除用户数/问卷数）。
     handleReset() {
       ElMessageBox.confirm('⚠️ 此操作将彻底删除所有演示数据！确定继续吗？', '⚠️ 危险操作确认', {
         confirmButtonText: '确定清空',
@@ -118,12 +129,11 @@ export default {
         this.resetting = true
         this.resetResult = null
         try {
-          const res = await fetch('/api/demo/reset', { method: 'DELETE' })
-          const data = await res.json()
-          this.resetResult = data
+          // ★ 后端是 DELETE，接口层已按 DELETE 固定，页面不用再管动词。
+          this.resetResult = await api.demo.reset()
           ElMessage.success('演示数据已清空')
         } catch {
-          ElMessage.error('重置失败')
+          // 同上：错误提示已在 http.js 里弹过，这里只做流程控制
         } finally {
           this.resetting = false
         }

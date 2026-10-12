@@ -1,22 +1,17 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0;">{{ isAdmin ? '🚫 违规问卷管理' : '🗑️ 回收站' }}</h2>
-      <div style="display: flex; gap: 10px;">
+    <div class="page-header">
+      <h2 class="m-0">{{ isAdmin ? '🚫 违规问卷管理' : '🗑️ 回收站' }}</h2>
+      <div class="flex-gap-10">
         <el-input v-model="keyword" placeholder="搜索问卷标题..." clearable :prefix-icon="Search" style="width: 260px;" @keyup.enter="handleSearch" @clear="handleSearch" />
         <el-button type="primary" @click="handleSearch">搜索</el-button>
         <el-button :icon="Refresh" @click="loadRecycle">刷新</el-button>
       </div>
     </div>
 
-    <el-alert
-      :title="isAdmin ? '这里是所有被下架的问卷，可恢复或彻底删除' : '回收站里的问卷不会出现在正常列表，可随时恢复或彻底删除'"
-      type="info"
-      :closable="false"
-      style="margin-bottom: 16px;"
-    />
+    <el-alert class="mb-16" :title="isAdmin ? '这里是所有被下架的问卷，可恢复或彻底删除' : '回收站里的问卷不会出现在正常列表，可随时恢复或彻底删除'" type="info" :closable="false" />
 
-    <el-table :data="surveys" stripe border v-loading="loading" style="width: 100%;">
+    <el-table class="w-full" :data="surveys" stripe border v-loading="loading">
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="问卷标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
@@ -43,7 +38,7 @@
       </el-table-column>
     </el-table>
 
-    <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+    <div class="pager-row">
       <el-pagination
         v-model:current-page="pageNum"
         v-model:page-size="pageSize"
@@ -63,10 +58,16 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { getUser } from '../utils/auth'
+// Refresh / Search 用于属性变量形式（:icon="Refresh"、:prefix-icon="Search"），必须 import
 import { Refresh, Search } from '@element-plus/icons-vue'
+// ★ 统一接口层（src/api）：分页 / 恢复 / 彻底删除都走它 ——
+//   token、query 拼接、错误提示、401 跳登录都不用本页再管
+import api from '../api'
 
+// 图标已在 main.js 里全局注册，这里不再重复注册
+// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
-  components: { Refresh, Search },
   data() {
     return {
       surveys: [],
@@ -75,7 +76,8 @@ export default {
       pageNum: 1,
       pageSize: 10,
       total: 0,
-      currentUser: JSON.parse(localStorage.getItem('user') || '{}'),
+      // ★ 读本地用户走 utils/auth.getUser()（data() 里的裸 parse 是白屏隐患）
+      currentUser: getUser() || {},
       Search: markRaw(Search),
       Refresh: markRaw(Refresh)
     }
@@ -92,18 +94,16 @@ export default {
     async loadRecycle() {
       this.loading = true
       try {
-        const params = new URLSearchParams({
+        // 参数对象直接给接口层（空关键字会被 toQuery 自动跳过）
+        const data = await api.survey.recyclePage({
           pageNum: this.pageNum,
-          pageSize: this.pageSize
+          pageSize: this.pageSize,
+          keyword: this.keyword.trim()
         })
-        if (this.keyword.trim()) params.append('keyword', this.keyword.trim())
-
-        const res = await fetch(`/api/survey/recycle/page?${params.toString()}`)
-        const data = await res.json()
         this.surveys = data.list || []
         this.total = data.total || 0
       } catch {
-        ElMessage.error('加载失败')
+        // ★ 接口层已统一提示，这里只负责流程控制，loading 交给 finally 复位
       } finally {
         this.loading = false
       }
@@ -132,16 +132,12 @@ export default {
         type: 'info'
       }).then(async () => {
         try {
-          const res = await fetch(`/api/survey/restore/${row.id}`, { method: 'PUT' })
-          const msg = await res.text()
-          if (msg === '已恢复') {
-            ElMessage.success('恢复成功')
-            this.loadRecycle()
-          } else {
-            ElMessage.error(msg)
-          }
+          // 恢复接口是 PUT，成功才 resolve
+          await api.survey.restore(row.id)
+          ElMessage.success('恢复成功')
+          this.loadRecycle()
         } catch {
-          ElMessage.error('恢复失败')
+          // 失败提示由接口层统一弹出，这里不再重复提示
         }
       }).catch(() => {})
     },
@@ -156,16 +152,12 @@ export default {
         type: 'error'
       }).then(async () => {
         try {
-          const res = await fetch(`/api/survey/permanent/${row.id}`, { method: 'DELETE' })
-          const text = await res.text()
-          if (text === '已彻底删除') {
-            ElMessage.success('已彻底删除')
-            this.loadRecycle()
-          } else {
-            ElMessage.error(text)
-          }
+          // 彻底删除是 DELETE，非 2xx 抛错（后端要求问卷已在回收站，否则 400）
+          await api.survey.permanent(row.id)
+          ElMessage.success('已彻底删除')
+          this.loadRecycle()
         } catch {
-          ElMessage.error('删除失败')
+          // 失败提示由接口层统一弹出（含后端返回的 400 具体原因），这里只做流程控制
         }
       }).catch(() => {})
     }

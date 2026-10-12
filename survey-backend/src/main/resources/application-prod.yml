@@ -1,9 +1,89 @@
 # ============================================
 # 生产环境配置（通过 --spring.profiles.active=prod 激活）
 # ============================================
+# ★ 本轮补全（评审【工程性·中】"生产配置过于单薄，环境分离不完整"）。
+#   原来这里只有 9 行、只关了 MyBatis SQL 日志，缺少连接池、日志、错误页等关键项。
+#   下面每一项都写清"为什么"和"怎么注入"。
 
-# ========== 关闭 MyBatis SQL 日志 ==========
+# ========== MyBatis SQL 日志 ==========
 mybatis:
   configuration:
-    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+    # ★ 本轮改动（评审【工程性·低】）：这里原来是 NoLoggingImpl，与 dev 的 StdOutImpl
+    #   是两套完全不同的日志口径。现在与 application.yaml **统一用 Slf4jImpl**，
+    #   生产不打 SQL 改由下面的 logging.level.com.survey.mapper=warn 实现
+    #   （MyBatis 的 SQL 日志是 DEBUG 级，warn 自然屏蔽）。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
     map-underscore-to-camel-case: true
+
+# ========== 数据源连接池 ==========
+# ★ 为什么必须显式配：默认 HikariCP 是 maximum-pool-size=10、connection-timeout=30s。
+#   ★ 本轮注释更正：原先这里写"AI 生成接口最长占用线程 4 分钟，连接池会被这类慢请求占满" ——
+#     那个坑**早已修掉**：AI 的外部 HTTP 调用现在完全在事务之外
+#     （service/AiGenerateService.generateAndSave 只用 TransactionTemplate 包住落库那几条 INSERT），
+#     所以它只占 Tomcat 线程，DB 连接仅在落库的几毫秒内被占用。
+#   压低 connection-timeout 的意义是：万一真出现连接紧张，让"抢不到连接"**快速失败**，
+#   而不是让请求线程干等 30 秒。
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 20          # 单实例够用；数据库 max_connections 默认 151，留足余量
+      minimum-idle: 5
+      connection-timeout: 10000      # 10 秒抢不到连接就失败（默认 30 秒，用户等太久）
+      idle-timeout: 300000           # 空闲连接 5 分钟回收
+      max-lifetime: 1200000          # 连接最长活 20 分钟（要小于 MySQL 的 wait_timeout）
+      pool-name: SurveyHikariPool
+
+  # ========== 异步任务线程池（通知发送、日志落库都走 @Async）==========
+  # ★ 为什么必须配：不配就用 Spring 默认的 SimpleAsyncTaskExecutor —— 它**不复用线程**、
+  #   每个任务新起一个线程且无上限，答卷提交高峰期可能瞬间创建成百上千线程。
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 16
+        queue-capacity: 200
+        keep-alive: 60s
+      thread-name-prefix: survey-async-
+      # 注：拒绝策略**没有**对应的 yaml 配置项（Spring Boot 只暴露 core/max/queue/keep-alive），
+      # 如需自定义（例如队列满时由调用线程执行而不是丢弃），要在代码里定制 TaskExecutorCustomizer。
+      # 当前默认策略是 AbortPolicy：队列满会抛异常 —— 由于 @Async 调用方是"提交答卷"这类主流程，
+      # 抛异常会被 GlobalExceptionHandler 记为 500 并写异常日志，不会静默丢数据。
+
+# ========== 错误页 ==========
+server:
+  error:
+    # ★ 双保险：即使某个异常没走到 GlobalExceptionHandler（例如容器层面的 400/404/500），
+    #   也不要把异常 message 暴露给客户端（评审【安全性·中】"500 响应泄露内部异常信息"）。
+    include-message: never
+    include-stacktrace: never
+    include-exception: false
+    include-binding-errors: never
+
+# ========== 日志 ==========
+logging:
+  level:
+    root: info
+    com.survey: info
+    # 生产把 SQL 与框架噪音压到 warn 以下（SQL 日志是 DEBUG 级，warn 即可屏蔽）
+    com.survey.mapper: warn
+    org.springframework: warn
+    org.mybatis: warn
+  # 输出到文件并按天滚动。★ 目录已在 .gitignore 里排除（/survey-backend/logs/）
+  file:
+    name: logs/survey-backend.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14            # 保留 14 天
+      total-size-cap: 500MB
+
+# ========== 敏感配置的注入方式（值不写在这里！）==========
+# 生产启动示例（Linux）：
+#   export DB_PASSWORD='...' QWEN_API_KEY='...' JWT_SECRET='...'
+#   java -jar survey-backend.jar --spring.profiles.active=prod
+# ★ 本轮注释更正（原表述不准确）：三个占位符在 application.yaml 里的**默认值并不一样** ——
+#   只有 jwt.secret 是 ${JWT_SECRET:}（空默认值 + JwtUtil 启动时 fail-fast），
+#   另两个是 ${DB_PASSWORD:your-db-password} 与 ${QWEN_API_KEY:your-api-key}（有占位默认值，
+#   **不会**让启动失败）。
+#   也就是说：JWT_SECRET 缺失 → 服务起不来（有意为之，宁可不启动也不用公开默认密钥）；
+#   DB_PASSWORD / QWEN_API_KEY 缺失 → 服务能起来，但连库 / 调 AI 时才会失败。生产请三个都设。

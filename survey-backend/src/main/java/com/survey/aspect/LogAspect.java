@@ -1,9 +1,12 @@
 package com.survey.aspect;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.survey.annotation.OperationLog;
 import com.survey.entity.User;
-import com.survey.mapper.UserMapper;
 import com.survey.service.OperationLogService;
+import com.survey.service.UserService;
+import com.survey.util.WebUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.AfterReturning;
@@ -17,18 +20,50 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 
+/**
+ * 操作日志切面：把标了 @OperationLog 的方法自动记进 t_operation_log。
+ *
+ * ── 工作方式 ──────────────────────────────────────────
+ *   @Pointcut 匹配"带 @OperationLog 注解的方法"；@AfterReturning 表示
+ *   **方法正常返回之后**才记录 —— 抛异常的操作不会被记成"成功"。
+ *
+ * ── 一条日志记了什么 ──────────────────────────────────
+ *   操作描述（注解的 value，如"发布问卷"）、类名.方法名、用户、角色、IP。
+ *   用户是先从请求头 X-User-Id 拿到 id，再去 t_user 查昵称（昵称更能认人）。
+ *
+ * ── ★ 两个健壮性设计 ──────────────────────────────────
+ *   1. 整个方法包在 try-catch 里 —— 记日志失败绝不能影响业务，只打印一行错误；
+ *   2. Integer.parseInt 单独保护（NumberFormatException）—— 请求头被人改成非数字也不会崩。
+ *   另外落库那步是 @Async（OperationLogService.save），不占用请求线程。
+ *
+ * ── 一个已知的弱点 ────────────────────────────────────
+ *   IP 走 util/WebUtils.getClientIp()：它优先信任 X-Forwarded-For / X-Real-IP，
+ *   而这两个头客户端可以伪造，所以日志里的 IP 只能当参考，不得用于安全判决。
+ */
 @Aspect
 @Component
 public class LogAspect {
 
+    /** 统一用 SLF4J 记录：System.out/err/printStackTrace 在生产会直接丢失。 */
+    private static final Logger LOG = LoggerFactory.getLogger(LogAspect.class);
+
     @Autowired
     private OperationLogService operationLogService;
+    /**
+     * ★ 这里注入 UserService 而不是 UserMapper：与 GlobalExceptionHandler 保持同一口径
+     *   （核心横切组件都走"切面/配置层 → Service → Mapper"），也便于以后给"取用户"加缓存。
+     */
     @Autowired
-    private UserMapper userMapper;
+    private UserService userService;
 
+    /** 切点：所有标注了 @OperationLog 的方法（本项目里都是 Controller 的写操作）。 */
     @Pointcut("@annotation(com.survey.annotation.OperationLog)")
     public void logPointcut() {}
 
+    /**
+     * 方法正常返回后执行：组装一条 OperationLog 并异步落库。
+     * @param joinPoint 连接点，用来取方法签名与注解
+     */
     @AfterReturning(pointcut = "logPointcut()")
     public void doAfterReturning(JoinPoint joinPoint) {
         try {
@@ -37,29 +72,30 @@ public class LogAspect {
             OperationLog annotation = method.getAnnotation(OperationLog.class);
             String operationDesc = annotation != null ? annotation.value() : "";
 
+            // 取当前请求（非 Web 线程调用时为 null，直接放弃记录）
             ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
             if (attributes == null) return;
             HttpServletRequest request = attributes.getRequest();
 
-            String userIdStr = request.getHeader("X-User-Id");
-            String role = request.getHeader("X-User-Role");
-            String ip = getClientIp(request);
+            String userIdStr = request.getHeader("X-User-Id");   // 由 JwtAuthFilter 写入
+            String role = request.getHeader("X-User-Role");      // 由 JwtAuthFilter 写入
+            String ip = WebUtils.getClientIp(request);
 
             com.survey.entity.OperationLog log = new com.survey.entity.OperationLog();
-            String username = "匿名";
+            String username = "匿名";   // 未登录（如注册接口）时显示"匿名"
 
-            // ★ 修复问题 4：parseInt 异常保护
+            // parseInt 异常保护：请求头是非数字格式也不会让整个切面挂掉
             if (userIdStr != null && !userIdStr.isEmpty()) {
                 try {
                     Integer userId = Integer.parseInt(userIdStr);
                     log.setUserId(userId);
-                    User user = userMapper.findById(userId);
+                    User user = userService.getById(userId);
                     if (user != null) {
                         username = user.getNickname() != null ? user.getNickname() : user.getUsername();
                     }
                 } catch (NumberFormatException e) {
                     // 非法 userId 格式，忽略用户信息
-                    System.err.println("非法 X-User-Id：" + userIdStr);
+                    LOG.warn("非法 X-User-Id：{}", userIdStr);
                 }
             }
 
@@ -71,21 +107,8 @@ public class LogAspect {
 
             operationLogService.save(log);
         } catch (Exception e) {
-            System.err.println("保存操作日志失败：" + e.getMessage());
+            // ★ 兜底：记日志失败只打印，绝不影响业务
+            LOG.error("保存操作日志失败：{}", e.getMessage(), e);
         }
-    }
-
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
     }
 }

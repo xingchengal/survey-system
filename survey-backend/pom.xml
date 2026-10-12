@@ -103,6 +103,15 @@
             <artifactId>okhttp</artifactId>
             <version>4.12.0</version>
         </dependency>
+        <!-- Bean Validation：声明式入参校验（评审【工程性·中】"全局缺少 @Valid，校验手写分散"） -->
+        <!-- ★ 为什么这里写 hibernate-validator 而不是 spring-boot-starter-validation：
+             该 starter 只是把 hibernate-validator + tomcat-embed-el 打成一个包，
+             而两者在本机离线仓库里都已存在，直接声明实现依赖即可，
+             不必为了一个聚合 POM 去联网拉包（否则 mvnw -o 会直接失败）。 -->
+        <dependency>
+            <groupId>org.hibernate.validator</groupId>
+            <artifactId>hibernate-validator</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -110,6 +119,42 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+
+            <!--
+              ★ 第十六轮补：把"需要真实 MySQL 的那个测试"在**构建配置里**排除掉，
+                让 `mvnw test` / CI 的 `./mvnw test` 变成"**默认跑全部纯单测**"。
+
+              ── 为什么要改（真实教训）────────────────────────────
+                原来 CI 是用 `-Dtest=A,B,C,...` **逐个列类名**跑的。这种写法的两个毛病：
+                  ① **新增测试类必须手工加进 CI 的列表**，忘了就静默不跑 ——
+                     第十六轮新增的 `SurveyControllerRoutingTest`（防回归的关键测试）
+                     就是这么漏掉的，全靠用户提醒才发现（而那时 CI 里的类名列表已经落后 3 轮）；
+                  ② 一旦列表里的某个类被重命名/删除，CI 会直接**编译失败**，
+                     报错信息还指向 CI 配置而不是代码。
+                现在改成"显式排除唯一那个连库的测试"，其余**全部自动纳入**：
+                  新增测试类不再需要改 CI，`<excludes>` 里也不需要维护清单。
+
+              ── 为什么排除而不是修好它 ───────────────────────────
+                `SurveyBackendApplicationTests` 是 `@SpringBootTest contextLoads`，
+                启动整个上下文 → 需要 MySQL。CI 上没有库，跑它必然红。
+                要纳入就得先给它配 Testcontainers 或 H2（《待解决问题》C6 记着这件事）。
+                在此之前，**本机有库时可以显式点名跑它**（已实测：命令行 `-Dtest=` 会覆盖这段
+                `<excludes>`，能正常跑起来并 BUILD SUCCESS）：
+                    ./mvnw -o "-Dtest=SurveyBackendApplicationTests" test
+
+              ── 为什么用 @SpringBootTest 之外的类型名写全限定名 ────
+                surefire 的 excludes 支持 `**/Xxx.java` 这类路径式匹配；写全限定名最直白。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <!-- 唯一需要真实数据库的测试：CI 无库，故意不纳入（见《待解决问题》C6） -->
+                        <exclude>**/SurveyBackendApplicationTests.java</exclude>
+                    </excludes>
+                </configuration>
             </plugin>
         </plugins>
     </build>

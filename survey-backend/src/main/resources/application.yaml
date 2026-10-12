@@ -4,6 +4,13 @@ server:
 
 # ========== Spring 配置 ==========
 spring:
+  # ★ 默认 profile = local：这样在 IDEA / VSCode 里直接 Run，不带任何参数也能跑起来。
+  # 不设这一项时，不带 --spring.profiles.active 启动就只读本文件，
+  # 于是 db 口令、AI Key、jwt 密钥全都落到占位符上（表现为连不上库 / 启动失败）。
+  # 注意：生产部署必须显式加 --spring.profiles.active=prod，否则会用到 local 的开发配置。
+  profiles:
+    default: local
+
   # 数据源
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -19,8 +26,24 @@ spring:
 # ========== MyBatis 配置 ==========
 mybatis:
   configuration:
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # ★ 本轮改动（评审【工程性·低】"默认（dev）配置用 StdOutImpl 打印 SQL"）：
+    #   原来是 org.apache.ibatis.logging.stdout.StdOutImpl —— SQL 直接写标准输出，
+    #   **绕过 SLF4J**：无法按级别过滤、不写进日志文件、格式也和其它日志不一致，
+    #   而 prod 又另外覆盖成 NoLoggingImpl，等于两套截然不同的日志口径。
+    #   现在 dev / prod 统一走 SLF4J，是否打印 SQL 完全由 logging.level 开关决定。
+    #   ★ 注意：application-local.yml 里也有一份 log-impl，它会**覆盖**这里 —— 两处要一起改
+    #     （JWT 有效期那次就是因为只改了一处，靠实测才发现）。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
     map-underscore-to-camel-case: true
+
+# ========== 日志级别 ==========
+logging:
+  level:
+    root: info
+    com.survey: info
+    # 本机想看 MyBatis 打印的 SQL 就把它调成 debug。
+    # ★ 用级别开关而不是换 log-impl：前者只影响打印与否，后者会改变日志实现本身。
+    com.survey.mapper: debug
 
 # ========== PageHelper 分页 ==========
 pagehelper:
@@ -47,9 +70,36 @@ ai:
     api-key: ${QWEN_API_KEY:your-api-key}
     model: Qwen/Qwen2.5-7B-Instruct
 
+# ========== 应用自定义开关 ==========
+app:
+  # ★ 登录时是否严格校验账号格式（只允许字母数字、4~20 位，与注册规则一致）。
+  #
+  # 默认 true —— 满足「登录注册改版」需求里"登录、注册需要校验用户名字符类型"。
+  # ★★ 但请注意后果：本项目库里**存有历史账号**，实测有一个中文账号（"用户"，2 位、含汉字）。
+  #    开启后**它无法登录**（登录会按"账号或密码错误"处理，不区分原因）。
+  #    如果被锁在外面（或需要让旧账号继续可用）：
+  #      · 本文件改成 false，或
+  #      · 启动参数 --app.strict-username-check=false，或
+  #      · 环境变量 APP_STRICTUSERNAMECHECK=false
+  #    关闭后**注册仍然强制新规则**（新账号不会再有坏名字），只是登录侧不再拦。
+  strict-username-check: true
+
 # ========== JWT 配置 ==========
 jwt:
-  # 密钥（至少 32 个字符，生产环境请换成随机字符串）
-  secret: ${JWT_SECRET:change-me-in-production-32chars-min}
-  # token 有效期（毫秒）：7 天
-  expiration: 604800000
+  # 密钥（至少 32 个字符）。
+  # ★ 故意不给默认值：缺失时启动直接失败。
+  # 原先这里写着一个固定默认值，而本文件是提交进 git 的 ——
+  # 等于把“可用密钥”公开了：任何人拿到源码、只要不带 local profile 启动，
+  # 就能用这个公开密钥自己签发 role=admin 的 token，绕过全部认证。
+  # 本地开发请加 --spring.profiles.active=local，或设置环境变量 JWT_SECRET。
+  secret: ${JWT_SECRET:}
+  # token 有效期（毫秒）：12 小时
+  # ★ 本轮改动（评审【安全性·中】"JWT 有效期 7 天且无任何吊销手段"）：
+  #   7 天窗口太长 —— token 一旦泄露（典型场景是 XSS 偷走 localStorage 里的它），
+  #   攻击者可以畅通 7 天，而**改密码、登出都无法让它失效**（项目没有 token 黑名单）。
+  #   缩短到 12 小时是"零新增依赖、改动最小"的缓解手段（评审给出的两个选项之一）。
+  #   ★ 彻底方案**已落地**：t_user.token_valid_after + JwtUtil.isIssuedAtOrAfter，
+  #     JwtAuthFilter / DocAccessFilter 都会校验"iat 是否晚于它"（改密码、恢复账号时写入）。
+  #     ★ 它**不增加查询**：过滤器本来就要查一次用户来判"账号是否已注销/不存在"。
+  #     另外还有一枚独立的短时文档通行证（2 小时，Cookie）。
+  expiration: 43200000

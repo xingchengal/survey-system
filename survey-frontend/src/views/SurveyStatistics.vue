@@ -1,9 +1,9 @@
 <template>
   <div style="padding: 20px;">
     <!-- 顶部栏 -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div class="page-header">
       <div>
-        <h2 style="margin: 0;">📈 {{ surveyTitle }} - 统计</h2>
+        <h2 class="m-0">📈 {{ surveyTitle }} - 统计</h2>
         <div style="color: #666; margin-top: 6px;">
           回收数量：<strong style="color: #f56c6c; font-size: 20px;">{{ responseCount }}</strong> 份
         </div>
@@ -22,10 +22,10 @@
     <el-empty v-if="questions.length === 0" description="该问卷还没有题目" />
 
     <div v-else>
-      <el-card v-for="(q, qIndex) in questions" :key="q.id" style="margin-bottom: 20px;">
+      <el-card class="mb-20" v-for="(q, qIndex) in questions" :key="q.id">
         <div style="font-weight: bold; font-size: 16px; margin-bottom: 16px;">
           {{ qIndex + 1 }}. {{ q.title }}
-          <el-tag size="small" style="margin-left: 8px;">
+          <el-tag class="ml-8" size="small">
             {{ q.type === 1 ? '单选题' : q.type === 2 ? '多选题' : '单行输入' }}
           </el-tag>
         </div>
@@ -53,7 +53,7 @@
 
     <!-- 答卷列表对话框 -->
     <el-dialog v-model="listVisible" title="所有答卷" width="700px">
-      <el-table :data="answers" stripe border style="width: 100%;" max-height="400">
+      <el-table class="w-full" :data="answers" stripe border max-height="400">
         <el-table-column type="index" label="序号" width="70" align="center" />
         <el-table-column prop="id" label="答卷ID" width="90" align="center" />
         <el-table-column prop="submitTime" label="提交时间" width="200" />
@@ -78,7 +78,7 @@
         <div style="font-weight: bold; margin-bottom: 6px;">
           {{ idx + 1 }}. {{ getQuestionTitle(item.questionId) }}
         </div>
-        <div style="color: #666;">{{ item.content || '（未作答）' }}</div>
+        <div class="text-secondary">{{ item.content || '（未作答）' }}</div>
       </div>
       <el-empty v-if="answerDetails.length === 0" description="暂无回答内容" />
     </el-dialog>
@@ -86,12 +86,17 @@
 </template>
 
 <script>
-import * as echarts from 'echarts'
+// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
+import echarts from '../utils/echarts'
 import { ElMessage } from 'element-plus'
-import { Download, View } from '@element-plus/icons-vue'
+// ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
+//   http.js 统一带 Authorization、统一按 HTTP 状态码判成败、统一弹后端 message。
+//   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
+import api from '../api'
+// 本页图标均为模板标签形式，已由 main.js 全局注册，无需 import
 
+// 图标已在 main.js 全局注册，不再重复注册（View 是 HTML 保留标签名）
 export default {
-  components: { Download, View },
   data() {
     return {
       surveyId: null,
@@ -113,37 +118,48 @@ export default {
     this.loadAll()
   },
   beforeUnmount() {
-    Object.values(this.chartInstances).forEach(item => item.chart && item.chart.dispose())
+    // ★ resize 监听必须用具名函数，否则无法 removeEventListener：
+    //   匿名写法 `window.addEventListener('resize', () => chart.resize())` 会让每进一次统计页
+    //   就永久多一个监听，而且它还会对已 dispose 的实例调 resize。
+    //   具名 handler 存在 chartInstances 上，这里一并移除再 dispose。
+    //   （对照写法：SystemStatistics.vue 的 handleResize + removeEventListener。）
+    Object.values(this.chartInstances).forEach(item => {
+      if (item.resizeHandler) window.removeEventListener('resize', item.resizeHandler)
+      if (item.chart) item.chart.dispose()
+    })
   },
   methods: {
     async loadAll() {
       try {
+        // ★ 接口层方法对应（都是 GET + 自动 parse 响应体）；
+        //   本方法里一共 5 个调用点（前 3 个 + 循环里的单题统计/填空文本）：
+        //   /api/survey/{id}       → api.survey.detail(id)
+        //   /api/answer/count/{id} → api.answer.count(id)      （后端直接返回一个数字）
+        //   /api/question/list/{id}→ api.question.list(id)     （题目数组，带 type / options）
         // 1. 问卷信息
-        const surveyRes = await fetch(`/api/survey/${this.surveyId}`)
-        const survey = await surveyRes.json()
+        const survey = await api.survey.detail(this.surveyId)
         this.surveyTitle = survey.title
 
         // 2. 回收数量
-        const countRes = await fetch(`/api/answer/count/${this.surveyId}`)
-        this.responseCount = await countRes.json()
+        this.responseCount = await api.answer.count(this.surveyId)
 
         // 3. 题目列表
-        const qRes = await fetch(`/api/question/list/${this.surveyId}`)
-        const questions = await qRes.json()
+        const questions = await api.question.list(this.surveyId)
 
         // 4. 逐题加载统计
+        // ⚠️ 这里是**串行请求**（for + await），N 道题就要等 N 个来回，属于待优化的 N+1 问题。
+        //    暂不重构（后续单独处理）。
         for (const q of questions) {
           if (q.type === 1 || q.type === 2) {
-            const statRes = await fetch(`/api/answer/statistics/${q.id}`)
-            q.chartData = await statRes.json()
+            q.chartData = await api.answer.statistics(q.id)
           } else {
-            const textRes = await fetch(`/api/answer/texts/${q.id}`)
-            q.textAnswers = await textRes.json()
+            q.textAnswers = await api.answer.texts(q.id)
           }
         }
 
         this.questions = questions
 
+        // ↓↓↓ 下面是纯前端图表渲染 ↓↓↓
         this.$nextTick(() => {
           this.questions.forEach(q => {
             if ((q.type === 1 || q.type === 2) && q.chartData && q.chartData.length > 0) {
@@ -152,14 +168,15 @@ export default {
           })
         })
       } catch {
-        ElMessage.error('加载统计数据失败')
+        // 失败提示由接口层统一弹出，这里不再重复弹，避免出现两条红字。
       }
     },
 
     setChartRef(el, questionId) {
       if (!el) return
       if (!this.chartInstances[questionId]) {
-        this.chartInstances[questionId] = { el: null, chart: null }
+        // resizeHandler 与 chart 一起存，卸载时才能移除监听（见 beforeUnmount）
+        this.chartInstances[questionId] = { el: null, chart: null, resizeHandler: null }
       }
       this.chartInstances[questionId].el = el
     },
@@ -211,17 +228,19 @@ export default {
           }
 
       chart.setOption(option)
-      window.addEventListener('resize', () => chart.resize())
+      // ★ 具名 handler，卸载时才能移除监听（见 beforeUnmount 的说明）
+      ref.resizeHandler = () => chart.resize()
+      window.addEventListener('resize', ref.resizeHandler)
     },
 
     // 打开答卷列表
     async openAnswerList() {
       try {
-        const res = await fetch(`/api/answer/list/${this.surveyId}`)
-        this.answers = await res.json()
+        //   api.answer.list() 失败时提示由接口层弹；失败时不打开弹窗。
+        this.answers = await api.answer.list(this.surveyId)
         this.listVisible = true
       } catch {
-        ElMessage.error('加载答卷列表失败')
+        // 提示由接口层统一弹出
       }
     },
 
@@ -229,11 +248,11 @@ export default {
     async viewAnswerDetail(row) {
       this.currentAnswerId = row.id
       try {
-        const res = await fetch(`/api/answer/detail/${row.id}`)
-        this.answerDetails = await res.json()
+        //   api.answer.detail(row.id)（这里传的是答卷 id，不是问卷 id）
+        this.answerDetails = await api.answer.detail(row.id)
         this.detailVisible = true
       } catch {
-        ElMessage.error('加载答卷详情失败')
+        // 提示由接口层统一弹出
       }
     },
 
@@ -243,39 +262,20 @@ export default {
       return q ? q.title : `题目 #${questionId}`
     },
 
-    // 导出 Excel（用 fetch 下载，自动带 token）
+    /**
+     * 导出 Excel。
+     *
+     * ★ api.answer.exportExcel() 内部走 http.download()，它解析响应头 Content-Disposition
+     *   里的文件名（后端用 RFC 5987 的 `filename*=UTF-8''` 传中文名，并给一个 ASCII 的
+     *   `filename` 兜底）并**直接触发浏览器下载** —— 所以页面只剩一行，
+     *   而且文件名终于是后端给的那个，不再是写死的兜底名。
+     */
     async exportExcel() {
       try {
-        const res = await fetch(`/api/answer/export/${this.surveyId}`)
-        if (!res.ok) {
-          ElMessage.error('导出失败：' + res.status)
-          return
-        }
-
-        // 从响应头取文件名
-        const disposition = res.headers.get('Content-Disposition')
-        let filename = '答卷数据.xlsx'
-        if (disposition) {
-          const match = disposition.match(/filename=([^;]+)/)
-          if (match) {
-            filename = decodeURIComponent(match[1].replace(/["']/g, '').trim())
-          }
-        }
-
-        // 下载
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-
+        await api.answer.exportExcel(this.surveyId)
         ElMessage.success('导出成功')
-      } catch (e) {
-        ElMessage.error('导出失败：' + e.message)
+      } catch {
+        // 失败提示由接口层统一弹出
       }
     },
   }

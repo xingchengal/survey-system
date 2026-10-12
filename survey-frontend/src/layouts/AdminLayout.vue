@@ -109,7 +109,7 @@
 
             <div style="padding: 4px 0;">
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5;">
-                <span style="font-weight: bold;">消息中心</span>
+                <span class="text-bold">消息中心</span>
                 <div>
                   <el-button type="primary" link size="small" @click="markAllRead" :disabled="unreadCount === 0">全部已读</el-button>
                   <el-button type="danger" link size="small" @click="clearAll" :disabled="notifications.length === 0">清空</el-button>
@@ -152,10 +152,10 @@
               >
                 {{ avatarText }}
               </el-avatar>
-              <span style="margin-left: 8px;">{{ displayName }}</span>
+              <span class="ml-8">{{ displayName }}</span>
               <el-tag v-if="isAdmin" type="danger" size="small" style="margin-left: 6px;">管理员</el-tag>
               <el-tag v-else type="info" size="small" style="margin-left: 6px;">用户</el-tag>
-              <el-icon style="margin-left: 4px;"><ArrowDown /></el-icon>
+              <el-icon class="ml-4"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -206,6 +206,13 @@ import {
   ChatDotRound, BellFilled, InfoFilled, Close
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+// ★ 统一走接口层：不要在本布局里自己 fetch —— http.js 统一带 Authorization、
+//   统一判成败、统一弹错误提示，页面只管拿数据。
+//   路径说明：本文件在 src/layouts/ 下，api 在 src/api/，所以是 '../api'。
+import api from '../api'
+// ★ 登录态统一从 utils/auth 读：避免裸 JSON.parse 遇到脏数据时抛异常，
+//   把整个后台布局（含侧边栏和顶栏）都渲染崩掉。
+import { getUser, clearAuth } from '../utils/auth'
 
 export default {
   components: {
@@ -215,7 +222,8 @@ export default {
   },
   data() {
     return {
-      currentUser: JSON.parse(localStorage.getItem('user') || '{}'),
+      // ★ 用 getUser()：直接 JSON.parse(localStorage...) 遇到脏数据会抛异常
+      currentUser: getUser() || {},
       // 公告相关
       announcementVisible: false,
       currentAnnouncement: null,
@@ -237,9 +245,18 @@ export default {
       return name ? name.charAt(0) : '用'
     }
   },
+  watch: {
+    // 监听路由变化，从个人中心返回时刷新用户信息（保证头像、昵称实时更新）
+    // ★ 必须用 getUser()：裸 JSON.parse 遇到脏数据会让回调抛异常
+    //   （watch 放在 mounted 之前，是 ESLint 的 vue/order-in-components 规则要求）
+    $route() {
+      this.currentUser = getUser() || {}
+    }
+  },
   mounted() {
     // 每次进入布局页，重新读取最新的用户信息
-    this.currentUser = JSON.parse(localStorage.getItem('user') || '{}')
+    // ★ 用 getUser() 而不是裸 JSON.parse：脏数据不会让布局/守卫抛异常
+    this.currentUser = getUser() || {}
     // 只有普通用户才加载公告弹窗
     if (!this.isAdmin) {
       this.loadAnnouncements()
@@ -250,25 +267,25 @@ export default {
     this.notifyTimer = setInterval(this.loadUnreadCount, 30000)
   },
   beforeUnmount() {
+    // 组件卸载时清掉 30 秒轮询未读数的定时器，避免离开后台后还在请求
     if (this.notifyTimer) clearInterval(this.notifyTimer)
-  },
-  watch: {
-    // 监听路由变化，从个人中心返回时刷新用户信息（保证头像、昵称实时更新）
-    $route() {
-      this.currentUser = JSON.parse(localStorage.getItem('user') || '{}')
-    }
   },
   methods: {
     async handleCommand(command) {
       if (command === 'logout') {
-        // ★ 先调后端接口，清 Cookie
+        // ★ 先调后端接口，清 Cookie。
+        //   api.user.logout() 内部是 http.post(..., { silent: true })：
+        //   silent 表示「不自动弹错误提示、不自动跳登录」，因为退出登录本身就是离开本页，
+        //   而且未登录时调它会 401，绝不能触发「登录已过期 → 跳 /login」那一套。
         try {
-          await fetch('/api/user/logout', { method: 'POST' })
-        } catch (e) {
-          // 忽略错误
+          await api.user.logout()
+        } catch {
+          // 忽略错误：退出接口失败也必须让用户走掉，下面照常清本地登录态
         }
-        localStorage.removeItem('user')
-        localStorage.removeItem('token')
+        // ★ 清本地登录态必须走 utils/auth 的 clearAuth：它把 token / refreshToken / user
+        //   三个 key 一起清 —— 手写 removeItem 很容易漏掉 refreshToken，
+        //   漏了就会出现"退出登录后刷新页面又自动登录"。
+        clearAuth()
         this.$router.push('/login')
       } else if (command === 'profile') {
         if (this.isAdmin) {
@@ -280,22 +297,40 @@ export default {
     },
 
     openApiDoc() {
-      window.open('http://localhost:8080/doc.html', '_blank')
+      // ★ 打开 Knife4j 接口文档。
+      //   开发环境：前端跑在 5173、后端在 8080，是两个"源"，必须写完整地址；
+      //   生产环境：前后端同源（dist 拷进后端 static），用相对路径即可 ——
+      //             写死 http://localhost:8080 部署到服务器后就打不开了。
+      //   另外文档只有管理员能看：后端 DocAccessFilter 会校验 doc_token Cookie。
+      const docUrl = import.meta.env.DEV ? 'http://localhost:8080/doc.html' : '/doc.html'
+      window.open(docUrl, '_blank')
     },
 
     // 加载未过期公告，普通用户登录后弹一次
+    // ★ api.announcement.active() 直接把响应体（公告数组）resolve 出来，
+    //   res.json() 这一步由 http.js 统一做了；它是 silent 的
+    //   （登录页也会调，未登录不该弹红字）。
     async loadAnnouncements() {
       try {
         if (this.isAdmin) return
 
-        const res = await fetch('/api/announcement/active')
-        const list = await res.json()
+        const list = await api.announcement.active()
         if (!list || list.length === 0) return
 
         // 按用户ID隔离已读记录
         const userId = this.currentUser.id
         const storageKey = `readAnnouncements_${userId}`
-        const readIds = JSON.parse(localStorage.getItem(storageKey) || '[]')
+        // ★ 这个键存的是"已读公告 id 数组"，不是 user，所以不能复用 auth.getUser()，
+        //   必须在这里单独兜底：**裸 parse 不能省掉 try-catch** —— 值一旦写坏
+        //   （手工改过 / 旧版本格式），异常会冒到渲染流程，把整个后台壳打崩。
+        let readIds = []
+        try {
+          const raw = localStorage.getItem(storageKey)
+          const parsed = raw ? JSON.parse(raw) : []
+          readIds = Array.isArray(parsed) ? parsed : []
+        } catch {
+          localStorage.removeItem(storageKey)   // 脏值直接清掉，下次当作"都没读过"
+        }
         const unread = list.filter(a => !readIds.includes(a.id))
         if (unread.length === 0) return
 
@@ -310,28 +345,41 @@ export default {
     },
 
     // ==================== 通知相关 ====================
+    // ★ 下面 6 个通知方法统一走 api.notification.*，方法名与后端一一对应
+    //   （unread / list / read / readAll / remove / clear）。
+    //   ⚠️ 30 秒轮询的节奏（mounted 里的 setInterval(this.loadUnreadCount, 30000)）和
+    //      铃铛红点、列表的 DOM 结构都**不要动**。
     async loadUnreadCount() {
+      // api.notification.unread() 内部就是 silent：轮询失败不会弹提示、不会踢去登录页，
+      // 所以 catch 里什么都不做。
       try {
-        const res = await fetch('/api/notification/unread')
-        const data = await res.json()
+        const data = await api.notification.unread()
         this.unreadCount = data.count || 0
-      } catch (e) { /* 忽略错误 */ }
+      } catch { /* 忽略错误：轮询失败不该打扰用户 */ }
     },
 
     async loadNotifications() {
+      // 不要在 catch 里再弹 ElMessage.error：http.js 在非 2xx 时已经弹过后端的 message，
+      // 再弹一次会变成两条红字。
       try {
-        const res = await fetch('/api/notification/list')
-        this.notifications = await res.json()
+        this.notifications = await api.notification.list()
       } catch {
-        ElMessage.error('加载通知失败')
+        // 错误提示由 http.js 统一负责，这里只做流程控制（保持列表为上一次的数据）
       }
     },
 
     async handleNotifyClick(n) {
       if (n.isRead === 0) {
-        await fetch(`/api/notification/read/${n.id}`, { method: 'PUT' })
-        n.isRead = 1
-        this.loadUnreadCount()
+        // ★ 必须 try/catch：标记已读失败会抛异常（后端 NotificationController 失败时
+        //   throw BizException → 400 + message，http.js 弹红字并抛 ApiError）。
+        //   若不挡，就会变成未捕获 rejection，而且**下面的跳转不会执行**。
+        try {
+          await api.notification.read(n.id)
+          n.isRead = 1
+          this.loadUnreadCount()
+        } catch {
+          // 提示已由接口层弹出；已读状态保持未读，用户仍可以点进详情
+        }
       }
       if (n.link) {
         this.$router.push(n.link)
@@ -339,23 +387,38 @@ export default {
     },
 
     async markAllRead() {
-      await fetch('/api/notification/read-all', { method: 'PUT' })
-      this.notifications.forEach(n => n.isRead = 1)
-      this.unreadCount = 0
-      ElMessage.success('已全部标记为已读')
+      // 对应 PUT /api/notification/read-all（api.notification.readAll() 已封装）。
+      try {
+        await api.notification.readAll()
+        this.notifications.forEach(n => n.isRead = 1)
+        this.unreadCount = 0
+        ElMessage.success('已全部标记为已读')
+      } catch {
+        // 失败提示由接口层弹出，本地状态不改（列表仍显示未读）
+      }
     },
 
     async deleteNotify(n) {
-      await fetch(`/api/notification/${n.id}`, { method: 'DELETE' })
-      this.notifications = this.notifications.filter(item => item.id !== n.id)
-      this.loadUnreadCount()
+      // 对应 DELETE /api/notification/{id}；注意 api 里叫 remove。
+      try {
+        await api.notification.remove(n.id)
+        this.notifications = this.notifications.filter(item => item.id !== n.id)
+        this.loadUnreadCount()
+      } catch {
+        // 删不掉就不动列表（否则会出现"界面上没了、刷新又回来"）
+      }
     },
 
     async clearAll() {
-      await fetch('/api/notification/clear', { method: 'DELETE' })
-      this.notifications = []
-      this.unreadCount = 0
-      ElMessage.success('已清空所有通知')
+      // 对应 DELETE /api/notification/clear（清空全部）。
+      try {
+        await api.notification.clear()
+        this.notifications = []
+        this.unreadCount = 0
+        ElMessage.success('已清空所有通知')
+      } catch {
+        // 失败提示由接口层弹出，列表保持原样
+      }
     }
   }
 }

@@ -3,7 +3,22 @@
 # ============================================
 /survey-backend/target/
 /survey-backend/.idea/
-/survey-backend/.mvn/
+# ★ 这里原本是 `/survey-backend/.mvn/`，第十二轮**已删除**（别再加回来）：
+#   Maven Wrapper 的 mvnw / mvnw.cmd 是入库的，但它们**必须**配合
+#   .mvn/wrapper/maven-wrapper.properties 才能工作 —— 该文件里写着
+#   distributionType=only-script 与 distributionUrl（apache-maven-3.9.16）。
+#   忽略整个 .mvn/ 的后果：别人 clone 下来后 mvnw 读不到发行版地址，轻则报错、
+#   重则静默换一个 Maven 版本构建（"在我机器上能跑"）——
+#   等于给了人一把没有钥匙孔的锁。
+#
+#   ★ 为什么说这条"重复且过宽"：survey-backend/.gitignore（Spring Initializr 官方模板）
+#     第 3 行已经有 `.mvn/wrapper/maven-wrapper.jar` —— 它想忽略的只是那个**二进制 jar**
+#     （而且本项目是 distributionType=only-script，压根不生成 jar，所以那条在本项目里也不起作用）；
+#     maven-wrapper.properties 是**必须入库**的。根这条按**目录**忽略、范围更大，
+#     把 properties 一并吞掉了。git 的规则是"任一 .gitignore 命中即忽略"，
+#     模块级那条拦不住根级的目录级忽略，而且**不会有任何提示**。
+#   ★ 该目录下只有那 1 个 168 字节的文本文件，没有构建产物也没有密钥，
+#     没有任何"必须忽略"的理由。
 /survey-backend/*.iml
 /survey-backend/logs/
 /survey-backend/src/main/resources/application-local.yml
@@ -25,6 +40,11 @@
 # ============================================
 # 通用
 # ============================================
+# ★ 补：IDE 工程目录一律不入库。原来只写了 /survey-backend/.idea/ 与
+#   /survey-frontend/.idea/，**漏了仓库根目录的 /.idea/** ——
+#   而 dataSources.local.xml 里就存着数据库连接串与用户名（评审 P0 项）。
+#   实测历史里从未提交过（git log --all --stat 查过），这里补上防止以后误提交。
+.idea/
 .DS_Store
 Thumbs.db
 *.sw?

@@ -1,15 +1,15 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0;">📜 系统监控</h2>
+    <div class="page-header">
+      <h2 class="m-0">📜 系统监控</h2>
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
       <!-- ==================== 操作日志 ==================== -->
       <el-tab-pane name="operation">
         <template #label>
-          <span style="display: flex; align-items: center;">
-            <el-icon style="margin-right: 4px;"><Memo /></el-icon>
+          <span class="flex-center">
+            <el-icon class="mr-4"><Memo /></el-icon>
             操作日志
           </span>
         </template>
@@ -21,7 +21,7 @@
           <el-button :icon="Refresh" @click="loadOperations">刷新</el-button>
         </div>
 
-        <el-table :data="operations" stripe border v-loading="opLoading" style="width: 100%;">
+        <el-table class="w-full" :data="operations" stripe border v-loading="opLoading">
           <el-table-column prop="id" label="ID" width="80" align="center" />
           <el-table-column prop="username" label="操作人" width="130" align="center">
             <template #default="{ row }">
@@ -46,7 +46,7 @@
           <el-table-column prop="createTime" label="操作时间" width="180" />
         </el-table>
 
-        <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <div class="pager-row">
           <el-pagination
             v-model:current-page="opPageNum"
             v-model:page-size="opPageSize"
@@ -65,8 +65,8 @@
       <!-- ==================== 异常日志 ==================== -->
       <el-tab-pane name="error">
         <template #label>
-          <span style="display: flex; align-items: center;">
-            <el-icon style="margin-right: 4px;"><WarningFilled /></el-icon>
+          <span class="flex-center">
+            <el-icon class="mr-4"><WarningFilled /></el-icon>
             异常日志
           </span>
         </template>
@@ -78,7 +78,7 @@
           <el-button type="danger" :icon="Delete" @click="clearErrors" :disabled="errorTotal === 0">清空全部</el-button>
         </div>
 
-        <el-table :data="errors" stripe border v-loading="errorLoading" style="width: 100%;">
+        <el-table class="w-full" :data="errors" stripe border v-loading="errorLoading">
           <el-table-column prop="id" label="ID" width="70" align="center" />
           <el-table-column prop="errorType" label="异常类型" width="180" align="center">
             <template #default="{ row }">
@@ -116,7 +116,7 @@
           </el-table-column>
         </el-table>
 
-        <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <div class="pager-row">
           <el-pagination
             v-model:current-page="errorPageNum"
             v-model:page-size="errorPageSize"
@@ -124,7 +124,7 @@
             :total="errorTotal"
             layout="total, sizes, prev, pager, next, jumper"
             background
-            @size-change="loadErrors"
+            @size-change="handleErrorSizeChange"
             @current-change="loadErrors"
           />
         </div>
@@ -136,7 +136,7 @@
     <!-- 异常详情对话框 -->
     <el-dialog v-model="detailVisible" title="异常详情" width="900px" top="5vh">
       <div v-if="currentError">
-        <el-descriptions :column="2" border size="small" style="margin-bottom: 16px;">
+        <el-descriptions class="mb-16" :column="2" border size="small">
           <el-descriptions-item label="异常ID">#{{ currentError.id }}</el-descriptions-item>
           <el-descriptions-item label="异常类型">{{ currentError.errorType }}</el-descriptions-item>
           <el-descriptions-item label="请求方式">{{ currentError.requestMethod }}</el-descriptions-item>
@@ -164,10 +164,16 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search, User, Memo, WarningFilled, Delete } from '@element-plus/icons-vue'
+// Search / User 用于 :prefix-icon，Refresh / Delete 用于 :icon，都是「属性变量」形式，必须 import；
+// 注意区别：模板标签形式（<WarningFilled />）由 main.js 全局注册提供，不需要 import
+import { Refresh, Search, User, Delete } from '@element-plus/icons-vue'
+// ★ 统一接口层（src/api）：日志类接口按「操作日志 / 异常日志」两个子对象导出，
+//   页面只关心「调哪个接口、拿到什么数据」
+import api from '../api'
 
+// 图标已在 main.js 里全局注册，这里不再重复注册
+// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
-  components: { Refresh, Search, User, Memo, WarningFilled, Delete },
   data() {
     return {
       activeTab: 'operation',
@@ -205,6 +211,17 @@ export default {
     this.loadErrorCount()
   },
   methods: {
+    /**
+     * ★ 改"每页条数"时要把**页码复位到 1**，否则会落到空页上：
+     *   页码仍是旧值时，例如在第 5 页把每页改成 100 条，总页数变成 1 页，
+     *   用户会看到"暂无异常"，以为数据没了。
+     *   （对照写法：Recycle.vue / AdminSurveyList.vue / UserManage.vue 的 size-change 都复位了。）
+     */
+    handleErrorSizeChange() {
+      this.errorPageNum = 1
+      this.loadErrors()
+    },
+
     handleTabChange(name) {
       if (name === 'error') {
         this.loadErrors()
@@ -217,19 +234,17 @@ export default {
     async loadOperations() {
       this.opLoading = true
       try {
-        const params = new URLSearchParams({
+        // 参数对象交给接口层，toQuery 会自动拼串并跳过 null/undefined/空串
+        const data = await api.operationLog.page({
           pageNum: this.opPageNum,
-          pageSize: this.opPageSize
+          pageSize: this.opPageSize,
+          username: this.opUsername.trim(),
+          operation: this.opOperation.trim()
         })
-        if (this.opUsername.trim()) params.append('username', this.opUsername.trim())
-        if (this.opOperation.trim()) params.append('operation', this.opOperation.trim())
-
-        const res = await fetch(`/api/log/page?${params.toString()}`)
-        const data = await res.json()
         this.operations = data.list || []
         this.opTotal = data.total || 0
       } catch {
-        ElMessage.error('加载操作日志失败')
+        // ★ 接口层已按 HTTP 状态码统一提示，这里只留 catch 做流程控制，loading 由 finally 复位
       } finally {
         this.opLoading = false
       }
@@ -239,18 +254,16 @@ export default {
     async loadErrors() {
       this.errorLoading = true
       try {
-        const params = new URLSearchParams({
+        // 同 loadOperations：只传参数对象，query 拼接交给接口层
+        const data = await api.errorLog.page({
           pageNum: this.errorPageNum,
-          pageSize: this.errorPageSize
+          pageSize: this.errorPageSize,
+          keyword: this.errorKeyword.trim()
         })
-        if (this.errorKeyword.trim()) params.append('keyword', this.errorKeyword.trim())
-
-        const res = await fetch(`/api/error-log/page?${params.toString()}`)
-        const data = await res.json()
         this.errors = data.list || []
         this.errorTotal = data.total || 0
       } catch {
-        ElMessage.error('加载异常日志失败')
+        // ★ 不再自己弹「加载异常日志失败」（接口层已统一提示），只保留流程控制
       } finally {
         this.errorLoading = false
       }
@@ -258,10 +271,14 @@ export default {
 
     async loadErrorCount() {
       try {
-        const res = await fetch('/api/error-log/count')
-        const data = await res.json()
+        // api.errorLog.count() 内部已带 { silent: true }
+        const data = await api.errorLog.count()
         this.errorTotal = data.count || 0
-      } catch (e) {}
+      } catch {
+        // 接口异常（未登录 / 网络问题）时忽略即可，计数保持 0；
+        // 这里显式保留 catch 块并写注释，是为了同时满足 ESLint 的 no-empty 规则
+        // ★ count() 内部传了 silent，所以失败既不弹提示也不跳登录
+      }
     },
 
     viewDetail(row) {
@@ -275,12 +292,14 @@ export default {
         cancelButtonText: '取消',
         type: 'warning'
       }).then(async () => {
-        const res = await fetch(`/api/error-log/${row.id}`, { method: 'DELETE' })
-        const msg = await res.text()
-        if (msg === '已删除') {
+        try {
+          // 删除是 DELETE，失败即 throw，await 通过就是删成功
+          await api.errorLog.remove(row.id)
           ElMessage.success('已删除')
           this.loadErrors()
           this.loadErrorCount()
+        } catch {
+          // 失败提示已由接口层统一弹出；这里挡住 rejection
         }
       }).catch(() => {})
     },
@@ -291,12 +310,14 @@ export default {
         cancelButtonText: '取消',
         type: 'error'
       }).then(async () => {
-        const res = await fetch('/api/error-log/clear', { method: 'DELETE' })
-        const msg = await res.text()
-        if (msg === '已清空') {
+        try {
+          // 清空是 DELETE，只需 await 通过
+          await api.errorLog.clear()
           ElMessage.success('已清空')
           this.loadErrors()
           this.loadErrorCount()
+        } catch {
+          // 失败提示由接口层统一弹出，这里只挡住 rejection
         }
       }).catch(() => {})
     },

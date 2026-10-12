@@ -63,13 +63,13 @@
     </el-row>
 
     <!-- 下方两块 -->
-    <el-row :gutter="20" style="margin-top: 20px;">
+    <el-row class="mt-20" :gutter="20">
       <!-- 左：状态分布饼图 -->
       <el-col :span="10">
         <el-card>
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: bold;">📊 问卷状态分布</span>
+            <div class="flex-between">
+              <span class="text-bold">📊 问卷状态分布</span>
             </div>
           </template>
           <div v-if="stats.total > 0" ref="pieRef" style="width: 100%; height: 280px;"></div>
@@ -81,15 +81,15 @@
       <el-col :span="14">
         <el-card>
           <template #header>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: bold;">📝 最近创建的问卷</span>
+            <div class="flex-between">
+              <span class="text-bold">📝 最近创建的问卷</span>
               <el-button type="primary" link size="small" @click="$router.push('/my/surveys')">查看全部 →</el-button>
             </div>
           </template>
-          <el-table :data="stats.recent" :show-header="false" style="width: 100%;">
+          <el-table class="w-full" :data="stats.recent" :show-header="false">
             <el-table-column min-width="180">
               <template #default="{ row }">
-                <div style="display: flex; align-items: center;">
+                <div class="flex-center">
                   <el-icon style="margin-right: 8px; color: #409eff;"><Document /></el-icon>
                   <span style="font-weight: 500;">{{ row.title }}</span>
                 </div>
@@ -121,9 +121,13 @@
 </template>
 
 <script>
-import * as echarts from 'echarts'
-import { ElMessage } from 'element-plus'
+// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
+import echarts from '../utils/echarts'
 import { Document, Promotion, EditPen, ChatDotRound } from '@element-plus/icons-vue'
+// ★ 统一接口层：统计数据走 api.survey.myStatistics()。
+//   本文件在 src/views/ 下，api 在 src/api/，所以相对路径是 '../api'。
+import api from '../api'
+import { getUser } from '../utils/auth'
 
 export default {
   components: { Document, Promotion, EditPen, ChatDotRound },
@@ -142,7 +146,8 @@ export default {
     }
   },
   mounted() {
-    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    // ★ 读本地用户走 utils/auth.getUser()
+    const user = getUser() || {}
     this.userName = user.nickname || user.username || '用户'
     this.loadStats()
   },
@@ -152,12 +157,13 @@ export default {
   methods: {
     async loadStats() {
       try {
-        const res = await fetch('/api/survey/my-statistics')
-        const data = await res.json()
-        this.stats = data
+        // ★ api.survey.myStatistics() 里 http.js 自动带 Authorization，
+        //   成功时 resolve 出响应体（后端返回的统计对象），直接赋给 this.stats。
+        this.stats = await api.survey.myStatistics()
         this.$nextTick(() => this.initPie())
       } catch {
-        ElMessage.error('加载统计数据失败')
+        // 失败提示已由 http.js 用后端 message 弹过，这里只做流程控制：
+        // 保持 stats 为初始值（页面显示 0 / 空图表），不渲染饼图。
       }
     },
 

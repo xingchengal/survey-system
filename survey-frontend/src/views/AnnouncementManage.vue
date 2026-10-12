@@ -1,11 +1,11 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-      <h2 style="margin: 0;">📢 公告管理</h2>
+    <div class="page-header">
+      <h2 class="m-0">📢 公告管理</h2>
       <el-button type="primary" :icon="Plus" @click="openDialog">发布公告</el-button>
     </div>
 
-    <el-table :data="list" stripe border style="width: 100%;">
+    <el-table class="w-full" :data="list" stripe border>
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="content" label="内容" min-width="240" show-overflow-tooltip />
@@ -48,19 +48,13 @@
     <el-dialog v-model="dialogVisible" title="发布公告" width="600px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="标题" required>
-          <el-input v-model="form.title" placeholder="请输入公告标题" maxlength="100" show-word-limit />
+          <el-input v-model="form.title" placeholder="请输入公告标题" maxlength="200" show-word-limit />
         </el-form-item>
         <el-form-item label="内容" required>
-          <el-input v-model="form.content" type="textarea" :rows="6" placeholder="请输入公告内容" maxlength="1000" show-word-limit />
+          <el-input v-model="form.content" type="textarea" :rows="6" placeholder="请输入公告内容" maxlength="16000" show-word-limit />
         </el-form-item>
         <el-form-item label="过期时间">
-          <el-date-picker
-            v-model="form.expireTime"
-            type="datetime"
-            placeholder="不设置则永不过期"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            style="width: 100%;"
-          />
+          <el-date-picker class="w-full" v-model="form.expireTime" type="datetime" placeholder="不设置则永不过期" value-format="YYYY-MM-DD HH:mm:ss" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -74,10 +68,14 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+// Plus 用于属性变量形式（:icon="Plus"），必须 import（模板标签形式才可由全局注册提供）
 import { Plus } from '@element-plus/icons-vue'
+// ★ 统一接口层（src/api）：Authorization、query 拼接、非 2xx 抛错、错误提示、401 跳登录都在里面，
+//   本页只需关心「调哪个接口、拿到什么数据」
+import api from '../api'
 
+// 图标已在 main.js 全局注册；本页只有 Plus 需要按"属性变量"形式用（:icon="Plus"），所以单独 import
 export default {
-  components: { Plus },
   data() {
     return {
       list: [],
@@ -93,10 +91,11 @@ export default {
   methods: {
     async loadList() {
       try {
-        const res = await fetch('/api/announcement/list')
-        this.list = await res.json()
+        // 接口层已带登录凭证且会按 HTTP 状态码判成败，成功直接 resolve 响应体（数组）
+        this.list = await api.announcement.list()
       } catch {
-        ElMessage.error('加载失败')
+        // ★ 接口层已统一 ElMessage.error，这里保留 catch 只为挡住 rejection，
+        //   列表维持上一次的数据
       }
     },
 
@@ -109,36 +108,25 @@ export default {
       if (!this.form.title.trim()) return ElMessage.warning('请输入标题')
       if (!this.form.content.trim()) return ElMessage.warning('请输入内容')
       try {
-        const res = await fetch('/api/announcement/add', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.form)
-        })
-        const data = await res.json()
-        if (data.success) {
-          ElMessage.success('发布成功')
-          this.dialogVisible = false
-          this.loadList()
-        } else {
-          ElMessage.error(data.message)
-        }
+        // POST 与序列化由接口层负责，非 2xx 直接 throw ——「await 成功即成功」
+        await api.announcement.add(this.form)
+        ElMessage.success('发布成功')
+        this.dialogVisible = false
+        this.loadList()
       } catch {
-        ElMessage.error('发布失败')
+        // ★ 失败必定走 throw，提示已由接口层统一弹出，这里只做流程控制（不关弹窗、不刷新列表）
       }
     },
 
     async handleToggle(row, status) {
       try {
-        const res = await fetch(`/api/announcement/status/${row.id}?status=${status}`, { method: 'PUT' })
-        const msg = await res.text()
-        if (msg === '操作成功') {
-          ElMessage.success('操作成功')
-          this.loadList()
-        } else {
-          ElMessage.error(msg)
-        }
+        // updateStatus 内部就是 PUT /api/announcement/status/{id}?status=，成功才 resolve ——
+        // ★ 不要退回"读 text 比对 msg"的写法，否则后端改文案前端就静默失效
+        await api.announcement.updateStatus(row.id, status)
+        ElMessage.success('操作成功')
+        this.loadList()
       } catch {
-        ElMessage.error('操作失败')
+        // 失败提示已由接口层统一处理，这里不再重复弹窗
       }
     },
 
@@ -149,16 +137,13 @@ export default {
         type: 'warning'
       }).then(async () => {
         try {
-          const res = await fetch(`/api/announcement/delete/${row.id}`, { method: 'DELETE' })
-          const msg = await res.text()
-          if (msg === '删除成功') {
-            ElMessage.success('删除成功')
-            this.loadList()
-          } else {
-            ElMessage.error(msg)
-          }
+          // 删除是 DELETE，非 2xx 一律抛错，await 通过就说明删掉了
+          await api.announcement.remove(row.id)
+          ElMessage.success('删除成功')
+          this.loadList()
         } catch {
-          ElMessage.error('删除失败')
+          // 失败提示由接口层统一弹出；保留 catch 是为了不打断 Promise 链
+          // （外层 .catch(() => {}) 负责吞掉「取消」分支，两者作用不同）
         }
       }).catch(() => {})
     }
