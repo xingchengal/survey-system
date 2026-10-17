@@ -40,6 +40,55 @@ public interface AnswerDetailMapper {
     List<Map<String, Object>> countByQuestionId(Integer questionId);
 
     /**
+     * 单题选项分布，**只统计有效答卷**（`t_answer.quality_flag = 0`）。
+     *
+     * ★ 为什么不给 `countByQuestionId` 加一个 `excludeInvalid` 参数：
+     *   注解 SQL 里拼 `<if>` 会让"缓存有两个口径"这件事藏在动态 SQL 里，
+     *   排查时很难一眼看出走的是哪条。两条**静态 SQL** + 两个缓存 key，对应关系一目了然。
+     * ★ JOIN 的方向：明细 → 答卷（`d.answer_id = a.id`），过滤条件挂在答卷上。
+     */
+    @Select("SELECT d.content, COUNT(*) AS count FROM t_answer_detail d " +
+            "JOIN t_answer a ON d.answer_id = a.id " +
+            "WHERE d.question_id = #{questionId} AND a.quality_flag = 0 GROUP BY d.content")
+    List<Map<String, Object>> countValidByQuestionId(Integer questionId);
+
+    /**
+     * ★ 批量版：多道题的选项分布，**只统计有效答卷**（整份问卷统计 + 剔除可疑样本时用）。
+     * 返回每行 `qid / content / cnt`，与 {@link #countByQuestionIds} 同口径（全小写别名）。
+     */
+    @Select("<script>" +
+            "SELECT d.question_id AS qid, d.content, COUNT(*) AS cnt FROM t_answer_detail d " +
+            "JOIN t_answer a ON d.answer_id = a.id " +
+            "WHERE d.question_id IN " +
+            "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
+            "AND a.quality_flag = 0 " +
+            "GROUP BY d.question_id, d.content" +
+            "</script>")
+    List<Map<String, Object>> countValidByQuestionIds(@Param("questionIds") List<Integer> questionIds);
+
+    /**
+     * ★ **批量版**选项分布：一次取回多道题的 `{content, count}`（整份问卷统计接口用它）。
+     *
+     * 返回每行三个列：`qid` / `content` / `cnt`。
+     * · 别名故意全小写，与 {@code AnswerMapper.countBySurveyIds} 同一口径
+     *   （避免不同 JDBC 驱动对列标签大小写处理不一致）；
+     * · **没有任何答卷的题目不会出现在结果里**（`GROUP BY` 无行）——
+     *   调用方必须自己为它们补空列表，否则前端会拿到 null 而不是"暂无回答数据"。
+     *
+     * ★ 为什么不在这里再包一层"保证每题一行"：那需要数字表或递归 CTE，
+     *   而在 Java 里补空列表只是 `getOrDefault(qid, List.of())` 一行。
+     *
+     * @param questionIds 题目 id 列表（调用方需保证非空：空列表会让 `IN ()` 变成语法错误）
+     */
+    @Select("<script>" +
+            "SELECT question_id AS qid, content, COUNT(*) AS cnt FROM t_answer_detail " +
+            "WHERE question_id IN " +
+            "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
+            "GROUP BY question_id, content" +
+            "</script>")
+    List<Map<String, Object>> countByQuestionIds(@Param("questionIds") List<Integer> questionIds);
+
+    /**
      * 填空题的所有非空答案文本（前端做列表/词云展示）。
      *
      * ★ 加 **LIMIT 2000**（OOM 防护）：
@@ -54,6 +103,35 @@ public interface AnswerDetailMapper {
     @Select("SELECT content FROM t_answer_detail WHERE question_id = #{questionId} " +
             "AND content IS NOT NULL AND content != '' LIMIT 2000")
     List<String> findTextAnswers(Integer questionId);
+
+    /**
+     * ★ **批量版**填空文本：一次取回多道填空题的文本，且**每题最多 `perQuestion` 条**。
+     *
+     * ── 为什么不能简单套用单题版的 `LIMIT 2000` ──────────────
+     *   单题版的 `LIMIT 2000` 限制的是"整条 SQL 的返回行数"，那没问题（只查一道题）。
+     *   但批量查多题时，`LIMIT 2000` 会变成"**所有题一共**只能取 2000 条"：
+     *   第一道题如果就有 2000 条，后面几道题**一条都拿不到**（静默丢数据，最难查的那种）。
+     *   ⇒ 用窗口函数按 `question_id` 分区编号，再在外层过滤 `rn <= perQuestion`，
+     *     这样"每题 2000 条"的上限才真正成立。
+     *
+     * ★ MySQL 8 才支持窗口函数（`ROW_NUMBER() OVER`）—— 本项目 init.sql 就是 8.0 语法。
+     * ★ 排序用 `ORDER BY id`（自增主键）而不是 `submit_time`：同秒提交的答卷时间相同，
+     *   按时间排序在分页/取前 N 条时不稳定。
+     *
+     * @param questionIds 题目 id 列表（非空）
+     * @param perQuestion 每题最多取多少条（调用方与单题版的 2000 对齐）
+     */
+    @Select("<script>" +
+            "SELECT t.qid AS qid, t.content AS content FROM (" +
+            "SELECT question_id AS qid, content, " +
+            "ROW_NUMBER() OVER (PARTITION BY question_id ORDER BY id) AS rn " +
+            "FROM t_answer_detail WHERE question_id IN " +
+            "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
+            "AND content IS NOT NULL AND content != ''" +
+            ") t WHERE t.rn &lt;= #{perQuestion}" +
+            "</script>")
+    List<Map<String, Object>> findTextAnswersByQuestionIds(@Param("questionIds") List<Integer> questionIds,
+                                                           @Param("perQuestion") int perQuestion);
 
     /**
      * 整份问卷的全部明细（JOIN t_answer 按 survey_id 取）。

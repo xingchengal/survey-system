@@ -9,14 +9,40 @@ export default {
   /** 某问卷的答卷份数 */
   count: (surveyId) => http.get(`/api/answer/count/${surveyId}`),
 
-  /** 单题的选项分布 [{content, count}] */
-  statistics: (questionId) => http.get(`/api/answer/statistics/${questionId}`),
+  /** 单题的选项分布 [{content, count}]；excludeInvalid=true 时只统计有效答卷 */
+  statistics: (questionId, excludeInvalid = false) =>
+    http.get(`/api/answer/statistics/${questionId}${excludeInvalid ? '?excludeInvalid=true' : ''}`),
+
+  /**
+   * 答卷质控摘要：`{ total, suspicious, suspiciousRate, reasons:[{code,label,count}], samples }`
+   * ★ "可疑"是**打标**不是删除：可疑答卷仍计入回收数量，是否剔除由统计接口的 excludeInvalid 决定。
+   */
+  quality: (surveyId) => http.get(`/api/answer/quality/${surveyId}`),
 
   /** 单题的填空题文本列表 */
   texts: (questionId) => http.get(`/api/answer/texts/${questionId}`),
 
-  /** 某问卷的答卷列表 */
-  list: (surveyId) => http.get(`/api/answer/list/${surveyId}`),
+  /**
+   * 整份问卷的统计（**一次取回**）。
+   *
+   * ★ 统计页专用：替代原来的"逐题请求"（N 道题 = N 次**串行**往返，见 SurveyStatistics.vue）。
+   *   返回 `{ surveyId, title, answerCount, questions: [{ question, chartData, textAnswers }] }`。
+   * ★ 上面的 `statistics` / `texts` 两个单题方法**保留**：它们是单题接口的契约，
+   *   将来若出现"只刷新某一题"的场景还要用（别因为统计页不用了就把它们删掉）。
+   */
+  surveyStatistics: (surveyId, excludeInvalid = false) =>
+    http.get(`/api/answer/statistics/survey/${surveyId}${excludeInvalid ? '?excludeInvalid=true' : ''}`),
+
+  /**
+   * 某问卷的答卷列表（**分页**）。
+   *
+   * ★ 返回 `{ total, list, pageNum, pageSize }`（后端 PageResult），**不是数组**。
+   * ★ 为什么必须分页：原先一次返回整份问卷的全部答卷（两万份 = 两万个对象、
+   *   实测 P50 239ms），点开"所有答卷"就能把服务端与浏览器一起拖慢。
+   * ★ 后端把 pageNum 夹到 ≥1、pageSize 夹到 [1,100]，这里默认 1 / 10 与分页器一致。
+   */
+  list: (surveyId, pageNum = 1, pageSize = 10) =>
+    http.get(`/api/answer/list/${surveyId}?pageNum=${pageNum}&pageSize=${pageSize}`),
 
   /** 某份答卷的明细 */
   detail: (answerId) => http.get(`/api/answer/detail/${answerId}`),
@@ -50,7 +76,11 @@ export default {
    *   否则点了没反应等于功能坏了。接口在白名单里，本来也不会返回 401 触发"登录过期跳转"，
    *   所以不传 silent 是安全的。
    * ★ 失败原因由后端 400 + message 给出，http.js 统一弹红字。
+   * ★ durationMs：答题页从打开到提交的毫秒数，**只用于质控**（"答题过快"判定）。
+   *   它是客户端值、可伪造 —— 后端也只当提示用，不当安全边界。
    */
-  submitByShareCode: (shareCode, details) =>
-    http.post(`/api/answer/submit-share/${shareCode}`, details)
+  submitByShareCode: (shareCode, details, durationMs) => {
+    const query = durationMs == null ? '' : `?durationMs=${durationMs}`
+    return http.post(`/api/answer/submit-share/${shareCode}${query}`, details)
+  }
 }

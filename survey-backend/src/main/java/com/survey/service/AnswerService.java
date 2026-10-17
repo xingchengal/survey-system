@@ -1,15 +1,19 @@
 package com.survey.service;
 
 import com.survey.common.BizException;
+import com.survey.common.PageParams;
+import com.survey.common.PageResult;
 import com.survey.common.QuestionType;
 import com.survey.common.SurveyStatus;
 import com.survey.common.TextLimits;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Question;
+import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
 import com.survey.mapper.AnswerMapper;
+import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
 import com.survey.mapper.SurveyMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -94,6 +100,13 @@ public class AnswerService {
      */
     private static final int MAX_ROWS_PER_QUESTION = 50;
 
+    /**
+     * 整份问卷统计接口里，**每道填空题最多返回多少条文本**。
+     * ★ 与单题接口 `AnswerDetailMapper.findTextAnswers` 的 `LIMIT 2000` 对齐 ——
+     *   两个入口对同一份数据必须给出同样的条数，否则统计页与单题页会显示不一样的列表。
+     */
+    private static final int MAX_TEXT_ANSWERS_PER_QUESTION = 2000;
+
     @Autowired
     private AnswerMapper answerMapper;
     @Autowired
@@ -104,6 +117,12 @@ public class AnswerService {
     private QuestionMapper questionMapper;
     @Autowired
     private NotificationService notificationService;
+    @Autowired
+    private StatsCacheService statsCacheService;
+    @Autowired
+    private OptionMapper optionMapper;
+    @Autowired
+    private AnswerQualityService answerQualityService;
 
     /**
      * 提交一份答卷。
@@ -127,6 +146,24 @@ public class AnswerService {
      */
     @Transactional
     public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details) {
+        doSubmit(surveyId, userId, details, null);
+    }
+
+    /**
+     * 提交答卷（带"答题耗时"）—— 供质控判定"是否答得太快"。
+     *
+     * ★ 两个重载**各自**标 `@Transactional`、且都调 private 的 `doSubmit`，互不调用：
+     *   同类内部调用会让事务注解失效（《交接文档》约定 9）。
+     *
+     * @param durationMs 答题页上报的耗时（毫秒），可为 null（老客户端 / 直接调接口）。
+     *                   ★ 客户端值、可伪造 —— 只用于质控提示，不作安全边界。
+     */
+    @Transactional
+    public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
+        doSubmit(surveyId, userId, details, durationMs);
+    }
+
+    private void doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
         if (details == null || details.isEmpty()) {
             throw new BizException("答卷内容不能为空");
         }
@@ -241,6 +278,20 @@ public class AnswerService {
             answerDetailMapper.insert(d);
         }
 
+        // ★★ 质控判定：基于"刚插入的明细 + 题目 + 选项"，在**同一事务**里回写标记。
+        //   放在这里（明细插完之后、缓存刷新之前）：
+        //     · 明细没插完就没法判定（一道多选题就是多行）；
+        //     · 必须同事务 —— 否则"答卷存了、标记没写"会让质控统计悄悄少一份，且没有任何报错。
+        evaluateQuality(answer.getId(), surveyId, details, surveyQuestions, durationMs);
+
+        // ★★ 缓存维护：提交成功后要让统计缓存反映这份新答卷。
+        //   · 答卷数：**只有缓存已存在时**才自增（见 StatsCacheService.bumpAnswerCount）；
+        //   · 单题分布/文本：直接失效，下次访问回源重算（多选题一选项一行，
+        //     分布会以难以穷举的方式变化，增量维护的风险高于重算成本）。
+        //   ★ 与通知同一个理由放进 afterCommit：事务回滚时缓存不能先动，
+        //     否则会出现"库里没有这份答卷、答卷数却多 1"的脏缓存，且一直错到 TTL 到期。
+        afterCommitCacheRefresh(surveyId, surveyQuestions);
+
         // ★ 给问卷创建者发通知
         //   ★ 为什么不能在事务内直接调 @Async 的 send()：
         //     异步线程可能在**主事务提交之前**就把通知插进去了。一旦主事务随后回滚，
@@ -279,24 +330,248 @@ public class AnswerService {
         }
     }
 
+    /**
+     * 事务提交后刷新统计缓存：答卷数自增 + 该问卷各题的分布/文本失效。
+     *
+     * ★ 为什么必须在 afterCommit：submit() 是 @Transactional，如果在事务里动缓存，
+     *   一旦事务回滚（明细插入失败、撞上 uk_survey_user 等），就会出现"缓存说多了一份答卷、
+     *   库里其实没有"的不一致 —— 而缓存不会自己纠正，会一直错到 TTL 到期（默认 10 分钟）。
+     *   ★ 注意方向差异：**失效（DEL）放在事务里也安全**（幂等 + 下次回源正确），
+     *     但**自增（INCR）不行**（回滚无法撤销），所以两者统一放到提交之后。
+     * ★ 与 notifyAfterCommit 同理：本类也可能在没有事务的上下文里被调用
+     *   （单元测试直接 new 出来调），所以先判 isSynchronizationActive()。
+     */
+    private void afterCommitCacheRefresh(Integer surveyId, List<Question> surveyQuestions) {
+        List<Integer> questionIds = surveyQuestions.stream()
+                .map(Question::getId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+        Runnable refresh = () -> {
+            statsCacheService.bumpAnswerCount(surveyId);
+            statsCacheService.evictQuestions(questionIds);
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    refresh.run();
+                }
+            });
+        } else {
+            refresh.run();
+        }
+    }
+
+    /**
+     * 质控判定 + 回写（提交事务内调用）。
+     *
+     * ★ 只取**本次涉及的选择题**的选项，一次批量查（`findByQuestionIds`）：
+     *   提交是热路径，逐题查选项就是 N 次往返。
+     * ★ 规则全部在 {@link AnswerQualityService} 里，本方法只负责"喂数据 + 写结果"。
+     */
+    private void evaluateQuality(Integer answerId, Integer surveyId, List<AnswerDetail> details,
+                                 List<Question> surveyQuestions, Integer durationMs) {
+        List<Integer> optionQuestionIds = surveyQuestions.stream()
+                .filter(q -> QuestionType.hasOptions(q.getType()))
+                .map(Question::getId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+        Map<Integer, List<com.survey.entity.Option>> optionsByQuestion = new HashMap<>();
+        if (!optionQuestionIds.isEmpty()) {
+            for (com.survey.entity.Option option : optionMapper.findByQuestionIds(optionQuestionIds)) {
+                optionsByQuestion.computeIfAbsent(option.getQuestionId(), k -> new java.util.ArrayList<>())
+                        .add(option);
+            }
+        }
+        AnswerQualityService.QualityVerdict verdict =
+                answerQualityService.evaluate(details, surveyQuestions, optionsByQuestion, durationMs);
+        String reasons = verdict.suspicious() ? verdict.joined() : null;
+        if (reasons != null && reasons.length() > com.survey.common.AnswerQuality.MAX_REASONS_LENGTH) {
+            // 防御：正常最多 4 个码（约 60 字符），不会超；超了宁可截断也不能让提交 500
+            reasons = reasons.substring(0, com.survey.common.AnswerQuality.MAX_REASONS_LENGTH);
+        }
+        answerMapper.updateQuality(answerId, durationMs, verdict.suspicious() ? 1 : 0, reasons);
+    }
+
     /** 某问卷的**明细行数**（导出前的内存预检）。★ 见 AnswerController 里的说明。 */
     public int countDetails(Integer surveyId) {
         return answerDetailMapper.countBySurveyId(surveyId);
     }
 
-    /** 某问卷的答卷份数（/api/answer/count/{surveyId}）。★ 只查单份问卷时才用它。 */
+    /**
+     * 某问卷的答卷份数（/api/answer/count/{surveyId}）。★ 只查单份问卷时才用它。
+     *
+     * ★ 先读缓存：这是统计页每次刷新都要打的接口，而 `COUNT(*)` 的结果只随"提交/删除答卷"变化。
+     *   未命中时回源并写回缓存；Redis 不可用时 getAnswerCount 返回 null，本条自动退化为直查库。
+     */
     public int countResponses(Integer surveyId) {
-        return answerMapper.countBySurveyId(surveyId);
+        Integer cached = statsCacheService.getAnswerCount(surveyId);
+        if (cached != null) {
+            return cached;
+        }
+        int count = answerMapper.countBySurveyId(surveyId);
+        statsCacheService.putAnswerCount(surveyId, count);
+        return count;
     }
 
-    /** 单题的选项分布：{content, count} 列表 —— 单选/多选题的饼图/柱图靠它。 */
+    /**
+     * 单题的选项分布：{content, count} 列表 —— 单选/多选题的饼图/柱图靠它。
+     *
+     * ★ 这是本项目最重的一条统计 SQL（`GROUP BY content` 扫明细表，2 万答卷下 P50 约 191ms），
+     *   而结果只随答卷变化 ⇒ 缓存收益最大的一条。写入路径（submit）会主动删掉它。
+     */
     public List<Map<String, Object>> countQuestion(Integer questionId) {
-        return answerDetailMapper.countByQuestionId(questionId);
+        return countQuestion(questionId, false);
     }
 
-    /** 单题的所有填空题文本（前端做词云或列表展示）。 */
+    /**
+     * 单题选项分布。
+     *
+     * @param excludeInvalid true = **只统计有效答卷**（`quality_flag = 0`）——
+     *                       统计页的"剔除可疑样本"开关走这条路。
+     * ★ 两个口径在 Redis 里是**两个 key**（`qstats` / `qstats-valid`），绝不能共用：
+     *   共用的话"切换开关"会读到上一个口径的缓存，图表会静默地算错。
+     */
+    public List<Map<String, Object>> countQuestion(Integer questionId, boolean excludeInvalid) {
+        if (excludeInvalid) {
+            List<Map<String, Object>> cached = statsCacheService.getValidQuestionStats(questionId);
+            if (cached != null) {
+                return cached;
+            }
+            List<Map<String, Object>> valid = answerDetailMapper.countValidByQuestionId(questionId);
+            statsCacheService.putValidQuestionStats(questionId, valid);
+            return valid;
+        }
+        List<Map<String, Object>> cached = statsCacheService.getQuestionStats(questionId);
+        if (cached != null) {
+            return cached;
+        }
+        List<Map<String, Object>> stats = answerDetailMapper.countByQuestionId(questionId);
+        statsCacheService.putQuestionStats(questionId, stats);
+        return stats;
+    }
+
+    /** 单题的所有填空题文本（前端做词云或列表展示）。★ 同样走缓存，失效策略与选项分布一致。 */
     public List<String> listTextAnswers(Integer questionId) {
-        return answerDetailMapper.findTextAnswers(questionId);
+        List<String> cached = statsCacheService.getQuestionTexts(questionId);
+        if (cached != null) {
+            return cached;
+        }
+        List<String> texts = answerDetailMapper.findTextAnswers(questionId);
+        statsCacheService.putQuestionTexts(questionId, texts);
+        return texts;
+    }
+
+    /**
+     * 整份问卷的统计（一次取回）—— 统计页专用，替代"逐题请求"。
+     *
+     * ── 为什么需要它 ──────────────────────────────────────
+     *   原实现是前端 `for + await` 逐题请求：N 道题 = N 次**串行**往返，
+     *   而且每次都各自扫一遍明细表。10 题的问卷就是 10 个来回，延迟直接叠加成倍数。
+     *   现在一次请求返回「标题 + 答卷数 + 题目 + 每题分布/文本」。
+     *
+     * ── 三层优化（缺一不可）────────────────────────────────
+     *   ① **缓存优先**：逐题先读 Redis（与单题接口共用同一批 key），命中的直接带走；
+     *   ② **批量回源**：所有未命中的题目合并成**一条 SQL**（选择题一条、填空题一条）——
+     *      如果"每个未命中再单独查一次"，那没命中时又退化成 N 次 SQL，等于白改；
+     *   ③ **回填缓存**：回源结果按题写回 Redis，下一次请求（包括单题接口）直接命中。
+     *
+     * ★ 权限校验不在这里：Controller 的 `requireSurveyOwnership` 已经校验过。
+     * ★ `survey` 由调用方传入（它刚查过一次），这里不再重复查库。
+     */
+    public SurveyStatisticsDTO getSurveyStatistics(Survey survey) {
+        return getSurveyStatistics(survey, false);
+    }
+
+    /**
+     * 整份问卷的统计（可指定"只看有效答卷"）。
+     *
+     * @param excludeInvalid true = 剔除可疑答卷（`quality_flag = 1`），
+     *                       统计页的"剔除可疑样本"开关走这条路。
+     * ★ 两个口径在 Redis 里是**两套 key**（`qstats` / `qstats-valid`），与单题接口共用。
+     */
+    public SurveyStatisticsDTO getSurveyStatistics(Survey survey, boolean excludeInvalid) {
+        Integer surveyId = survey.getId();
+        // ★ 用 findBySurveyId（**不带 options**）：统计页不渲染选项文本，
+        //   而 getQuestionsBySurveyId 会为每道选择题再查一次 t_option —— 那是另一种 N+1。
+        List<Question> questions = questionMapper.findBySurveyId(surveyId);
+
+        Map<Integer, List<Map<String, Object>>> chartByQuestion = new LinkedHashMap<>();
+        Map<Integer, List<String>> textByQuestion = new LinkedHashMap<>();
+        List<Integer> missingChart = new ArrayList<>();
+        List<Integer> missingText = new ArrayList<>();
+
+        // ① 先读缓存（excludeInvalid 时走"有效样本"口径）
+        for (Question q : questions) {
+            if (QuestionType.hasOptions(q.getType())) {
+                List<Map<String, Object>> cached = excludeInvalid
+                        ? statsCacheService.getValidQuestionStats(q.getId())
+                        : statsCacheService.getQuestionStats(q.getId());
+                if (cached != null) {
+                    chartByQuestion.put(q.getId(), cached);
+                } else {
+                    missingChart.add(q.getId());
+                }
+            } else {
+                List<String> cached = statsCacheService.getQuestionTexts(q.getId());
+                if (cached != null) {
+                    textByQuestion.put(q.getId(), cached);
+                } else {
+                    missingText.add(q.getId());
+                }
+            }
+        }
+
+        // ② 批量回源：只有真的缺了才查，且一次查完所有缺的题
+        if (!missingChart.isEmpty()) {
+            Map<Integer, List<Map<String, Object>>> grouped = new HashMap<>();
+            List<Map<String, Object>> rows = excludeInvalid
+                    ? answerDetailMapper.countValidByQuestionIds(missingChart)
+                    : answerDetailMapper.countByQuestionIds(missingChart);
+            for (Map<String, Object> row : rows) {
+                Integer qid = ((Number) row.get("qid")).intValue();
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("content", row.get("content"));
+                item.put("count", row.get("cnt"));
+                grouped.computeIfAbsent(qid, k -> new ArrayList<>()).add(item);
+            }
+            for (Integer qid : missingChart) {
+                // ★ 一道题可能一份答卷都没有：GROUP BY 不会给它出行，必须补空列表，
+                //   否则前端拿到 null 而不是"暂无回答数据"。
+                List<Map<String, Object>> list = grouped.getOrDefault(qid, List.of());
+                chartByQuestion.put(qid, list);
+                if (excludeInvalid) {
+                    statsCacheService.putValidQuestionStats(qid, list);
+                } else {
+                    statsCacheService.putQuestionStats(qid, list);
+                }
+            }
+        }
+
+        if (!missingText.isEmpty()) {
+            Map<Integer, List<String>> grouped = new HashMap<>();
+            for (Map<String, Object> row : answerDetailMapper.findTextAnswersByQuestionIds(
+                    missingText, MAX_TEXT_ANSWERS_PER_QUESTION)) {
+                Integer qid = ((Number) row.get("qid")).intValue();
+                grouped.computeIfAbsent(qid, k -> new ArrayList<>()).add((String) row.get("content"));
+            }
+            for (Integer qid : missingText) {
+                List<String> list = grouped.getOrDefault(qid, List.of());
+                textByQuestion.put(qid, list);
+                statsCacheService.putQuestionTexts(qid, list);
+            }
+        }
+
+        // ③ 按题目原顺序组装（前端的渲染顺序完全依赖它）
+        List<SurveyStatisticsDTO.QuestionStats> items = new ArrayList<>(questions.size());
+        for (Question q : questions) {
+            if (QuestionType.hasOptions(q.getType())) {
+                items.add(new SurveyStatisticsDTO.QuestionStats(q, chartByQuestion.get(q.getId()), null));
+            } else {
+                items.add(new SurveyStatisticsDTO.QuestionStats(q, null, textByQuestion.get(q.getId())));
+            }
+        }
+        return new SurveyStatisticsDTO(surveyId, survey.getTitle(), countResponses(surveyId), items);
     }
 
     /** 某问卷的**全部**答卷明细（统计页做整体分析用，注意数据量）。 */
@@ -304,9 +579,30 @@ public class AnswerService {
         return answerDetailMapper.findBySurveyId(surveyId);
     }
 
-    /** 某问卷的答卷列表（答卷时间倒序，统计页的"答卷记录"表格）。 */
-    public List<Answer> listAnswersBySurveyId(Integer surveyId) {
-        return answerMapper.findBySurveyId(surveyId);
+    /**
+     * 某问卷的答卷列表（**分页**，提交时间倒序；统计页的"所有答卷"对话框）。
+     *
+     * ── 为什么必须分页 ────────────────────────────────────
+     *   这条接口原来一次返回整份问卷的全部答卷：两万份答卷就是两万个对象一次性
+     *   读进堆、再序列化成 JSON（实测 P50 239ms，且随答卷数线性增长）。
+     *   分页后每页最多 {@link PageParams#MAX_PAGE_SIZE} 条，内存与响应时间都可预期。
+     *   ★ **导出不走这里**：Excel 导出要的是"整份问卷"，仍由
+     *     {@code AnswerDetailMapper.findBySurveyId} + 两道预检（份数 / 明细行数）承担，
+     *     所以这里的分页不会让导出静默截断。
+     *
+     * ★ total 用**直查**（{@code countBySurveyId}）而不是带缓存的口径：
+     *   分页器的总数必须与当前页数据同源，否则缓存晚 60 秒会让"共 N 份"与最后一页对不上。
+     */
+    public PageResult<Answer> listAnswersPage(Integer surveyId, int pageNum, int pageSize) {
+        int num = PageParams.pageNum(pageNum);
+        int size = PageParams.pageSize(pageSize);
+        int total = answerMapper.countBySurveyId(surveyId);
+        // ★ 偏移量统一走 PageParams.offset：它内部用 long 算，避免 (pageNum-1)*pageSize 溢出成负数
+        long offset = PageParams.offset(num, size);
+        List<Answer> rows = total == 0
+                ? List.of()
+                : answerMapper.findPageBySurveyId(surveyId, offset, size);
+        return new PageResult<>(total, rows, num, size);
     }
 
     /** 某份答卷的全部明细（点开单条答卷看详情）。 */

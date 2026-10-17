@@ -22,10 +22,10 @@ AI 生成问卷、账号与治理后台。
 
 | 维度 | 数量 |
 |---|---|
-| 后端主源文件 | **84** 个 Java 文件 |
-| REST 端点 | **67** 个方法级端点（公开 11 / 需登录 21 / 需登录+归属 15 / 管理员 20） |
-| 数据库 | **12** 张表（MySQL 8，库名 `survey_db`） |
-| 纯单元测试 | **11** 个测试类 / **99** 个用例 |
+| 后端主源文件 | **98** 个 Java 文件 |
+| REST 端点 | **73** 个方法级端点（公开 11 / 需登录 21 / 需登录+归属 21 / 管理员 20） |
+| 数据库 | **13** 张表（MySQL 8，库名 `survey_db`） |
+| 后端测试 | **24** 个测试类 / **204** 个用例（不连库）＋ **1** 个真库集成测试 |
 | 前端 | `views/` **17** 个页面 · `api/` **12** 个模块 · **18** 条具名路由 |
 
 ---
@@ -94,6 +94,7 @@ AI 生成问卷、账号与治理后台。
 | **MyBatis** | 4.0.1 | ORM：**注解式 Mapper，无 XML** |
 | **PageHelper** | 2.1.0 | 分页插件 |
 | **MySQL** | 8.x | 数据库 `survey_db` |
+| **Redis** | 7.x（本地用 Windows 5.0.14.1 构建） | 答卷统计**预聚合缓存** + **分布式限流**计数（Lettuce 客户端）。key 规范、失效策略与压测前后数据见 `docs/Redis-键规范与缓存限流设计.md` |
 | **jjwt** | 0.12.6 | 自研 JWT 认证 |
 | **Knife4j** | 5.6.1 | 接口文档（OpenAPI 3） |
 | **EasyExcel** | 3.3.4 | Excel 导出 |
@@ -158,6 +159,10 @@ AI 生成问卷、账号与治理后台。
 └─────────────────────────────────────────────────────────────┘
 ```
 
+> **存储依赖**：MySQL 8（唯一的持久化存储）+ **Redis**（**旁路、可丢**：答卷统计**预聚合缓存**与**分布式限流计数**）。
+> Redis 不可用时应用**照常启动与服务** —— 缓存退化为直查数据库、限流退化为单机计数
+> （降级与熔断的方向见 `docs/Redis-键规范与缓存限流设计.md`）。
+
 **部署形态**
 
 | 场景 | 形态 |
@@ -198,7 +203,7 @@ CREATE DATABASE survey_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 mysql -u root -p --default-character-set=utf8mb4 survey_db < sql/init.sql
 ```
 
-脚本一次性建好 **12 张表**。它只含表结构、**不含业务数据**，所以建完库还有两步：
+脚本一次性建好 **13 张表**。它只含表结构、**不含业务数据**，所以建完库还有两步：
 
 1. **创建管理员**：系统没有管理员种子数据 —— 先在前端注册一个账号，再执行
    ```sql
@@ -252,7 +257,7 @@ npm run dev
 
 ## 🐳 Docker 一键启动（演示 / 答辩推荐）
 
-数据库、后端、前端一起起；前端 `dist` 已打进 jar，所以**只有一个应用容器**：
+数据库（MySQL）、**Redis**、后端、前端一起起；前端 `dist` 已打进 jar，所以**应用只有一个容器**：
 
 ```bash
 copy .env.example .env      # Git Bash: cp .env.example .env
@@ -266,7 +271,8 @@ docker compose up --build
 |---|---|
 | 应用地址 | <http://localhost:8080> —— 前端与接口同源，不需要再跑 Vite |
 | 数据库 | 容器内 3306，宿主机映射 **3307**（避开本机已装的 MySQL） |
-| 建表 | 首次启动自动执行 `sql/init.sql`（12 张表 + 唯一索引） |
+| Redis | 容器内 6379，宿主机映射 **6380**（避开本机 6379）。只承载统计缓存与限流计数，**不持久化**：它挂了应用照常服务（缓存回源、限流退化为单机计数） |
+| 建表 | 首次启动自动执行 `sql/init.sql`（13 张表 + 唯一索引） |
 | 数据持久化 | 存在 `survey-mysql-data` 卷里：`docker compose down` 不丢，`down -v` 才清空 |
 | 建管理员 | 先注册账号，再 `UPDATE t_user SET role='admin' WHERE username='你的账号';` |
 | 改了代码 | 重新 `docker compose up --build` |
@@ -280,7 +286,7 @@ docker compose up --build
 IdeaProjects/
 ├── README.md                          # 本文件
 ├── sql/                               # 数据库脚本
-│   └── init.sql                       # 建库建表（12 张表，仅结构）
+│   └── init.sql                       # 建库建表（13 张表，仅结构）
 ├── docs/                              # 随仓库入库的文档（见下方"文档索引"）
 │   ├── README.md
 │   ├── 问卷系统-端点权限审计表.md
@@ -304,7 +310,7 @@ IdeaProjects/
 │   │   ├── application.yaml           # 主配置
 │   │   ├── application-local.yml      # 本地配置（已 gitignore，不入库）
 │   │   └── application-prod.yml       # 生产配置
-│   ├── src/test/java/com/survey/      # 纯单元测试（11 个测试类 / 99 个用例）
+│   ├── src/test/java/com/survey/      # 测试（24 个类 / 204 例；另 1 个真库集成测试默认不跑）
 │   └── pom.xml
 │
 └── survey-frontend/                   # 前端应用
@@ -468,19 +474,28 @@ Knife4j（OpenAPI 3）在线文档，覆盖全部 67 个方法级端点；文档
 | 连接池 / 异步线程池 / 错误页脱敏 | `application-prod.yml` | 生产专用 |
 | 异常日志保留天数 | `log.retention-days` | 默认 90 |
 
-### 单元测试
+### 后端测试
 
 ```powershell
 cd survey-backend
 .\mvnw.cmd -o test
 ```
 
-覆盖 11 个测试类、99 个用例，全部为**纯单元测试**（不依赖数据库）；
-唯一需要真实 MySQL 的 `@SpringBootTest` 已在 Surefire 中排除，需要时可单独点名运行：
+覆盖 **24 个测试类 / 204 个用例**，全部**不依赖数据库**（纯单测 + 1 个 MockMvc 全栈类，
+后者把 Mapper 与 DataSource 都 mock 掉）。两个需要真实 MySQL 的类已在 Surefire 中排除：
 
 ```powershell
+# ① contextLoads（连本机 survey_db，只验证 Spring 上下文能起来）
 .\mvnw.cmd -o "-Dtest=SurveyBackendApplicationTests" test
+
+# ② 真库集成测试：注册→建卷→发布→提交→统计→分页→Excel→删除（只连独立的空库 survey_db_test）
+$env:TEST_DB_PASSWORD='<本机库口令>'
+.\mvnw.cmd -o "-Dtest=SurveyFlowIntegrationTest" test
 ```
+
+> 集成测试的库要先建好并导入结构（`sql/init.sql`），且**不要**指向开发/演示库：
+> `CREATE DATABASE survey_db_test ...` → `mysql ... survey_db_test < sql/init.sql`。
+> CI 里由 GitHub Actions 的 MySQL 8 service 自动完成这一步。
 
 ---
 

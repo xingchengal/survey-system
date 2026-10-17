@@ -1,8 +1,10 @@
 # ============================================================
-# 问卷系统 · 一键启动（MySQL 8 + 应用）
+# 问卷系统 · 一键启动（MySQL 8 + Redis + 应用）
 #   1) copy .env.example .env   然后填好三个值
 #   2) docker compose up --build        （首次要几分钟：下 Node/Maven 依赖）
 #   3) 浏览器打开 http://localhost:8080
+#   ★ Redis 只承载"统计预聚合缓存 + 限流计数"，两者都是**可丢数据**：
+#     它挂了应用照常启动与服务（缓存回源、限流退化为单机计数），见 docs/Redis-键规范与缓存限流设计.md
 # ============================================================
 services:
   mysql:
@@ -31,6 +33,32 @@ services:
       retries: 30
       start_period: 30s
 
+  redis:
+    image: redis:7-alpine
+    container_name: survey-redis
+    restart: unless-stopped
+    # ★ 与本地 tools/redis-5.0.14.1/redis.survey.conf 口径一致：
+    #   不落盘（save "" + appendonly no）、256MB 上限、allkeys-lru。
+    #   缓存与限流计数都是可丢数据，持久化只会带来"重启后读到陈旧计数"的麻烦。
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      # ★ 映射到 6380：避免与本机已在跑的 Redis（6379，见 tools/redis-5.0.14.1）冲突
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   app:
     build:
       context: .
@@ -39,6 +67,8 @@ services:
     restart: unless-stopped
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       # ★ 必须显式用 prod：容器里没有 application-local.yml
@@ -50,6 +80,9 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?请先在 .env 里设置 DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?请先在 .env 里设置 JWT_SECRET（至少 32 字符）}
       QWEN_API_KEY: ${QWEN_API_KEY:-}
+      # 覆盖 application.yaml 里默认的 localhost —— 容器内走服务名 redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "8080:8080"
 

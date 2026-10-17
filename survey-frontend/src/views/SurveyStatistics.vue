@@ -6,6 +6,14 @@
         <h2 class="m-0">📈 {{ surveyTitle }} - 统计</h2>
         <div style="color: #666; margin-top: 6px;">
           回收数量：<strong style="color: #f56c6c; font-size: 20px;">{{ responseCount }}</strong> 份
+          <!-- 质控：有可疑样本时才出现，避免"0 份可疑"也占一行 -->
+          <template v-if="quality && quality.suspicious > 0">
+            <el-tag type="warning" size="small" class="ml-8" :title="qualityHint">
+              其中可疑 {{ quality.suspicious }} 份（{{ quality.suspiciousRate }}%）
+            </el-tag>
+            <el-switch v-model="excludeInvalid" class="ml-10" size="small"
+                       active-text="剔除可疑样本" @change="reloadAll" />
+          </template>
         </div>
       </div>
       <div>
@@ -69,6 +77,17 @@
           </template>
         </el-table-column>
       </el-table>
+      <!-- ★ 分页器：没有它时后端一次返回整份问卷的全部答卷（两万份 = 两万个对象） -->
+      <el-pagination
+        v-if="answerPage.total > 0"
+        class="mt-3"
+        background
+        layout="total, prev, pager, next"
+        :current-page="answerPage.pageNum"
+        :page-size="answerPage.pageSize"
+        :total="answerPage.total"
+        @current-change="loadAnswerPage"
+      />
       <el-empty v-if="answers.length === 0" description="暂无答卷" />
     </el-dialog>
 
@@ -107,10 +126,27 @@ export default {
       // 答卷列表
       listVisible: false,
       answers: [],
+      /**
+       * 答卷列表分页状态（与后端 PageResult 字段同名，便于直接回填）。
+       * ★ total 由后端给（直查 count，不走 60 秒缓存），否则"共 N 份"会和最后一页对不上。
+       */
+      answerPage: { pageNum: 1, pageSize: 10, total: 0 },
       // 答卷详情
       detailVisible: false,
       currentAnswerId: null,
-      answerDetails: []
+      answerDetails: [],
+      // ===== 质控（答卷无效样本质控）=====
+      /** 质控摘要：{ total, suspicious, suspiciousRate, reasons:[{code,label,count}] } */
+      quality: null,
+      /** 是否剔除可疑样本（true = 图表只用有效答卷） */
+      excludeInvalid: false
+    }
+  },
+  computed: {
+    /** 可疑原因的中文汇总（鼠标悬停在徽标上能看到原因分布） */
+    qualityHint() {
+      if (!this.quality || !this.quality.reasons || !this.quality.reasons.length) return ''
+      return this.quality.reasons.map(r => `${r.label}：${r.count} 份`).join('；')
     }
   },
   mounted() {
@@ -131,33 +167,29 @@ export default {
   methods: {
     async loadAll() {
       try {
-        // ★ 接口层方法对应（都是 GET + 自动 parse 响应体）；
-        //   本方法里一共 5 个调用点（前 3 个 + 循环里的单题统计/填空文本）：
-        //   /api/survey/{id}       → api.survey.detail(id)
-        //   /api/answer/count/{id} → api.answer.count(id)      （后端直接返回一个数字）
-        //   /api/question/list/{id}→ api.question.list(id)     （题目数组，带 type / options）
-        // 1. 问卷信息
-        const survey = await api.survey.detail(this.surveyId)
-        this.surveyTitle = survey.title
+        // ★ 切换"剔除可疑样本"会重跑本方法：先把旧图表 dispose 掉 ——
+        //   否则 v-for 重建 DOM 后，chart 还挂在已脱离文档的旧元素上，图表会变空白。
+        this.disposeCharts()
 
-        // 2. 回收数量
-        this.responseCount = await api.answer.count(this.surveyId)
+        // ★ 一次请求取回全部：问卷标题 + 答卷数 + 题目列表 + 每题的统计/文本。
+        //   原实现是 `1 + 1 + 1 + N` 次请求，且最后一步是 for + await **串行** ——
+        //   N 道题就要等 N 个来回，延迟直接叠加（10 题约等于 10 倍往返）。
+        //   现在只发这 1 次（后端见 AnswerController.statisticsBySurvey）。
+        // ★ excludeInvalid：剔除可疑样本时后端走"只统计有效答卷"的口径（另一套缓存 key）。
+        const data = await api.answer.surveyStatistics(this.surveyId, this.excludeInvalid)
+        this.surveyTitle = data.title
+        this.responseCount = data.answerCount
 
-        // 3. 题目列表
-        const questions = await api.question.list(this.surveyId)
+        // 后端每题返回 { question, chartData, textAnswers }；
+        // 摊平成模板一直用的结构（题目字段直接铺开 + 两个统计字段）。
+        this.questions = (data.questions || []).map(item => ({
+          ...item.question,
+          chartData: item.chartData,
+          textAnswers: item.textAnswers
+        }))
 
-        // 4. 逐题加载统计
-        // ⚠️ 这里是**串行请求**（for + await），N 道题就要等 N 个来回，属于待优化的 N+1 问题。
-        //    暂不重构（后续单独处理）。
-        for (const q of questions) {
-          if (q.type === 1 || q.type === 2) {
-            q.chartData = await api.answer.statistics(q.id)
-          } else {
-            q.textAnswers = await api.answer.texts(q.id)
-          }
-        }
-
-        this.questions = questions
+        // 质控摘要（可疑份数 / 原因分布）：独立请求，失败不影响主流程
+        this.loadQuality()
 
         // ↓↓↓ 下面是纯前端图表渲染 ↓↓↓
         this.$nextTick(() => {
@@ -172,8 +204,30 @@ export default {
       }
     },
 
-    setChartRef(el, questionId) {
-      if (!el) return
+    /** 质控摘要（失败就静默：它只是提示，不该让统计页整体报错） */
+    async loadQuality() {
+      try {
+        this.quality = await api.answer.quality(this.surveyId)
+      } catch {
+        this.quality = null
+      }
+    },
+
+    /** "剔除可疑样本"开关切换：重新拉一遍（图和文本都可能是另一个口径） */
+    reloadAll() {
+      this.loadAll()
+    },
+
+    /** 释放所有图表实例并移除 resize 监听（切换口径 / 重新加载前必须调用，否则图表会空白） */
+    disposeCharts() {
+      Object.values(this.chartInstances).forEach(item => {
+        if (item.resizeHandler) window.removeEventListener('resize', item.resizeHandler)
+        if (item.chart) item.chart.dispose()
+      })
+      this.chartInstances = {}
+    },
+
+    setChartRef(el, questionId) {      if (!el) return
       if (!this.chartInstances[questionId]) {
         // resizeHandler 与 chart 一起存，卸载时才能移除监听（见 beforeUnmount）
         this.chartInstances[questionId] = { el: null, chart: null, resizeHandler: null }
@@ -233,14 +287,30 @@ export default {
       window.addEventListener('resize', ref.resizeHandler)
     },
 
-    // 打开答卷列表
+    // 打开答卷列表：从第 1 页开始，成功了才开弹窗（失败提示由接口层弹）
     async openAnswerList() {
-      try {
-        //   api.answer.list() 失败时提示由接口层弹；失败时不打开弹窗。
-        this.answers = await api.answer.list(this.surveyId)
+      if (await this.loadAnswerPage(1)) {
         this.listVisible = true
+      }
+    },
+
+    /**
+     * 拉取一页答卷（分页器翻页也走这里）。
+     *
+     * ★ 后端返回 `{ total, list, pageNum, pageSize }`（PageResult）：
+     *   `answers` 只放**当前页**，`total` 交给分页器 —— 不要再把整个数组塞进内存。
+     * ★ 返回 true/false 供 openAnswerList 判断"要不要开弹窗"。
+     */
+    async loadAnswerPage(pageNum) {
+      try {
+        const res = await api.answer.list(this.surveyId, pageNum, this.answerPage.pageSize)
+        this.answers = res.list
+        this.answerPage.total = res.total
+        this.answerPage.pageNum = res.pageNum
+        return true
       } catch {
         // 提示由接口层统一弹出
+        return false
       }
     },
 

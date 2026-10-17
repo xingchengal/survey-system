@@ -53,6 +53,13 @@ class QuestionServiceTest {
     private QuestionMapper questionMapper;
     @Mock
     private OptionMapper optionMapper;
+    /**
+     * ★ 保存题目成功后要生成版本快照，所以 QuestionService 多了这个依赖。
+     * 这里给它一个 mock：本类断言的是"保存/校验"逻辑，版本快照本身由 SurveyVersionServiceTest 覆盖。
+     * 不注入的话该字段是 null，saveQuestions 走到最后会 NPE。
+     */
+    @Mock
+    private SurveyVersionService surveyVersionService;
 
     @InjectMocks
     private QuestionService questionService;

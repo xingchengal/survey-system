@@ -166,7 +166,13 @@ export default {
       submitted: false,
       allDone: false,
       countdown: '',
-      countdownTimer: null
+      countdownTimer: null,
+      /**
+       * 打开答题页的时间戳（毫秒）。
+       * ★ 唯一用途：提交时上报"答题耗时"，给后端的"答题过快"质控判定。
+       *   它是**客户端值、可伪造** —— 后端只当提示，不当安全边界。
+       */
+      startedAt: 0
     }
   },
   computed: {
@@ -195,6 +201,8 @@ export default {
   },
   mounted() {
     this.shareCode = this.$route.params.shareCode
+    // ★ 从"打开页面"开始计时（而不是等题目加载完）：用户的阅读时间也该算进答题耗时
+    this.startedAt = Date.now()
     this.loadSurvey()
   },
   beforeUnmount() {
@@ -478,7 +486,10 @@ export default {
         //     否则点了没反应等于功能坏了。该接口在白名单里，不会返回 401，
         //     所以不传 silent 也不会触发"登录过期跳转"。
         // ★ 后端契约：成功 200、失败 400 + message（由 http.js 弹红字）。
-        await api.answer.submitByShareCode(this.shareCode, details)
+        // ★ 上报答题耗时（毫秒）：后端的"答题过快"质控规则靠它。
+        //   没打开计时（startedAt=0）就不传 —— 后端会当作"未上报"、不判这条规则。
+        const durationMs = this.startedAt ? Math.max(0, Date.now() - this.startedAt) : null
+        await api.answer.submitByShareCode(this.shareCode, details, durationMs)
         this.submitted = true
       } catch {
         // 失败红字已由 http.js 弹出；这里只做流程控制：

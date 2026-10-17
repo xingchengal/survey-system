@@ -71,19 +71,23 @@
     </el-row>
 
     <!-- 中间：状态分布图 + 系统信息 -->
-    <el-row class="mt-20" :gutter="20">
+    <el-row class="mt-20 equal-height-row" :gutter="20">
       <el-col :span="10">
-        <el-card style="height: 500px;">
+        <!-- ★ 两栏等高由 .equal-height-row 的 flex 拉伸保证（见 <style>）：
+             原先两边都写死 500px，右侧技术栈 + 功能标签超出卡片高度、
+             被 el-card 的 overflow:hidden 裁掉（"核心功能"只露一行） -->
+        <el-card>
           <template #header>
             <span class="text-bold">📊 问卷状态分布</span>
           </template>
-          <div v-if="stats.total > 0" ref="pieRef" style="width: 100%; height: 400px;"></div>
+          <div v-if="stats.total > 0" ref="pieRef" style="width: 100%; height: 520px;"></div>
           <el-empty v-else description="暂无问卷数据" :image-size="80" />
         </el-card>
       </el-col>
 
       <el-col :span="14">
-        <el-card style="height: 500px;">
+        <!-- ★ 不写死高度：内容有多长卡片就多长，避免新加的技术栈/功能标签被裁掉 -->
+        <el-card>
           <template #header>
             <div class="flex-between">
               <span class="text-bold">📌 系统信息</span>
@@ -105,7 +109,7 @@
           <!-- 基础信息 -->
           <el-descriptions :column="2" border size="small" style="margin-bottom: 12px;">
             <el-descriptions-item label="系统名称">问卷调查系统</el-descriptions-item>
-            <el-descriptions-item label="系统版本">v2.1.0</el-descriptions-item>
+            <el-descriptions-item label="系统版本">v2.2.0</el-descriptions-item>
             <el-descriptions-item label="当前用户">{{ currentUser.nickname || currentUser.username }}</el-descriptions-item>
             <el-descriptions-item label="登录时间">{{ loginTime }}</el-descriptions-item>
           </el-descriptions>
@@ -119,18 +123,18 @@
               Vue 3 · Vite · Element Plus · ECharts · qrcode · Vue Router
             </el-descriptions-item>
             <el-descriptions-item label="后端">
-              Spring Boot 4 · MyBatis · PageHelper · OkHttp · JJWT
+              Spring Boot 4 · MyBatis · PageHelper · OkHttp · JJWT · Redis（Lettuce）
             </el-descriptions-item>
             <el-descriptions-item label="数据库">
-              MySQL 8.x（survey_db · 12 张表）
+              MySQL 8.x（survey_db · 13 张表）
             </el-descriptions-item>
             <el-descriptions-item label="安全机制">
               <!-- 注意：这里是"系统信息"卡片的技术栈展示，改动实现时要同步改这里，
                    否则会出现"代码用 PBKDF2、界面还写 MD5"这类不一致 -->
-              JWT 双 token（access 12h + refresh 7d）· RBAC 权限 · PBKDF2 加盐哈希 · HttpOnly + SameSite Cookie · 路由守卫
+              JWT 双 token（access 12h + refresh 7d）· RBAC 权限 · PBKDF2 加盐哈希 · 滑块验证码 · 令牌吊销（token_valid_after）· HttpOnly + SameSite Cookie · 路由守卫
             </el-descriptions-item>
             <el-descriptions-item label="进阶技术">
-              Spring AOP · @Scheduled 定时任务 · @Async 异步处理 · 全局异常 · 内存固定窗口限流
+              Spring AOP · @Scheduled 定时任务 · @Async 异步处理 · 全局异常 · Redis 分布式限流 + 统计缓存 + 熔断降级
             </el-descriptions-item>
             <el-descriptions-item label="AI 能力">
               Qwen2.5-7B-Instruct（SiliconFlow 硅基流动）
@@ -155,6 +159,8 @@
             <el-tag size="small" effect="plain">数据可视化</el-tag>
             <el-tag size="small" effect="plain">Excel 导出</el-tag>
             <el-tag size="small" effect="plain">回收站</el-tag>
+            <el-tag size="small" effect="plain">版本历史</el-tag>
+            <el-tag size="small" effect="plain">答卷质控</el-tag>
             <el-tag size="small" effect="plain">站内通知</el-tag>
             <el-tag size="small" effect="plain">操作日志</el-tag>
             <el-tag size="small" effect="plain">异常日志</el-tag>
@@ -336,6 +342,16 @@ export default {
 </script>
 
 <style scoped>
+/* 两栏等高：el-row 是 flex，把 el-col 也变成 flex 容器后，
+   里面的 el-card 会拉伸到整行高度 —— 这样右侧「系统信息」可以随内容变高，
+   左侧饼图卡自动跟着变高，不需要两边各写死一个猜出来的 px 值。 */
+.equal-height-row :deep(.el-col) {
+  display: flex;
+}
+.equal-height-row :deep(.el-card) {
+  width: 100%;
+}
+
 .stat-card :deep(.el-card__body) {
   display: flex;
   align-items: center;

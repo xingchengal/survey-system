@@ -1,10 +1,10 @@
 -- ============================================================
--- 问卷系统 · 数据库结构（MySQL 8，库名 survey_db，共 12 张表）
+-- 问卷系统 · 数据库结构（MySQL 8，库名 survey_db，共 13 张表）
 -- ============================================================
 -- 来源：mysqldump --no-data --default-character-set=utf8mb4 survey_db
 --       ★ 但**不是**原样 dump —— 里面手工补了"个人中心即将用到"的结构
 --         （t_login_log 与 t_user 的两列），所以它代表**目标结构**，比任一时刻的现库更全。
--- 更新日期：2026-10-09（第十九轮收工时）
+-- 更新日期：2026-10-17（第二十八轮：补性能索引；此前已含 t_survey_version 与答卷质控 3 列）
 --
 -- 为什么要有这个文件（评审【工程性】+《待解决问题》C1：仓库里 0 个 .sql 文件，
 -- 换台机器/重装数据库后无法重建 survey_db，答辩演示换机器时有风险）：
@@ -22,12 +22,20 @@
 --      POST /api/template-seeder/init 即可补回 31 个模板。
 --      ★ 该接口在 prod profile 下**不注册**（@Profile("!prod")），需在 local 下调用。
 --
--- ★ 表清单（12 张）：
+-- ★ 表清单（13 张）：
 --   t_user 用户      / t_survey 问卷        / t_question 题目      / t_option 选项
 --   t_answer 答卷    / t_answer_detail 明细 / t_notification 通知  / t_announcement 公告
 --   t_operation_log 操作日志 / t_error_log 异常日志
 --   t_refresh_token 刷新令牌（"记住我"，第十九轮）
 --   t_login_log 登录日志（个人中心"最近登录时间/IP"用）
+--   t_survey_version 问卷版本快照（第二十五轮）
+--
+-- ★ 老库升级按顺序执行（每个都可重复执行，脚本头部写了撤销方式）：
+--   migration-personal-center.sql  → 个人中心两列 + t_login_log
+--   migration-answer-unique-key.sql → t_answer 唯一键 uk_survey_user
+--   migration-survey-version.sql    → t_survey_version
+--   migration-answer-quality.sql    → t_answer 质控 3 列（★ 不可重复执行，先查列）
+--   migration-perf-indexes.sql      → 性能索引（第二十八轮）
 --
 -- ★ 与 sql/migration-personal-center.sql 的分工：
 --   本文件是**全量**（新建库直接用它 → 得到最终结构）；
@@ -72,9 +80,16 @@ CREATE TABLE `t_answer` (
   `survey_id` int NOT NULL COMMENT '所属问卷ID',
   `user_id` int DEFAULT NULL COMMENT '填写者ID，NULL表示匿名填写',
   `submit_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '提交时间',
+  `duration_ms` int DEFAULT NULL COMMENT '答题耗时（毫秒）。由答题页上报；NULL=未上报。★ 客户端值，可伪造，只作质控信号、不作安全边界',
+  `quality_flag` tinyint NOT NULL DEFAULT '0' COMMENT '质控标记：0=正常，1=可疑（命中任一无效样本规则，规则码见 quality_reasons）',
+  `quality_reasons` varchar(200) DEFAULT NULL COMMENT '命中的规则码，逗号分隔：TOO_FAST / STRAIGHT_LINE / OPTION_MISMATCH / DUP_TITLE_CONFLICT',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_survey_user` (`survey_id`,`user_id`),
-  KEY `idx_survey_id` (`survey_id`),
+  -- ★ 答卷列表分页 / 质控样本 / 导出预检：都是 "WHERE survey_id = ? ORDER BY submit_time DESC"。
+  --   等值列 + 排序列放同一个索引，避免 filesort；深度翻页也不用先扫全表再排序。
+  --   原来的单列 idx_survey_id 已被 uk_survey_user 的最左前缀覆盖，不再单独保留
+  --   （老库升级见 sql/migration-perf-indexes.sql）。
+  KEY `idx_survey_submit_time` (`survey_id`,`submit_time`),
   KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3254 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='答卷记录表';
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -215,8 +230,28 @@ CREATE TABLE `t_survey` (
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',
   PRIMARY KEY (`id`),
   UNIQUE KEY `share_code` (`share_code`),
+  -- ★ 管理端问卷列表 / 回收站 / 模板广场都按 "created_time DESC" 排序（见 SurveyMapper 的 5 条查询）
+  KEY `idx_created_time` (`created_time`),
   KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=747 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_survey_version` (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '版本ID',
+  `survey_id` int NOT NULL COMMENT '所属问卷ID',
+  `version_no` int NOT NULL COMMENT '版本号（同一问卷内从 1 递增，不因删除旧版本而回退）',
+  `title` varchar(200) DEFAULT NULL COMMENT '快照时的问卷标题（改标题不生成版本，但对比时能看到它）',
+  `description` varchar(500) DEFAULT NULL COMMENT '快照时的问卷描述',
+  `question_count` int NOT NULL DEFAULT '0' COMMENT '题目数量（列表展示用，免得去解析 JSON）',
+  `questions_json` mediumtext NOT NULL COMMENT '题目与选项的完整快照（JSON，按 sort_order 排序）',
+  `change_summary` varchar(500) DEFAULT NULL COMMENT '相对上一版本的变更摘要（自动生成，便于列表直接展示）',
+  `created_by` int DEFAULT NULL COMMENT '操作人ID',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '生成时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_survey_version` (`survey_id`,`version_no`),
+  KEY `idx_survey_id` (`survey_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷版本快照表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;

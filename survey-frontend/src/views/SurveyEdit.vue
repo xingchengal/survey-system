@@ -37,6 +37,8 @@
           @click="publishSurvey"
         >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
         <el-tag class="ml-10" v-else-if="surveyInfo.status === 1" type="success">已发布（可继续修改）</el-tag>
+        <!-- 历史版本：回收站里禁用（回滚走的是"全量覆盖式保存"，在回收站问卷上执行会让历史答卷的 question_id 悬空） -->
+        <el-button class="ml-10" :disabled="inRecycleBin" @click="openVersions">历史版本</el-button>
       </div>
     </div>
 
@@ -140,6 +142,70 @@
       <el-button type="success" plain @click="addQuestion(2)">多选题</el-button>
       <el-button type="warning" plain @click="addQuestion(3)">单行输入</el-button>
     </div>
+    <!-- ===== 历史版本对话框 ===== -->
+    <el-dialog v-model="versionVisible" title="历史版本" width="820px">
+      <div style="color:#666; font-size:13px; margin-bottom:12px;">
+        每次「保存」只要题目结构有变化就会留一个版本（每份问卷最多保留 50 个）。
+        ★ 回滚会生成一个新版本，历史不会丢 —— 回滚错了还能再回滚回去。
+      </div>
+
+      <el-table class="w-full" :data="versions" stripe border max-height="300"
+                empty-text="还没有版本（保存一次题目后才会生成）">
+        <el-table-column label="版本" width="80" align="center">
+          <template #default="{ row }">v{{ row.versionNo }}</template>
+        </el-table-column>
+        <el-table-column prop="createdTime" label="生成时间" width="170" />
+        <el-table-column prop="questionCount" label="题数" width="70" align="center" />
+        <el-table-column prop="changeSummary" label="变更" min-width="240" show-overflow-tooltip />
+        <el-table-column label="操作" width="100" align="center">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small"
+                       :loading="rollingBack === row.id"
+                       @click="rollbackVersion(row)">回滚</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 版本对比 -->
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px;">
+        <span style="color:#666;">版本对比：</span>
+        <el-select v-model="diffFrom" placeholder="旧版本" size="small" style="width:120px;">
+          <el-option v-for="v in versions" :key="v.id" :label="'v' + v.versionNo" :value="v.id" />
+        </el-select>
+        <span>→</span>
+        <el-select v-model="diffTo" placeholder="新版本" size="small" style="width:120px;">
+          <el-option v-for="v in versions" :key="v.id" :label="'v' + v.versionNo" :value="v.id" />
+        </el-select>
+        <el-button size="small" type="primary" plain
+                   :disabled="!diffFrom || !diffTo || diffFrom === diffTo"
+                   @click="doDiff">对比</el-button>
+      </div>
+
+      <div v-if="versionDiff" style="margin-top:12px;">
+        <el-alert v-if="versionDiff.titleChanged" type="info" :closable="false" style="margin-bottom:8px;"
+                  :title="`标题：${versionDiff.titleFrom || '（空）'} → ${versionDiff.titleTo || '（空）'}`" />
+        <div v-if="!versionDiff.added.length && !versionDiff.removed.length && !versionDiff.modified.length"
+             style="color:#67c23a;">两个版本的题目结构完全一致</div>
+        <div v-else>
+          <div v-if="versionDiff.added.length" style="margin-bottom:8px;">
+            <el-tag type="success" size="small">新增 {{ versionDiff.added.length }}</el-tag>
+            <span v-for="x in versionDiff.added" :key="'a' + x.questionId" style="margin-left:8px;">{{ x.title }}</span>
+          </div>
+          <div v-if="versionDiff.removed.length" style="margin-bottom:8px;">
+            <el-tag type="danger" size="small">删除 {{ versionDiff.removed.length }}</el-tag>
+            <span v-for="x in versionDiff.removed" :key="'r' + x.questionId" style="margin-left:8px;">{{ x.title }}</span>
+          </div>
+          <div v-if="versionDiff.modified.length">
+            <el-tag type="warning" size="small">修改 {{ versionDiff.modified.length }}</el-tag>
+            <div v-for="x in versionDiff.modified" :key="'m' + x.questionId"
+                 style="margin-left:8px; margin-top:4px;">
+              {{ x.title }}
+              <span style="color:#999;">（{{ x.changes.join('；') }}）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -187,7 +253,18 @@ export default {
        *   一句话都不报，症状却是"选了结束却跳到某道题"。
        *   这里从 -1000 起留出安全间隔；真实 id 全是正数，负数区只属于前端。
        */
-      tempQuestionId: -1000
+      tempQuestionId: -1000,
+
+      // ===== 历史版本（编辑历史 / 对比 / 回滚）=====
+      versionVisible: false,
+      versions: [],
+      /** 对比用的两个版本 id（旧 → 新） */
+      diffFrom: null,
+      diffTo: null,
+      /** 对比结果（后端 SurveyVersionDiff） */
+      versionDiff: null,
+      /** 正在回滚的版本 id（用于按钮 loading，避免连点两次回滚） */
+      rollingBack: null
     }
   },
   computed: {
@@ -479,6 +556,49 @@ export default {
       if (mismatch > 0) {
         ElMessage.error(`有 ${mismatch} 道题的 id 与后端不一致，跳转规则可能不准确，请重新检查后再保存`)
       }
+    },
+
+    // ===== 历史版本 =====
+
+    async openVersions() {
+      this.versionVisible = true
+      await this.loadVersions()
+    },
+
+    async loadVersions() {
+      this.versions = await api.survey.versions(this.surveyId)
+      // 默认预选"最新两版"做对比，省得用户每次手选
+      if (this.versions.length >= 2 && !this.diffFrom && !this.diffTo) {
+        this.diffTo = this.versions[0].id
+        this.diffFrom = this.versions[1].id
+      }
+      this.versionDiff = null
+    },
+
+    async rollbackVersion(v) {
+      try {
+        await this.$confirm(
+          `把题目恢复到 v${v.versionNo}？\n\n会生成一个新版本，历史不会丢（回滚错了还能再回滚回来）。`,
+          '回滚版本',
+          { type: 'warning', confirmButtonText: '确定回滚', cancelButtonText: '取消' }
+        )
+      } catch {
+        return // 用户取消
+      }
+      this.rollingBack = v.id
+      try {
+        const created = await api.survey.rollbackVersion(v.id)
+        ElMessage.success(`已回滚到 v${v.versionNo}，生成新版本 v${created.versionNo}`)
+        await this.loadVersions()
+        // ★ 必须重新加载题目：编辑器里还是回滚前的数组，此时直接点保存会把回滚结果覆盖掉
+        await this.loadQuestions()
+      } finally {
+        this.rollingBack = null
+      }
+    },
+
+    async doDiff() {
+      this.versionDiff = await api.survey.versionDiff(this.diffFrom, this.diffTo)
     },
 
     async publishSurvey() {

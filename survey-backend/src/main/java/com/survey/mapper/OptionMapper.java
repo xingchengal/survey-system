@@ -41,6 +41,17 @@ public interface OptionMapper {
     List<Option> findByQuestionId(Integer questionId);
 
     /**
+     * ★ 批量查多道题的选项 —— 质控判定要在"一次提交"里同时看所有题的选项。
+     * ★ 用一条 SQL 而不是逐题查：提交是热路径，N 道题各查一次就是 N 次往返。
+     *
+     * @param questionIds 题目 id 列表（调用方保证非空）
+     */
+    @Select("<script>SELECT * FROM t_option WHERE question_id IN "
+            + "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> "
+            + "ORDER BY question_id, sort_order ASC</script>")
+    List<Option> findByQuestionIds(@Param("questionIds") List<Integer> questionIds);
+
+    /**
      * 删掉某题的全部选项。
      * ★ QuestionService.saveQuestions() 保存选择题时是"先删后插"，
      *   所以每次保存 option.id 都会变（这是有意的简化实现）。

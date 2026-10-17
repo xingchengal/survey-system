@@ -1,12 +1,16 @@
 package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
+import com.survey.common.PageParams;
+import com.survey.common.PageResult;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Question;
+import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
+import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
 import com.survey.service.QuestionService;
 import com.survey.service.SurveyService;
@@ -38,7 +42,7 @@ import java.util.*;
  *                  它是"答题人身份落库（t_answer.user_id）/ 答卷防重 / 我的答题历史"的实现路径，
  *                  删掉会把这条路径一起堵死。完整理由（含答卷防重的现状说明）写在下面
  *                  submit() 的 javadoc 里 —— **改它之前先读那段**。
- *   需登录+归属  : GET /count|/statistics|/texts|/list|/detail|/export
+ *   需登录+归属  : GET /count|/statistics|/texts|/statistics/survey|/list|/detail|/export|/quality
  *
  * ── 两条重要约定（改这几个端点前务必看）──────────────────
  *   1. 归属校验集中在私有方法 requireSurveyOwnership()：admin 直接放行，
@@ -74,6 +78,25 @@ public class AnswerController {
      */
     private static final int MAX_EXPORT_DETAILS = 50000;
 
+    /**
+     * 答题耗时的上限（24 小时）。
+     * ★ 前端上报的是**客户端值**：可能是负数，也可能是天文数字。
+     *   直接写库会把 int 列写爆（超过 2^31-1 会抛异常 → 500），
+     *   这里夹到 [0, 24h]：既不会 500，也不让异常值污染"是否答得太快"的判定。
+     */
+    private static final long MAX_DURATION_MS = 24L * 60 * 60 * 1000;
+
+    /** 把前端上报的耗时夹到合理区间；null 原样返回（= 未上报）。 */
+    private static Integer clampDuration(Long durationMs) {
+        if (durationMs == null) {
+            return null;
+        }
+        if (durationMs < 0) {
+            return 0;
+        }
+        return (int) Math.min(durationMs, MAX_DURATION_MS);
+    }
+
     @Autowired
     private AnswerService answerService;
 
@@ -82,6 +105,10 @@ public class AnswerController {
 
     @Autowired
     private QuestionService questionService;
+
+    /** 质控摘要（可疑样本数 / 原因分布 / 最近样本）。 */
+    @Autowired
+    private AnswerQualityService answerQualityService;
 
     /**
      * ★ 归属校验：确认当前登录用户就是这份问卷的作者（管理员放行）。
@@ -135,25 +162,27 @@ public class AnswerController {
     @PostMapping("/submit/{surveyId}")
     public String submit(@PathVariable Integer surveyId,
                          @RequestBody List<AnswerDetail> details,
-                         @RequestHeader(value = "X-User-Id", required = false) Integer userId) {
+                         @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                         @RequestParam(value = "durationMs", required = false) Long durationMs) {
         // ★ 与下面 submitByShareCode 保持一致：只有【已发布】(status=1) 的问卷才收答卷。
         //   （"回收站里的问卷不能收答卷"由 AnswerService.submit 的四道校验兜住 —— 不变量收口在 Service，
         //     这里的判断只是为了给出更早、更明确的 400 文案。）
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
-        answerService.submit(surveyId, userId, details);
+        answerService.submit(surveyId, userId, details, clampDuration(durationMs));
         return "提交成功";
     }
 
     @Operation(summary = "提交答卷（匿名访客，通过分享码）")
     @PostMapping("/submit-share/{shareCode}")
     public String submitByShareCode(@PathVariable String shareCode,
-                                    @RequestBody List<AnswerDetail> details) {
+                                    @RequestBody List<AnswerDetail> details,
+                                    @RequestParam(value = "durationMs", required = false) Long durationMs) {
         Survey survey = surveyService.getByShareCode(shareCode);
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
-        answerService.submit(survey.getId(), null, details);
+        answerService.submit(survey.getId(), null, details, clampDuration(durationMs));
         return "提交成功";
     }
 
@@ -170,13 +199,55 @@ public class AnswerController {
     @GetMapping("/statistics/{questionId}")
     public List<Map<String, Object>> statistics(@PathVariable Integer questionId,
                                                 @RequestHeader(value = "X-User-Id", required = false) Integer userId,
-                                                @RequestHeader(value = "X-User-Role", required = false) String role) {
+                                                @RequestHeader(value = "X-User-Role", required = false) String role,
+                                                @RequestParam(value = "excludeInvalid", required = false,
+                                                        defaultValue = "false") boolean excludeInvalid) {
         Question question = questionService.getById(questionId);
         if (question == null) {
             throw new BizException("题目不存在");
         }
         requireSurveyOwnership(question.getSurveyId(), userId, role);
-        return answerService.countQuestion(questionId);
+        return answerService.countQuestion(questionId, excludeInvalid);
+    }
+
+    /**
+     * 整份问卷的统计（一次取回）—— 统计页专用，替代"逐题请求"。
+     *
+     * ★ 原来统计页发 `1（问卷详情）+ 1（答卷数）+ 1（题目列表）+ N（逐题统计/文本）` 次请求，
+     *   而且是 `for + await` **串行**：N 道题就要等 N 个来回。现在只发这 1 次。
+     * ★ 路径 `/statistics/survey/{surveyId}` 与 `/statistics/{questionId}` **不冲突**：
+     *   后者只匹配"两段"，这里是三段；Spring 的路径匹配按段数比较，
+     *   不会把 "survey" 当成 questionId 去做整数转换。
+     */
+    @Operation(summary = "整份问卷的统计（一次取回：题目 + 选项分布 + 填空文本 + 答卷数）")
+    @GetMapping("/statistics/survey/{surveyId}")
+    public SurveyStatisticsDTO statisticsBySurvey(@PathVariable Integer surveyId,
+                                                  @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                                                  @RequestHeader(value = "X-User-Role", required = false) String role,
+                                                  @RequestParam(value = "excludeInvalid", required = false,
+                                                          defaultValue = "false") boolean excludeInvalid) {
+        Survey survey = requireSurveyOwnership(surveyId, userId, role);
+        return answerService.getSurveyStatistics(survey, excludeInvalid);
+    }
+
+    /**
+     * 答卷质控摘要（统计页顶部显示"其中可疑 N 份"）。
+     *
+     * ── ★ 只打标、不删除 ────────────────────────────────
+     *   可疑答卷仍然在库里、仍然计入"答卷数"；是否剔除由统计接口的 `excludeInvalid` 决定。
+     *   自动删除会让作者**无法复核**被判无效的答卷（也没法申诉"我这明明是认真填的"）。
+     *
+     * ── 返回什么 ────────────────────────────────────────
+     *   `{ total, suspicious, suspiciousRate, reasons:[{code,label,count}], samples:[最近 50 条] }`
+     *   — 规则码与中文说明的唯一口径在 `common/AnswerQuality`。
+     */
+    @Operation(summary = "答卷质控摘要（可疑样本数 / 原因分布 / 最近样本）")
+    @GetMapping("/quality/{surveyId}")
+    public Map<String, Object> quality(@PathVariable Integer surveyId,
+                                       @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                                       @RequestHeader(value = "X-User-Role", required = false) String role) {
+        requireSurveyOwnership(surveyId, userId, role);
+        return answerQualityService.summarize(surveyId, answerService.countResponses(surveyId));
     }
 
     @Operation(summary = "填空题的文字回答列表")
@@ -192,13 +263,27 @@ public class AnswerController {
         return answerService.listTextAnswers(questionId);
     }
 
-    @Operation(summary = "查询某问卷的所有答卷")
+    /**
+     * 某问卷的答卷列表（**分页**）。
+     *
+     * ★ 原来一次性返回全部答卷：两万份答卷时响应体是两万个对象（实测 P50 239ms），
+     *   既拖慢统计页，也让"点开所有答卷"变成一个能拖垮服务端的操作。
+     *   ⇒ 改成 {@code PageResult<Answer>}（total / list / pageNum / pageSize），
+     *   每页条数由 {@link PageParams#pageSize} 夹在 [1, 100]，页码 ≥ 1。
+     * ★ 前端对应改动：`SurveyStatistics.vue` 的"所有答卷"对话框加了分页器；
+     *   `api/answer.js` 的 `list()` 多了两个参数（默认 1 / 10，与后端夹紧口径一致）。
+     * ★ 归属校验仍在：先 {@code requireSurveyOwnership} 再查，避免"先查后判"。
+     */
+    @Operation(summary = "查询某问卷的答卷列表（分页）")
     @GetMapping("/list/{surveyId}")
-    public List<Answer> listAnswers(@PathVariable Integer surveyId,
-                                    @RequestHeader(value = "X-User-Id", required = false) Integer userId,
-                                    @RequestHeader(value = "X-User-Role", required = false) String role) {
+    public PageResult<Answer> listAnswers(
+            @PathVariable Integer surveyId,
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+            @RequestHeader(value = "X-User-Role", required = false) String role) {
         requireSurveyOwnership(surveyId, userId, role);
-        return answerService.listAnswersBySurveyId(surveyId);
+        return answerService.listAnswersPage(surveyId, pageNum, pageSize);
     }
 
     @Operation(summary = "查询某份答卷的详细内容")

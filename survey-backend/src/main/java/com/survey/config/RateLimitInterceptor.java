@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -16,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 关键接口的限流拦截器（内存固定窗口计数）。
+ * 关键接口的限流拦截器（固定窗口计数；**计数在 Redis**，Redis 不可用时回退进程内计数）。
  *
  * ── 为什么需要它 ──────────────────────────────────────
  *   关键入口都不能没有配额，例如：
@@ -28,13 +29,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  *     4. `POST /api/answer/submit-share/{code}` —— 公开、不需凭证，可被灌垃圾答卷
  *   完整规则清单见下方 RULES。
  *
- * ── 实现取舍（为什么不用 Redis / Bucket4j）──────────────
- *   · 本项目是**单实例部署**（前端 dist 打进后端 static），内存计数完全够用；
- *     引入 Redis 会平白增加部署复杂度，与"保持项目轻量、零新增依赖"的既有取向冲突。
+ * ── 计数放在哪（★ 改这里之前先读完）────────────────────
+ *   · **主路径是 Redis**（{@code RedisRateLimiter}：Lua `INCR` + `PEXPIRE`）：
+ *     配额在多实例之间共享。下面那个进程内 counters **已经不是主路径** ——
+ *     它只活在单个 JVM 里，多实例部署时每个实例各拦一份、配额被放大 N 倍，
+ *     而"多实例"恰恰是这条规则真正被需要的时候。
+ *   · **Redis 不可用时回退进程内计数，而不是放行**：宁可退化成"单机限流"，
+ *     也不能出现"Redis 一挂就等于不限流"。代价（如实说明）：降级期间多实例的配额
+ *     会被放大，且实例重启会重置计数。
  *   · 用**固定窗口**而非滑动窗口：实现简单、无内存膨胀风险。
  *     代价是窗口边界最多放行 2 倍配额（例如 10 次/分的规则，跨窗口瞬间最多 20 次）——
- *     对"防暴力破解、防刷"这个目标来说完全可接受。
- *   · ★ 局限：**多实例部署时这份计数不共享**，那时必须换成 Redis 计数。
+ *     对"防暴力破解、防刷"这个目标完全可接受（Redis 与进程内两条路径的窗口语义一致）。
  *
  * ── 与全局异常处理的关系 ──────────────────────────────
  *   限流命中直接写 429 响应并中断请求，不走 ControllerAdvice（它只管 Controller 抛出的异常）。
@@ -56,7 +61,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     /**
      * 限流规则。
      *
-     * @param name     规则名（进日志与计数 key）
+     * @param name     规则名（进限流 key，见 {@code common/RedisKeys.rateLimit}）
      * @param prefix   路径前缀（用 startsWith 匹配，便于覆盖带路径参数的端点）
      * @param limit    窗口内允许的最大次数
      * @param windowMs 窗口长度（毫秒）
@@ -111,7 +116,15 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         final AtomicInteger count = new AtomicInteger();
     }
 
+    /**
+     * **降级用的**进程内计数（Redis 不可用时才走它）。
+     * ★ 它不再承担"多实例共享配额"的职责，所以不要把它当主路径来读。
+     */
     private final Map<String, Counter> counters = new ConcurrentHashMap<>();
+
+    /** Redis 计数（多实例共享配额）。★ 返回 null 表示"Redis 不可用"，此时回退上面的 counters。 */
+    @Autowired
+    private RedisRateLimiter redisRateLimiter;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
@@ -132,9 +145,16 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         String subject = rule.subject() == Subject.IP
                 ? WebUtils.getConnectionIp(request)
                 : String.valueOf(request.getHeader("X-User-Id"));
-        String key = rule.name() + '|' + subject;
 
-        if (allow(key, rule.limit(), rule.windowMs())) {
+        // ★ 配额判定先走 Redis（多实例共享同一份计数）；
+        //   返回 null 表示 Redis 不可用（或开关关闭），此时**必须**回退到进程内计数继续限流 ——
+        //   绝不能"Redis 一挂就放行"（两条链路的降级方向相反，见 RedisRateLimiter 类注释）。
+        Long remoteCount = redisRateLimiter.increment(rule.name(), subject, rule.windowMs());
+        boolean allowed = remoteCount != null
+                ? remoteCount <= rule.limit()
+                : allow(rule.name() + '|' + subject, rule.limit(), rule.windowMs());
+
+        if (allowed) {
             return true;
         }
 
@@ -161,8 +181,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 固定窗口计数：窗口过期就重置，否则累加并判断是否超限。
+     * **降级路径**的固定窗口计数：窗口过期就重置，否则累加并判断是否超限。
      * ★ 对同一个 Counter 加锁 —— 竞争只发生在同一 IP/用户的并发请求上，粒度足够细。
+     * ★ 只在 Redis 不可用时被调用（见 preHandle），所以它不承担多实例共享的职责。
      */
     private boolean allow(String key, int limit, long windowMs) {
         long now = System.currentTimeMillis();
@@ -177,8 +198,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 定期清理过期窗口，避免 counters 随访问过的 IP/用户数无限增长（长期运行的内存泄漏）。
+     * 定期清理过期窗口，避免降级用的 counters 随访问过的 IP/用户数无限增长（长期运行的内存泄漏）。
      * ★ 依赖启动类上的 @EnableScheduling（去掉它这个清理就不会跑，但限流本身仍工作）。
+     * ★ Redis 路径的窗口过期由 key 的 TTL 自己负责，与这里无关。
      */
     @Scheduled(fixedDelay = 60_000)
     public void evictExpired() {

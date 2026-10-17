@@ -57,9 +57,55 @@ public interface AnswerMapper {
             "</script>")
     List<Map<String, Object>> countBySurveyIds(@Param("ids") List<Integer> ids);
 
-    // 根据问卷ID查询所有答卷
-    @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} ORDER BY submit_time DESC")
-    List<Answer> findBySurveyId(Integer surveyId);
+    /**
+     * 写入质控标记（提交那一刻算好，在**同一事务**里回写）。
+     *
+     * ★ 只算一次、不重算历史：规则以后调整（比如把"每题 1.5 秒"改成 2 秒）时，
+     *   老答卷的标记**保持不变**。否则历史数据会随规则升级"忽有效忽无效"，
+     *   用户看到的图表会莫名其妙地变，而且无法解释"为什么上周的统计和这周不一样"。
+     */
+    @Update("UPDATE t_answer SET duration_ms = #{durationMs}, quality_flag = #{flag}, quality_reasons = #{reasons} "
+            + "WHERE id = #{id}")
+    int updateQuality(@Param("id") Integer id,
+                      @Param("durationMs") Integer durationMs,
+                      @Param("flag") int flag,
+                      @Param("reasons") String reasons);
+
+    /** 某问卷的可疑答卷数（质控摘要用）。 */
+    @Select("SELECT COUNT(*) FROM t_answer WHERE survey_id = #{surveyId} AND quality_flag = 1")
+    int countSuspiciousBySurveyId(Integer surveyId);
+
+    /** 可疑答卷样本（最近的在前，最多 50 条）。 */
+    @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} AND quality_flag = 1 "
+            + "ORDER BY submit_time DESC LIMIT 50")
+    List<Answer> findSuspiciousBySurveyId(Integer surveyId);
+
+    /**
+     * 按"原因组合"分组统计（质控摘要里的原因分布）。
+     * ★ 按整串 reasons 分组（而不是拆成单个码）：一条 SQL 就够，
+     *   拆成单个码的聚合在 Java 里做（见 `AnswerQualityService.summarize`）。
+     */
+    @Select("SELECT quality_reasons AS reasons, COUNT(*) AS cnt FROM t_answer "
+            + "WHERE survey_id = #{surveyId} AND quality_flag = 1 "
+            + "GROUP BY quality_reasons")
+    List<Map<String, Object>> countByReasons(@Param("surveyId") Integer surveyId);
+
+    /**
+     * 某问卷的答卷列表（**分页**，提交时间倒序）。
+     *
+     * ★ 排序用 {@code submit_time DESC, id DESC}：同一秒提交的多份答卷
+     *   （压测/脚本灌数据时很常见）光按时间排序不稳定，翻页会出现"同一条出现两次 / 漏一条"；
+     *   补上自增主键做第二排序键，顺序才是确定的。
+     * ★ 走 {@code idx_survey_submit_time (survey_id, submit_time)}：等值过滤 + 排序列在同一个索引里，
+     *   不需要回表前的 filesort，也不需要为深度翻页扫全表。
+     * ★ 上限由调用方夹紧（{@link com.survey.common.PageParams#MAX_PAGE_SIZE} = 100），
+     *   Mapper 不重复校验 —— 唯一入口已有一处口径。
+     */
+    @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} "
+            + "ORDER BY submit_time DESC, id DESC LIMIT #{pageSize} OFFSET #{offset}")
+    List<Answer> findPageBySurveyId(@Param("surveyId") Integer surveyId,
+                                    @Param("offset") long offset,
+                                    @Param("pageSize") int pageSize);
 
     // 根据答卷ID查询
     @Select("SELECT * FROM t_answer WHERE id = #{id}")

@@ -68,6 +68,8 @@ public class SurveyService {
     private AnswerMapper answerMapper;
     @Autowired
     private AnswerDetailMapper answerDetailMapper;
+    @Autowired
+    private StatsCacheService statsCacheService;
 
     // ===== 分享码生成 =====
 
@@ -204,6 +206,15 @@ public class SurveyService {
     public int cascadeDeleteSurvey(Integer surveyId) {
         if (surveyId == null) return 0;
 
+        // 0) 先取出题目 id：题目行马上要被删掉，删完就再也查不到，
+        //    而统计缓存是**逐题**建的（选项分布 / 填空文本各一个 key）。
+        //    ★ 这里只按具体 key 删，不做前缀扫描清库 —— 前缀扫描会连限流计数一起清掉，
+        //      见 common/RedisKeys 的命名空间约定。
+        List<Integer> questionIds = questionMapper.findBySurveyId(surveyId).stream()
+                .map(Question::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
         // 1) 答卷明细：一条 JOIN DELETE 删完（AnswerDetailMapper.deleteBySurveyId）。
         //    ★ 必须用这条 JOIN DELETE：若改成先 findBySurveyId 把全部答卷读进内存、再逐份调
         //      deleteByAnswerId，一份 5000 份答卷的问卷就是 1 次查询 + 5000 条 DELETE，
@@ -217,6 +228,11 @@ public class SurveyService {
         questionMapper.deleteBySurveyId(surveyId);
         // 5) 问卷本体
         int rows = surveyMapper.deleteById(surveyId);
+        // 6) 统计缓存：问卷与题目都已不存在，这些 key 不会再被任何正常请求读到
+        //    （统计接口会先因"问卷/题目不存在"而 400），删掉纯粹是不让残值白占内存到 TTL 到期。
+        //    ★ 事务内删缓存是安全的：删是幂等的，且下次访问会回源得到正确值 ——
+        //      与"自增"相反，后者绝不能在事务里做（回滚会造成缓存比库多）。
+        statsCacheService.evictSurvey(surveyId, questionIds);
         LOG.info("级联删除问卷 id={}：清理答卷 {} 份 / 明细 {} 条，以及其选项与题目，删除问卷 {} 行",
                 surveyId, answerRows, detailRows, rows);
         return rows;

@@ -2,8 +2,10 @@ package com.survey.service;
 
 import com.survey.common.QuestionType;
 import com.survey.dto.QuestionIdItem;
+import com.survey.dto.SurveySnapshot;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
+import com.survey.entity.SurveyVersion;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
 import com.survey.common.TextLimits;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 题目业务：全量覆盖式保存题目与选项、查询题目（带选项）。
@@ -43,6 +46,15 @@ public class QuestionService {
     private OptionMapper optionMapper;
 
     /**
+     * 版本快照（保存题目后生成、回滚时读取）。
+     * ★ 依赖方向是**单向**的：QuestionService → SurveyVersionService。
+     *   反过来（版本服务回滚时直接写题目）会形成循环依赖，所以"回滚的写库动作"留在本类
+     *   —— 它本来就拥有"全量覆盖式保存"的全部校验逻辑，回滚必须走同一套。
+     */
+    @Autowired
+    private SurveyVersionService surveyVersionService;
+
+    /**
      * 保存问卷的所有题目（全量覆盖）。
      *
      * @param surveyId  问卷 id
@@ -66,6 +78,91 @@ public class QuestionService {
 
     @Transactional
     public List<QuestionIdItem> saveQuestions(Integer surveyId, List<Question> questions) {
+        return doSaveQuestions(surveyId, questions, null, null);
+    }
+
+    /**
+     * 保存题目（带操作人）—— 只比上一个重载多记一个"谁保存的"，版本快照的 `created_by` 用它。
+     *
+     * ★ 两个重载**各自**标 `@Transactional`、且都直接调 private 的 `doSaveQuestions`，互不调用：
+     *   若让三参版本去调两参版本，就变成"同类内部调用"，事务注解会失效（《交接文档》约定 9）。
+     */
+    @Transactional
+    public List<QuestionIdItem> saveQuestions(Integer surveyId, List<Question> questions, Integer userId) {
+        return doSaveQuestions(surveyId, questions, userId, null);
+    }
+
+    /**
+     * 把问卷回滚到某个历史版本（**回滚也是一次编辑**：会产生一个新版本，历史不会被抹掉）。
+     *
+     * ── ★ 一条硬限制：跳转规则指向"会被重新创建的题目"时，拒绝回滚 ──
+     *   快照里的选项带着 `nextQuestionId`（**真题目 id**）。回滚时：
+     *     · 目标题**还在**（库里同 id）→ 走"更新"，id 不变，跳转继续有效；
+     *     · 目标题**已被删除** → 它会被重新插入、拿到**新 id**，而快照里仍指向旧 id ⇒ 悬空规则。
+     *   所以这种情况直接 400 并说清原因 —— **不静默把规则置空**（那会让用户以为回滚成功了）。
+     *   绝大多数问卷没有跳转规则、或回滚时题目都还在，因此这条限制很少触发。
+     *
+     * @param version 已经过归属校验的版本（Controller 传入，避免重复查库）
+     * @param userId  操作人
+     * @return 回滚产生的新版本
+     */
+    @Transactional
+    public SurveyVersion rollbackToVersion(SurveyVersion version, Integer userId) {
+        Integer surveyId = version.getSurveyId();
+        SurveySnapshot snapshot = surveyVersionService.loadSnapshot(version);
+        List<Question> restored = snapshot.getQuestions() == null
+                ? new ArrayList<>()
+                : new ArrayList<>(snapshot.getQuestions());
+
+        // 当前库里还存在的题目 id
+        Set<Integer> existingIds = questionMapper.findBySurveyId(surveyId).stream()
+                .map(Question::getId)
+                .collect(Collectors.toSet());
+        // 回滚时需要**重新插入**的题目（快照里有、库里没有）—— 它们的 id 会变
+        Set<Integer> willBeRecreated = restored.stream()
+                .map(Question::getId)
+                .filter(Objects::nonNull)
+                .filter(id -> !existingIds.contains(id))
+                .collect(Collectors.toSet());
+
+        for (Question q : restored) {
+            if (q.getOptions() == null) {
+                continue;
+            }
+            for (Option opt : q.getOptions()) {
+                if (opt.getNextQuestionId() != null && willBeRecreated.contains(opt.getNextQuestionId())) {
+                    throw new BizException(
+                            "无法回滚到 v" + version.getVersionNo() + "：该版本的跳转规则指向一道在后续版本里"
+                                    + "已被删除的题目，回滚会重新创建它并分配新的 id，原规则会变成悬空规则。"
+                                    + "请手工调整该题的跳转，或把这一版另存为新问卷。");
+                }
+            }
+        }
+
+        // ★ 只清"库里已经没有的题"的 id（它们本来就要重建）；
+        //   仍存在的题**保留 id** —— 否则所有题都会换成新 id，历史答卷的 question_id 会全部悬空。
+        for (Question q : restored) {
+            if (q.getId() != null && !existingIds.contains(q.getId())) {
+                q.setId(null);
+            }
+            if (q.getOptions() != null) {
+                for (Option opt : q.getOptions()) {
+                    opt.setId(null);   // 选项本来就是"全删重插"（saveQuestions 的既有语义）
+                }
+            }
+        }
+
+        doSaveQuestions(surveyId, restored, userId, "回滚到 v" + version.getVersionNo());
+
+        SurveyVersion latest = surveyVersionService.getLatest(surveyId);
+        if (latest == null) {
+            throw new IllegalStateException("回滚后未能生成版本快照");
+        }
+        return latest;
+    }
+
+    private List<QuestionIdItem> doSaveQuestions(Integer surveyId, List<Question> questions,
+                                                 Integer userId, String note) {
         // ★ **题目与选项的条数必须有上限**。
         //   请求体上限是 4MB，而一道题的 JSON 只有几十字节 —— 一次保存可以塞进**几万道题**，
         //   之后每个读到这份问卷的地方都会放大：
@@ -167,6 +264,11 @@ public class QuestionService {
                 }
             }
         }
+
+        // ★★ 保存成功后生成版本快照（**同一事务**：保存回滚，快照也不会留下）。
+        //   capture 内部自己判断"题目结构与上一版完全相同 → 不生成"，所以重复点保存不会刷版本。
+        //   ★ 必须放在**跳转校验之后**：校验失败要整体回滚，不该留下一个"结构非法"的版本。
+        surveyVersionService.capture(surveyId, userId, note);
 
         // ★ 回显"本次提交的第 i 项 → 真实 id"（顺序即 questions 的顺序，也就是刚写入的 sortOrder）。
         //   前端要靠它把草稿阶段的临时 id 换成真 id，否则新建的题永远设不了跳转目标。

@@ -8,6 +8,7 @@ import com.survey.entity.Question;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
 import com.survey.mapper.AnswerMapper;
+import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
 import com.survey.mapper.SurveyMapper;
 import org.junit.jupiter.api.DisplayName;
@@ -54,9 +55,37 @@ class AnswerServiceGuardTest {
     private QuestionMapper questionMapper;
     @Mock
     private NotificationService notificationService;
+    /**
+     * ★ 提交成功后要刷新统计缓存（答卷数自增 + 该问卷各题分布失效），
+     *   所以 AnswerService 多了一个依赖。这里给它一个 mock：
+     *   本类断言的是**守卫逻辑**，缓存本身的行为由 StatsCacheServiceTest 覆盖；
+     *   不注入的话该字段是 null，任何走到"提交成功"的用例都会 NPE。
+     */
+    @Mock
+    private StatsCacheService statsCacheService;
+
+    /**
+     * ★ 提交成功后还要做"答卷质控判定"（基于刚插入的明细 + 选项），
+     *   所以 AnswerService 又多了两个依赖。这里都给 mock：
+     *   守卫逻辑本身不需要质控数据，判定规则由 AnswerQualityServiceTest 覆盖。
+     *   ★ 不注入就是 null，任何走到"提交成功"的用例都会 NPE。
+     */
+    @Mock
+    private OptionMapper optionMapper;
+    @Mock
+    private AnswerQualityService answerQualityService;
 
     @InjectMocks
     private AnswerService answerService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void givenQualityRulesPass() {
+        // ★ lenient：只有"提交成功"的用例才会走到质控判定，其余用例用不到这个 stub
+        //   —— 严格模式下会报 UnnecessaryStubbing。
+        org.mockito.Mockito.lenient()
+                .when(answerQualityService.evaluate(any(), any(), any(), any()))
+                .thenReturn(new AnswerQualityService.QualityVerdict(false, java.util.List.of()));
+    }
 
     private static final Integer SURVEY_ID = 100;
     private static final Integer USER_ID = 7;

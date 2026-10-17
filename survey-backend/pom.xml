@@ -112,6 +112,11 @@
             <groupId>org.hibernate.validator</groupId>
             <artifactId>hibernate-validator</artifactId>
         </dependency>
+        <!-- Redis：答卷统计预聚合缓存 + 分布式限流（客户端为 Lettuce，由 starter 带入） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
@@ -153,6 +158,13 @@
                     <excludes>
                         <!-- 唯一需要真实数据库的测试：CI 无库，故意不纳入（见《待解决问题》C6） -->
                         <exclude>**/SurveyBackendApplicationTests.java</exclude>
+                        <!-- ★ 真库集成测试（全链路：注册→建卷→发布→提交→统计→导出→删除）。
+                             它要一个**独立的空库**（默认 survey_db_test）+ 环境变量，
+                             默认不跑；要跑就显式点名（-Dtest= 会覆盖这里的 excludes）：
+                               $env:TEST_DB_PASSWORD='<口令>'
+                               ./mvnw -o "-Dtest=SurveyFlowIntegrationTest" test
+                             CI 由 .github/workflows/ci.yml 的 backend-integration 作业提供 MySQL。 -->
+                        <exclude>**/SurveyFlowIntegrationTest.java</exclude>
                     </excludes>
                 </configuration>
             </plugin>

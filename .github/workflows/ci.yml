@@ -6,11 +6,15 @@
 #   而这些地方历史上正是"反复出问题又被修回来"。没有 CI 时，任何破坏性改动
 #   都只能靠人工发现 —— 现在至少有编译 + 单测这两道自动闸门。
 #
-# ★ 关于测试范围（重要，第十六轮改过写法）：
-#   **默认跑全部纯单元测试**，唯一被排除的是 SurveyBackendApplicationTests
-#   （`@SpringBootTest contextLoads`，需要真实 MySQL，CI 无库必然失败）——
+# ★ 关于测试范围（重要，第十六轮改过写法、第二十七/二十八轮又扩了两类）：
+#   **默认跑全部纯单元测试 + MockMvc 全栈测试（都不连库）**；被排除的有两类：
+#     1. `SurveyBackendApplicationTests`（`@SpringBootTest contextLoads`，需要真实 MySQL）；
+#     2. `SurveyFlowIntegrationTest`（真库全链路集成测试，需要独立的空库）。
 #   排除规则写在 `survey-backend/pom.xml` 的 maven-surefire-plugin `<excludes>` 里，
-#   所以这里直接 `./mvnw test` 即可。要把它纳入，需先配 Testcontainers 或 H2。
+#   所以这里直接 `./mvnw test` 即可。
+#   ★ 第 2 类由下面的 `backend-integration` 作业单独跑：它自带一个 MySQL 8 service，
+#     先导入 sql/init.sql，再用 `-Dtest=SurveyFlowIntegrationTest`（会覆盖 excludes）。
+#   ★ 真库测试**只连 survey_db_test**（独立的空库），绝不指向开发/演示库。
 #
 #   ★ 为什么改成"默认全跑"（第十六轮的真实教训）：
 #     原来这里是 `-Dtest=UserServiceTest,JwtAuthFilterTest,...` **逐个列类名**。两个毛病：
@@ -24,9 +28,9 @@
 # ★ 关于"静态检查"这一步（评审【工程性·低】建议加 Checkstyle / Spotless / 覆盖率）：
 #   **本机离线仓库里没有这些插件**（checkstyle-maven-plugin / spotless-maven-plugin /
 #   jacoco-maven-plugin 均不存在），而沙箱不允许联网写 ~/.m2，所以这一轮无法接入。
-#   替代做法是把纯单测补到覆盖面够用（当前 **99 个用例 / 11 个测试类**），把新增的安全/路由逻辑纳入闸门 ——
-#   这些正是历史上反复出问题的地方。接入静态检查插件需要一次联网构建，
-#   留给下一轮或你自己在有网的机器上做。
+#   替代做法是把测试补到覆盖面够用（当前 **204 例 / 24 类**，另有 1 个真库集成测试），
+#   把新增的安全/路由逻辑纳入闸门 —— 这些正是历史上反复出问题的地方。
+#   接入静态检查插件需要一次联网构建，留给下一轮或你自己在有网的机器上做。
 #
 # ★ 关于前端构建：
 #   前端用 Vite 8 + Node 22，构建只验证"能打包"，不做视觉/交互测试。
@@ -68,11 +72,61 @@ jobs:
       - name: 编译（Maven Wrapper）
         run: ./mvnw -B -q -DskipTests compile
 
-      # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了那个连库的测试，
-      #   其余测试类**全部自动纳入**（含本轮新增的 SurveyControllerRoutingTest）。
-      #   当前应为 **99 个用例 / 11 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
-      - name: 单元测试（不依赖数据库，Maven Wrapper）
+      # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了两个连库的测试
+      #   （SurveyBackendApplicationTests / SurveyFlowIntegrationTest），其余测试类**全部自动纳入**。
+      #   当前应为 **204 个用例 / 24 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
+      - name: 单元测试 + MockMvc 全栈测试（不依赖数据库，Maven Wrapper）
         run: ./mvnw -B test
+
+  # ============================================================
+  # 真库集成测试（第二十八轮新增）
+  #   一条完整链路：注册 → 建卷 → 存题 → 发布 → 匿名提交 → 统计 → 分页 → Excel 导出 → 删除。
+  #   单元测试把 Mapper 全 mock 掉，验不到 SQL/事务/导出；这个作业补的就是那一段。
+  #   ★ 用 GitHub Actions 的 service 容器起 MySQL 8（不需要 Docker Desktop，也不用 Testcontainers）。
+  #   ★ 只连 survey_db_test（独立的空库），不碰任何开发/演示数据。
+  # ============================================================
+  backend-integration:
+    name: 后端集成测试（真实 MySQL 8）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test
+          MYSQL_DATABASE: survey_db_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ptest"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # ★ 集成测试连的是**空库**：先建表（sql/init.sql 只含结构、不含数据）。
+      - name: 导入表结构（sql/init.sql → survey_db_test）
+        run: |
+          mysql -h127.0.0.1 -P3306 -uroot -ptest --default-character-set=utf8mb4 \
+            survey_db_test < sql/init.sql
+          mysql -h127.0.0.1 -P3306 -uroot -ptest -N -e \
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='survey_db_test'"
+
+      # ★ -Dtest= 会覆盖 pom 里 surefire 的 <excludes>，所以这里可以点名跑那个"默认不跑"的类。
+      - name: 集成测试（真实 MySQL，Maven Wrapper）
+        working-directory: survey-backend
+        env:
+          TEST_DB_URL: jdbc:mysql://127.0.0.1:3306/survey_db_test?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+          TEST_DB_USER: root
+          TEST_DB_PASSWORD: test
+        run: ./mvnw -B "-Dtest=SurveyFlowIntegrationTest" test
 
   frontend:
     name: 前端构建（Node 22）

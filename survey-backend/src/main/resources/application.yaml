@@ -23,6 +23,26 @@ spring:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
 
+  # Redis：答卷统计预聚合缓存 + 分布式限流计数（key 规范见 common/RedisKeys）。
+  # ★ 连不上 Redis **不会**导致启动失败（Lettuce 是懒连接），也不会让接口 500：
+  #   缓存降级为"直查数据库"，限流降级为"进程内计数"（两条链路的降级方向相反，
+  #   理由分别写在 service/StatsCacheService 与 config/RedisRateLimiter 的类注释里）。
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # 单条命令超时：宁可快速降级为直查库，也不要把 Tomcat 线程挂在 Redis 上。
+      # ★ 配合 RedisCircuitBreaker（失败即短路 10 秒）：超时决定"第一次失败要等多久"，
+      #   熔断决定"后续请求还要不要再等"。实测把 Redis 停掉时，没有熔断的话
+      #   每个统计请求要等一次 2 秒超时（接口仍 200，但耗时从 12ms 变 4000ms）。
+      timeout: 500ms
+      connect-timeout: 500ms
+      # 本项目不用 Spring Data Redis Repository（只用 StringRedisTemplate 的命令 API），
+      # 关掉启动时的 repository 扫描 —— 否则日志里会出现
+      # "Bootstrapping Spring Data Redis repositories ... Found 0 Redis repository interfaces"。
+      repositories:
+        enabled: false
+
 # ========== MyBatis 配置 ==========
 mybatis:
   configuration:
@@ -83,6 +103,24 @@ app:
   #      · 环境变量 APP_STRICTUSERNAMECHECK=false
   #    关闭后**注册仍然强制新规则**（新账号不会再有坏名字），只是登录侧不再拦。
   strict-username-check: true
+
+  # ★ 统计预聚合缓存（实现见 service/StatsCacheService，key 见 common/RedisKeys）。
+  cache:
+    # 总开关：false = 完全绕过 Redis，行为退回"每次都直查库"。
+    # 用途：无 Redis 的环境（CI）、以及"开/关缓存"的压测对比（用 --app.cache.stats-enabled=false 启动对比实例）。
+    stats-enabled: ${APP_CACHE_STATS_ENABLED:true}
+    # 单题分布 / 填空文本的 TTL（秒）。★ 回源要扫明细表（2 万答卷下约 190ms），所以长。
+    stats-ttl-seconds: ${APP_CACHE_STATS_TTL_SECONDS:600}
+    # 答卷数的 TTL（秒）。★ 回源只要一条 COUNT(*)（约 21ms）：
+    #   短 TTL 的代价可忽略，同时把"增量更新失败导致缓存比库少 1"的窗口压到 1 分钟。
+    count-ttl-seconds: ${APP_CACHE_COUNT_TTL_SECONDS:60}
+    # 单题统计 TTL 的随机抖动上限（秒），用于打散"集体过期 → 并发一起回源"的缓存击穿。
+    ttl-jitter-seconds: ${APP_CACHE_TTL_JITTER_SECONDS:60}
+
+  # ★ 分布式限流（实现见 config/RedisRateLimiter）。
+  rate-limit:
+    # false = 完全走进程内计数（单实例部署够用；多实例下配额会被放大，见 RedisRateLimiter 类注释）
+    redis-enabled: ${APP_RATE_LIMIT_REDIS_ENABLED:true}
 
 # ========== JWT 配置 ==========
 jwt:

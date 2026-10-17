@@ -30,6 +30,24 @@ export default {
   /** 新建问卷。★ 归属由后端按登录身份写死，请求体里的 userId 会被忽略 */
   add: (data) => http.post('/api/survey/add', data),
 
+  // ===== 版本快照（编辑历史 / 对比 / 回滚）=====
+
+  /**
+   * 某问卷的版本列表（新的在前）。
+   * ★ 后端**不返回**题目快照 JSON（极端问卷下是 MB 级）—— 列表只给摘要。
+   */
+  versions: (surveyId) => http.get(`/api/survey/version/list/${surveyId}`),
+
+  /** 对比两个版本（结构化差异：新增 / 删除 / 修改） */
+  versionDiff: (fromId, toId) => http.get(`/api/survey/version/diff/${fromId}/${toId}`),
+
+  /**
+   * 回滚到某个版本。
+   * ★ 回滚**不是撤销**：它会生成一个**新版本**（内容等于目标版本），历史仍然是线性的 ——
+   *   所以"回滚错了"还能再回滚回去。
+   */
+  rollbackVersion: (versionId) => http.post(`/api/survey/version/rollback/${versionId}`),
+
   /** 更新问卷（**标题 / 描述 / 起止时间**，共 4 个字段）。
    *  ★ status / shareCode / userId 后端一律**静默忽略** —— 要改状态必须走 publish()，否则页面不会有任何变化 */
   update: (data) => http.put('/api/survey/update', data),

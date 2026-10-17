@@ -20,6 +20,18 @@ public class Answer {
     private Integer userId;          // 填写者 ID，**NULL 表示匿名**（凭分享码提交，不要求登录）
     private LocalDateTime submitTime; // 提交时间（数据库默认值填充）
 
+    /**
+     * 答题耗时（毫秒）。由答题页在提交时上报；NULL = 未上报（老客户端 / 直接调接口）。
+     * ★ 这是**客户端提供的值，可以伪造** —— 它只用于"质控提示"，绝不能当安全边界或计费依据。
+     */
+    private Integer durationMs;
+
+    /** 质控标记：0 = 正常，1 = 可疑（命中任一无效样本规则） */
+    private Integer qualityFlag;
+
+    /** 命中的规则码，逗号分隔（TOO_FAST / STRAIGHT_LINE / OPTION_MISMATCH / DUP_TITLE_CONFLICT） */
+    private String qualityReasons;
+
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
 
@@ -31,4 +43,13 @@ public class Answer {
 
     public LocalDateTime getSubmitTime() { return submitTime; }
     public void setSubmitTime(LocalDateTime submitTime) { this.submitTime = submitTime; }
+
+    public Integer getDurationMs() { return durationMs; }
+    public void setDurationMs(Integer durationMs) { this.durationMs = durationMs; }
+
+    public Integer getQualityFlag() { return qualityFlag; }
+    public void setQualityFlag(Integer qualityFlag) { this.qualityFlag = qualityFlag; }
+
+    public String getQualityReasons() { return qualityReasons; }
+    public void setQualityReasons(String qualityReasons) { this.qualityReasons = qualityReasons; }
 }

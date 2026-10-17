@@ -57,7 +57,7 @@ public class QuestionController {
         //   这个接口是**全量覆盖**语义（没传的旧题会被删掉），在回收站问卷上执行
         //   会让历史答卷的 question_id 悬空 —— 后果比改个标题严重得多。
         OwnershipGuard.requireNotInRecycleBin(survey, "编辑题目");
-        return questionService.saveQuestions(surveyId, questions);
+        return questionService.saveQuestions(surveyId, questions, userId);
     }
 
     /**
