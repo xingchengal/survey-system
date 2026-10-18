@@ -171,11 +171,11 @@ const routes = [
         meta: { title: '回收站', roles: ['user', 'admin'] }
       },
       {
-        // 我的成绩 / 答题记录：只列"登录态提交过"的问卷（匿名答卷没有身份可回溯）
+        // 我的答卷 / 答题记录：只列"登录态提交过"的问卷（匿名答卷没有身份可回溯）
         path: 'my/answers',
         name: 'MyAnswers',
         component: () => import('../views/MyAnswers.vue'),
-        meta: { title: '我的成绩', roles: ['user', 'admin'] }
+        meta: { title: '我的答卷', roles: ['user', 'admin'] }
       },
       {
         // 我的钱包（H5）：普通用户看余额/流水/模拟充值；管理员也可查看自己的钱包

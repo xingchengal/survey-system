@@ -78,7 +78,7 @@
             </el-menu-item>
             <el-menu-item index="/my/answers">
               <el-icon><Memo /></el-icon>
-              <span>我的成绩</span>
+              <span>我的答卷</span>
             </el-menu-item>
             <el-menu-item index="/my/recycle">
               <el-icon><Delete /></el-icon>

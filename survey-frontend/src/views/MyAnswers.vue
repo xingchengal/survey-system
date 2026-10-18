@@ -2,9 +2,9 @@
   <div class="page">
     <div class="page-head">
       <div>
-        <h2>我的成绩</h2>
+        <h2>我的答卷</h2>
         <p class="page-sub">
-          这里只列**登录后提交**的答卷；匿名答卷没有账号可关联，不会出现在这里。
+          这里收录你登录后提交的全部答卷（含成绩与逐题详情）；匿名答卷无法关联账号，不会出现在这里。
         </p>
       </div>
     </div>
@@ -16,7 +16,7 @@
         :data="rows"
         stripe
         class="w-full"
-        empty-text="还没有答过问卷（登录后提交的答卷才会出现在这里）"
+        empty-text="还没有提交过答卷（登录后提交的答卷才会出现在这里）"
       >
         <el-table-column prop="surveyTitle" label="问卷" min-width="220" show-overflow-tooltip />
         <el-table-column prop="submitTime" label="提交时间" width="180" />
@@ -109,7 +109,7 @@
 import api from '../api'
 
 /**
- * 我的成绩 / 答题记录。
+ * 我的答卷 / 答题记录。
  *
  * ── 为什么只有"登录态提交"的记录 ──────────────────────
  *   t_answer.user_id 只在 POST /answer/submit/{surveyId} 这条路径上写入；

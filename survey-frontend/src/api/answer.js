@@ -91,7 +91,7 @@ export default {
    * ★ 「仅限登录用户填写」的问卷**必须**走这里：后端只认带 token 的提交，
    *   submit-share 的 userId 恒为 null，会被 400 拒收（见 AnswerService.doSubmit）。
    * ★ 它同时是**唯一**能把答题人身份写进 t_answer.user_id 的路径；
-   *   「答卷防重 / 我的成绩」都建立在它之上。
+   *   「答卷防重 / 我的答卷」都建立在它之上。
    * ★ durationMs 与匿名提交同口径：只用于限时校验与质控提示，可伪造。
    */
   submit: (surveyId, details, durationMs) => {
