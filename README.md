@@ -25,7 +25,7 @@ AI 生成问卷、账号与治理后台。
 | 后端主源文件 | **123** 个 Java 文件 |
 | REST 端点 | **94** 个方法级端点（公开 12 / 需登录 31 / 需登录+归属 25 / 管理员 26） |
 | 数据库 | **21** 张表（MySQL 8，库名 `survey_db`） |
-| 后端测试 | **37** 个测试类 / **319** 个用例（默认全跑）＋ **2** 个真库测试（默认排除） |
+| 后端测试 | **38** 个测试类 / **322** 个用例（默认全跑）＋ **2** 个真库测试（默认排除） |
 | 前端 | `views/` **22** 个页面 · `api/` **15** 个模块 · **25** 条具名路由 |
 
 ---
@@ -318,7 +318,7 @@ IdeaProjects/
 │   │   ├── application.yaml           # 主配置
 │   │   ├── application-local.yml      # 本地配置（已 gitignore，不入库）
 │   │   └── application-prod.yml       # 生产配置
-│   ├── src/test/java/com/survey/      # 测试（37 个类 / 319 例；另 2 个真库测试默认不跑）
+│   ├── src/test/java/com/survey/      # 测试（38 个类 / 322 例；另 2 个真库测试默认不跑）
 │   └── pom.xml
 │
 └── survey-frontend/                   # 前端应用
@@ -489,7 +489,7 @@ cd survey-backend
 .\mvnw.cmd -o test
 ```
 
-覆盖 **319** 个默认用例（共 **37** 个测试类），全部**不依赖数据库**（纯单测 + 1 个 MockMvc 全栈类，
+覆盖 **322** 个默认用例（共 **38** 个测试类），全部**不依赖数据库**（纯单测 + 1 个 MockMvc 全栈类，
 后者把 Mapper 与 DataSource 都 mock 掉）。两个需要真实 MySQL 的类已在 Surefire 中排除：
 
 ```powershell
