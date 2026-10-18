@@ -277,6 +277,49 @@ class AnswerServiceGradingTest {
     }
 
     @Test
+    @DisplayName("仅限登录：匿名提交 → 400，且一份数据都不写")
+    void requireLogin_rejectsAnonymous() {
+        Survey s = survey(0, null);
+        s.setRequireLogin(1);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        BizException e = assertThrows(BizException.class, () -> answerService.submit(
+                SURVEY_ID, null, List.of(answer(11, "A")), 3000, "127.0.0.1"));
+
+        assertTrue(e.getMessage().contains("仅限登录"), e.getMessage());
+        verify(answerMapper, never()).insert(any());
+        verify(answerDetailMapper, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("仅限登录：登录用户提交 → 正常收卷，user_id 落库")
+    void requireLogin_acceptsLoggedIn() {
+        Survey s = survey(0, null);
+        s.setRequireLogin(1);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        answerService.submit(SURVEY_ID, 9, List.of(answer(11, "A")), 3000, "127.0.0.1");
+
+        ArgumentCaptor<Answer> captor = ArgumentCaptor.forClass(Answer.class);
+        verify(answerMapper).insert(captor.capture());
+        assertEquals(9, captor.getValue().getUserId());
+    }
+
+    @Test
+    @DisplayName("登录态提交路径：即使是匿名问卷，这条路径仍会写 user_id（网页匿名问卷走 share，不走它）")
+    void submitPath_alwaysWritesUserId() {
+        givenSurvey(single(11, 10), option(11, "A", true));
+
+        answerService.submit(SURVEY_ID, 9, List.of(answer(11, "A")), 3000, "127.0.0.1");
+
+        ArgumentCaptor<Answer> captor = ArgumentCaptor.forClass(Answer.class);
+        verify(answerMapper).insert(captor.capture());
+        // ★ 两条入口的分工不要混淆：submit/{id} 是"已知身份的提交"，永远写 user_id；
+        //   网页上的匿名问卷走 submit-share（userId=null），所以默认问卷的数据语义没变。
+        assertEquals(9, captor.getValue().getUserId());
+    }
+
+    @Test
     @DisplayName("提交后显示答案：开启才返回逐题结果，关闭时为 null")
     void showAnswers_onlyWhenEnabled() {
         Survey s = survey(1, 8);

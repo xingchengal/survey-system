@@ -100,6 +100,15 @@ public class Survey {
      */
     private Integer showAnswerAfterSubmit;
 
+    /**
+     * 是否仅限登录用户填写：0 = 匿名可填（默认，与改造前完全一致），1 = 必须先登录。
+     * ★ 开启后：填写页未登录时只显示登录引导、不加载题目；
+     *   服务端只接受 {@code POST /answer/submit/{surveyId}}（带 token），
+     *   {@code submit-share} 会被拒收（userId 恒为 null）。
+     * ★ 实名答卷因此受 {@code uk_survey_user}（一人一份）约束，且统计里能看到答题人 id。
+     */
+    private Integer requireLogin;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
 
@@ -243,6 +252,9 @@ public class Survey {
 
     public Integer getShowAnswerAfterSubmit() { return showAnswerAfterSubmit; }
     public void setShowAnswerAfterSubmit(Integer showAnswerAfterSubmit) { this.showAnswerAfterSubmit = showAnswerAfterSubmit; }
+
+    public Integer getRequireLogin() { return requireLogin; }
+    public void setRequireLogin(Integer requireLogin) { this.requireLogin = requireLogin; }
 
     /**
      * IP 限制：0=关闭，1=同一 IP 只能提交一次（属于「高级设置包」）。

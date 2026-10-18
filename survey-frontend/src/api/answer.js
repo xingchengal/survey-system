@@ -70,13 +70,16 @@ export default {
   /**
    * 登录用户提交答卷（POST /api/answer/submit/{surveyId}）。
    *
-   * ★ 它是**预留扩展点、不是死代码** —— 别按"前端零调用"把它删掉：
-   *   · 它是**唯一**能把答题人身份写进 t_answer.user_id 的路径（submit-share 传的 userId 恒为 null）；
-   *   · 「答卷防重 / 我的答题历史 / 实名问卷」都要靠它，删掉等于把这些功能的实现路径一起堵死。
-   *   ★ 当前页面里**仍然没有调用点**（router 只有匿名答题页）；
-   *     真要做登录态答题页时，直接 api.answer.submit(surveyId, details) 即可。
+   * ★ 「仅限登录用户填写」的问卷**必须**走这里：后端只认带 token 的提交，
+   *   submit-share 的 userId 恒为 null，会被 400 拒收（见 AnswerService.doSubmit）。
+   * ★ 它同时是**唯一**能把答题人身份写进 t_answer.user_id 的路径；
+   *   「答卷防重 / 我的成绩」都建立在它之上。
+   * ★ durationMs 与匿名提交同口径：只用于限时校验与质控提示，可伪造。
    */
-  submit: (surveyId, details) => http.post(`/api/answer/submit/${surveyId}`, details),
+  submit: (surveyId, details, durationMs) => {
+    const query = durationMs == null ? '' : `?durationMs=${durationMs}`
+    return http.post(`/api/answer/submit/${surveyId}${query}`, details)
+  },
 
   /**
    * 匿名访客凭分享码提交答卷（公开接口）。

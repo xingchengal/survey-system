@@ -243,6 +243,15 @@ public class AnswerService {
             throw new BizException("问卷已截止，无法提交答卷");
         }
 
+        // ★★ 仅限登录用户填写：**服务端必须自己判**，不能只靠前端那个登录门。
+        //   · submit-share 传的 userId 恒为 null → 这条会拒掉所有匿名提交；
+        //   · 登录用户走 POST /answer/submit/{surveyId}（带 token）才会 userId 非空；
+        //   · 与"防重"的关系：实名答卷因此受 uk_survey_user（一人一份）约束。
+        //   ★ 位置放在"能不能收"的判断之后、"答卷内容校验"之前：早失败、不做无用功。
+        if (survey.getRequireLogin() != null && survey.getRequireLogin() == 1 && userId == null) {
+            throw new BizException("该问卷仅限登录用户填写，请先登录后再提交");
+        }
+
         // ★★ 限时：按前端上报的答题耗时校验（+10 秒宽限）。
         //   ★ 这不是防作弊：duration_ms 是客户端值、可伪造（见 entity/Answer 与《待解决问题》C8）；
         //     它挡的是"页面倒计时结束还继续答题"的正常超时。

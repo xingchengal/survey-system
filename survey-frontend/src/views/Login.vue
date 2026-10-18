@@ -99,7 +99,8 @@
 
         <div class="auth-footer">
           <span class="text-gray">没有账号？</span>
-          <el-button type="primary" link @click="$router.push('/register')">去注册</el-button>
+          <!-- ★ 带上 redirect：从"仅限登录"的问卷跳过来的，注册完还要回那份问卷 -->
+          <el-button type="primary" link @click="goRegister">去注册</el-button>
         </div>
       </el-form>
     </el-card>
@@ -146,6 +147,16 @@ export default {
     }
   },
   methods: {
+    /** 去注册：把 redirect 透传过去，注册成功后还能回到原问卷 */
+    goRegister() {
+      const redirect = this.$route.query.redirect
+      this.$router.push({
+        path: '/register',
+        query: typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+          ? { redirect } : {}
+      })
+    },
+
     async handleLogin() {
       this.serverError = ''
       try {
@@ -173,7 +184,14 @@ export default {
         //   ★ 注意：这里不判断 data.success —— 后端失败是 400（非 2xx），
         //     http.js 会抛 ApiError，根本走不到这一行。
         ElMessage.success('登录成功')
-        this.$router.push(homePathFor(res.user && res.user.role))
+        // ★ 支持 redirect：从「仅限登录」的问卷跳过来时，登录后回到那份问卷。
+        //   只接受站内路径（以单个 / 开头），挡掉 //evil.com 这类协议相对跳转。
+        const redirect = this.$route.query.redirect
+        if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) {
+          this.$router.push(redirect)
+        } else {
+          this.$router.push(homePathFor(res.user && res.user.role))
+        }
       } catch (e) {
         // 后端对"账号不存在"与"密码错误"返回**同一句**「账号或密码错误」，
         //   ★ 前端**不要**改写文案、也不要根据任何差异给出不同提示，否则等于帮人做账号探测。

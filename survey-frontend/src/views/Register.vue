@@ -124,7 +124,8 @@
 
         <div class="auth-footer">
           <span class="text-gray">已有账号？</span>
-          <el-button type="primary" link @click="$router.push('/login')">去登录</el-button>
+          <!-- ★ 带上 redirect：从"仅限登录"的问卷跳过来时，登录后还要回那份问卷 -->
+          <el-button type="primary" link @click="goLogin">去登录</el-button>
         </div>
       </el-form>
     </el-card>
@@ -272,6 +273,15 @@ export default {
     this.loadCaptcha()
   },
   methods: {
+    /** 去登录：把 redirect 透传过去（注册完 → 登录 → 回原问卷） */
+    goLogin() {
+      const redirect = this.$route.query.redirect
+      this.$router.push({
+        path: '/login',
+        query: typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+          ? { redirect } : {}
+      })
+    },
     /**
      * 取一张新的滑块验证码。
      *
@@ -428,7 +438,8 @@ export default {
           { token: this.sliderToken }
         )
         ElMessage.success('注册成功，即将跳转到登录页')
-        setTimeout(() => this.$router.push('/login'), 900)
+        // ★ 透传 redirect：注册完 → 登录 → 回到原问卷（"仅限登录"的问卷靠这条闭环）
+        setTimeout(() => this.goLogin(), 900)
       } catch (e) {
         // ★ 错误信息在表单区域展示：api.user.register 传了 silent:true → http.js 不弹 ElMessage，
         //   但**错误信息照常挂在 ApiError.message 上**（silent 只抑制弹窗，不吞信息），

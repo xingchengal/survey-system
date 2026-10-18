@@ -32,6 +32,26 @@
       </el-card>
     </div>
 
+    <!-- ★ 仅限登录用户填写：未登录时只给登录引导，**不加载题目**（后端提交也会拒收匿名）。
+         登录/注册后回到本页（redirect 参数），即可继续。 -->
+    <div v-else-if="loginRequired && !loggedIn" style="max-width: 600px; margin: 60px auto;">
+      <el-card>
+        <h2 style="margin: 0 0 8px 0;">{{ survey.title }}</h2>
+        <p v-if="survey.description" style="color: #666; margin: 0 0 16px;">{{ survey.description }}</p>
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          title="该问卷仅限登录用户填写"
+          description="请先登录或注册新账号，登录后会自动回到这份问卷。"
+        />
+        <div class="login-gate-actions">
+          <el-button type="primary" @click="goLogin">登录</el-button>
+          <el-button @click="goRegister">注册新账号</el-button>
+        </div>
+      </el-card>
+    </div>
+
     <div v-else-if="submitted" style="max-width: 600px; margin: 80px auto;">
       <!-- ★ 考试判分：交卷后立刻出分。
            ★ 为什么必须在这里给：匿名答卷没有 user_id，之后无法再查自己的成绩
@@ -468,6 +488,10 @@ export default {
     currentHasOptions() {
       return hasOptionType(this.currentQuestion && this.currentQuestion.type)
     },
+    /** 该问卷是否仅限登录用户填写（作者在设置里开的；默认 false = 匿名） */
+    loginRequired() {
+      return !!this.survey && this.survey.requireLogin === 1
+    },
     /**
      * 当前题**可用**的选项：过滤掉内容为空的脏选项。
      * ★ 空内容必须滤掉而不是原样渲染 —— 空字符串当 value 时整组选项的值都相同。
@@ -660,6 +684,12 @@ export default {
         }
         if (this.isExpired) {
           this.closedReason = 'expired'
+          this.loading = false
+          return
+        }
+        // ★ 仅限登录用户填写：未登录时不加载题目（页面渲染登录引导卡）。
+        //   服务端同样会拒收匿名答卷 —— 这里只是不让用户白填一遍。
+        if (data.requireLogin === 1 && !this.loggedIn) {
           this.loading = false
           return
         }
@@ -1209,7 +1239,11 @@ export default {
         //   没打开计时（startedAt=0）就不传 —— 后端会当作"未上报"、不判这条规则。
         const durationMs = this.startedAt ? Math.max(0, Date.now() - this.startedAt) : null
         // ★ 返回值带判分结果（普通问卷 graded=false / 分数全 null，此时不渲染成绩卡）
-        const result = await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
+        // ★ 实名问卷（requireLogin=1）必须走带 token 的 submit/{surveyId}：
+        //   submit-share 的 userId 恒为 null，后端会 400「仅限登录用户」。
+        const result = this.loginRequired
+          ? await api.answer.submit(this.survey.id, details, durationMs)
+          : await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
         this.submitResult = result && result.graded ? result : null
         this.submitted = true
         this.clearTimeLimit()
@@ -1217,10 +1251,41 @@ export default {
         // ★ 提交成功后静默刷新一次分享信息：限量问卷往往"你交完就满了"，
         //   刷新后"再填一份"会自动消失，而不是点进去再吃一次 400。
         this.refreshShareInfo()
-      } catch {
-        // 失败红字已由 http.js 弹出；这里只做流程控制：
+      } catch (e) {
+        // ★ 实名问卷：同一账号第二次提交会被 uk_survey_user 挡成 400。
+        //   这不是"操作失败"，而是"你已经交过了" —— 直接把上次的成绩取回来展示，
+        //   比只弹一句红字有用（也避免用户以为是网络问题反复点）。
+        if (this.loginRequired && e && e.status === 400
+            && String(e.message || '').includes('已经提交过')) {
+          await this.loadMyScore()
+          return
+        }
+        // 其它失败红字已由 http.js 弹出；这里只做流程控制：
         // 保持当前页面，访客可以改完再点一次"提交问卷"。
       }
+    },
+
+    /**
+     * 取回"我在本问卷上次的成绩"并直接展示成绩卡（实名问卷重复提交时用）。
+     * ★ 只有登录用户能查（GET /answer/score/{surveyId} 按 surveyId + 当前用户定位）。
+     */
+    async loadMyScore() {
+      try {
+        const score = await api.answer.score(this.survey.id)
+        this.submitResult = { graded: true, questions: null, ...score }
+        this.submitted = true
+        this.clearTimeLimit()
+      } catch {
+        // 失败提示由 http.js 负责；页面保持原样即可
+      }
+    },
+
+    /** 登录 / 注册：带上当前问卷地址，登录后自动回到这里（Login/Register 支持 redirect） */
+    goLogin() {
+      this.$router.push({ path: '/login', query: { redirect: this.$route.fullPath } })
+    },
+    goRegister() {
+      this.$router.push({ path: '/register', query: { redirect: this.$route.fullPath } })
     },
 
     /**
@@ -1261,6 +1326,12 @@ export default {
 </script>
 
 <style scoped>
+/* 仅限登录：登录/注册引导按钮 */
+.login-gate-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 12px;
+}
 /* 考试判分：交卷后的成绩卡（只展示分数与是否及格，不展示正确答案） */
 .score-card {
   margin-bottom: 4px;

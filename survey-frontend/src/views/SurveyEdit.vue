@@ -564,6 +564,19 @@
           </div>
         </el-form-item>
 
+        <el-divider content-position="left">填写身份</el-divider>
+
+        <el-form-item label="仅限登录用户">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.requireLogin" :active-value="1" :inactive-value="0" />
+            <el-tag v-if="surveyInfo.requireLogin === 1" type="warning" size="small">答题人必须先登录</el-tag>
+          </div>
+          <div class="setting-hint">
+            关闭（默认）= 匿名可填，与现在完全一致；开启后答题人必须先登录/注册才能看到题目，
+            答卷会记录账号、**同一账号只能提交一份**（适合考试、实名问卷）。
+          </div>
+        </el-form-item>
+
         <el-divider content-position="left">考试判分</el-divider>
 
         <el-form-item label="考试模式">
@@ -879,7 +892,9 @@ export default {
         // 限时（用分钟编辑，保存时换算成秒；null = 不限时）
         timeLimitMinutes: null,
         // 提交后是否展示正确答案（只有考试模式有意义）
-        showAnswerAfterSubmit: 0
+        showAnswerAfterSubmit: 0,
+        // 是否仅限登录用户填写（0=匿名可填，默认；1=必须先登录）
+        requireLogin: 0
       },
       questions: [],
 
@@ -1137,6 +1152,8 @@ export default {
           // ★ 限时：库里是秒，编辑器按分钟展示（空/0 都视为不限）
           timeLimitMinutes: data.timeLimitSeconds ? Math.round(data.timeLimitSeconds / 60) : null,
           showAnswerAfterSubmit: data.showAnswerAfterSubmit === 1 ? 1 : 0,
+          // ★ 仅限登录用户填写：默认 0（老后端不返回时也不会误开）
+          requireLogin: data.requireLogin === 1 ? 1 : 0,
           // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
@@ -1656,7 +1673,9 @@ export default {
           timeLimitSeconds: this.surveyInfo.timeLimitMinutes
             ? Math.round(this.surveyInfo.timeLimitMinutes * 60) : null,
           showAnswerAfterSubmit: this.surveyInfo.gradeEnabled === 1
-            && this.surveyInfo.showAnswerAfterSubmit === 1 ? 1 : 0
+            && this.surveyInfo.showAnswerAfterSubmit === 1 ? 1 : 0,
+          // ★ 仅限登录用户填写：默认 0，关闭时也传 0（静态 SQL，不传会被写成默认值）
+          requireLogin: this.surveyInfo.requireLogin === 1 ? 1 : 0
         })
 
         // ★ 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿

@@ -248,6 +248,7 @@ CREATE TABLE `t_survey` (
   `pass_score` int DEFAULT NULL COMMENT '及格分：NULL=不判及格（只出分）；开启考试模式时取值必须在 0 ~ 本卷总分之间',
   `time_limit_seconds` int DEFAULT NULL COMMENT '答题限时（秒）：NULL=不限；前端倒计时，服务端按上报 duration_ms + 10s 宽限校验（非防作弊）',
   `show_answer_after_submit` tinyint NOT NULL DEFAULT '0' COMMENT '提交后是否展示正确答案：0=否（只出分），1=是；只在 grade_enabled=1 时有意义',
+  `require_login` tinyint NOT NULL DEFAULT '0' COMMENT '是否仅限登录用户填写：0=匿名可填（默认），1=必须先登录；开启后只收带 token 的 POST /answer/submit',
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',

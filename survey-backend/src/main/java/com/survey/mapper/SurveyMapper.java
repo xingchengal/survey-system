@@ -90,7 +90,8 @@ public interface SurveyMapper {
             "public_result=IFNULL(#{publicResult}, 0), ip_limit=IFNULL(#{ipLimit}, 0), " +
             "grade_enabled=IFNULL(#{gradeEnabled}, 0), pass_score=#{passScore}, " +
             "time_limit_seconds=#{timeLimitSeconds}, " +
-            "show_answer_after_submit=IFNULL(#{showAnswerAfterSubmit}, 0) WHERE id=#{id}")
+            "show_answer_after_submit=IFNULL(#{showAnswerAfterSubmit}, 0), " +
+            "require_login=IFNULL(#{requireLogin}, 0) WHERE id=#{id}")
     int update(Survey survey);
 
     /**
