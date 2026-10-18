@@ -531,7 +531,7 @@ cd survey-backend
 ```
 
 覆盖 **343** 个默认用例（共 **42** 个测试类），全部**不依赖数据库**（纯单测 + 1 个 MockMvc 全栈类，
-后者把 Mapper 与 DataSource 都 mock 掉）。两个需要真实 MySQL 的类已在 Surefire 中排除：
+后者把 Mapper 与 DataSource 都 mock 掉）。三个需要真实 MySQL 的类已在 Surefire 中排除：
 
 ```powershell
 # ① contextLoads（连本机 survey_db，只验证 Spring 上下文能起来）
@@ -540,7 +540,33 @@ cd survey-backend
 # ② 真库集成测试：注册→建卷→发布→提交→统计→分页→Excel→删除（只连独立的空库 survey_db_test）
 $env:TEST_DB_PASSWORD='<本机库口令>'
 .\mvnw.cmd -o "-Dtest=SurveyFlowIntegrationTest" test
+
+# ③ 钱包并发测试（50 并发扣费不超扣 / 同幂等键只扣一次 / 对账一致）
+.\mvnw.cmd -o "-Dtest=WalletConcurrencyTest" test
 ```
+
+**覆盖率（JaCoCo，可选 profile）**
+
+```powershell
+# 生成 target/site/jacoco/（html + xml + csv）
+.\mvnw.cmd -B -Pcoverage test
+```
+
+> jacoco 放在 pom 的 **`coverage` profile** 里、**默认不启用** —— 本地日常是离线构建
+> （`-o test`），把插件无条件挂上去会让 `-o` 直接失败（多数人 `~/.m2` 里没有它）。
+> 首次用 `-Pcoverage` 需要联网拉一次插件；之后可离线。
+
+当前实测：**行 51.6% · 分支 45.5% · 指令 43.7%**。分包看更能说明问题：
+
+| 包 | 行覆盖 | 说明 |
+|---|---|---|
+| `common` / `aspect` | **91% / 90.7%** | 核心不变量（角色、归属、状态枚举、限流、脱敏）—— 这才是必须钉死的部分 |
+| `config` / `filter` | 64.5% / 64.3% | 过滤器链与 Redis 熔断 |
+| `service` | 52.5% | 业务主干，2709 行里大部分是分支密集的参数校验 |
+| `controller` | 16.3% | 主要是参数转发；它的**鉴权路径**由 MockMvc 矩阵逐条覆盖，业务分支在 Service |
+
+CI 的 backend 作业跑 `-Pcoverage`，把报告作为 artifact 上传，并在 job summary 里输出上面这组数字。
+**不设强制阈值**：覆盖率是看趋势的指标，用阈值卡 CI 只会逼人写凑数的测试。
 
 > 集成测试的库要先建好并导入结构（`sql/init.sql`），且**不要**指向开发/演示库：
 > `CREATE DATABASE survey_db_test ...` → `mysql ... survey_db_test < sql/init.sql`。

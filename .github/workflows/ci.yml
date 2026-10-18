@@ -72,11 +72,55 @@ jobs:
       - name: 编译（Maven Wrapper）
         run: ./mvnw -B -q -DskipTests compile
 
-      # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了两个连库的测试
-      #   （SurveyBackendApplicationTests / SurveyFlowIntegrationTest），其余测试类**全部自动纳入**。
-      #   当前应为 **204 个用例 / 24 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
-      - name: 单元测试 + MockMvc 全栈测试（不依赖数据库，Maven Wrapper）
-        run: ./mvnw -B test
+      # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了三个连库的测试
+      #   （SurveyBackendApplicationTests / SurveyFlowIntegrationTest / WalletConcurrencyTest），
+      #   其余测试类**全部自动纳入**。
+      #   当前应为 **343 个用例 / 42 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
+      #
+      # ★ why `-Pcoverage`：jacoco 放在 pom 的 **coverage profile** 里（默认不启用）。
+      #   本地日常是离线构建（`-o test`），把 jacoco 无条件挂上去会让 `-o` 直接失败
+      #   （插件不在多数人 ~/.m2 里）；CI 有网，显式激活即可。
+      - name: 单元测试 + MockMvc 全栈测试 + 覆盖率（不依赖数据库，Maven Wrapper）
+        run: ./mvnw -B -Pcoverage test
+
+      # 覆盖率报告：既是产物（可下载看 HTML），也在 job summary 里给一段人话摘要。
+      # ★ 不设强制阈值（fail if below）：覆盖率是"看趋势"的指标，
+      #   用阈值卡 CI 只会逼人写凑数的测试；本项目真正的不变量由 343 个用例本身保证。
+      - name: 汇总覆盖率（读 jacoco.csv 写进 job summary）
+        if: always()
+        run: |
+          # ★ 注意路径：本作业的 defaults.run.working-directory 是 survey-backend，
+          #   所以这里用**相对仓库子目录**的路径，不能写 survey-backend/target/...
+          #   （下面 upload-artifact 的 path 相反 —— action 的路径相对**仓库根**。）
+          CSV=target/site/jacoco/jacoco.csv
+          if [ ! -f "$CSV" ]; then
+            echo "未生成 jacoco.csv（测试步骤可能失败），跳过" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - "$CSV" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import csv, sys
+          rows = list(csv.DictReader(open(sys.argv[1], encoding='utf-8')))
+          def pct(missed, covered):
+              m = sum(int(r[missed]) for r in rows); c = sum(int(r[covered]) for r in rows)
+              return 0.0 if m + c == 0 else 100.0 * c / (m + c)
+          print("## 后端测试覆盖率（JaCoCo）\n")
+          print("| 指标 | 覆盖率 |")
+          print("|---|---|")
+          print(f"| 指令 | {pct('INSTRUCTION_MISSED','INSTRUCTION_COVERED'):.1f}% |")
+          print(f"| 分支 | {pct('BRANCH_MISSED','BRANCH_COVERED'):.1f}% |")
+          print(f"| 行 | {pct('LINE_MISSED','LINE_COVERED'):.1f}% |")
+          print("\n> 分包看：`common`/`aspect`（核心不变量）约 90%，`service` 约 52%，`controller` 约 16%")
+          print("> （Controller 主要是参数转发，业务分支在 Service；它的鉴权路径由 MockMvc 矩阵覆盖）。")
+          PY
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: survey-backend/target/site/jacoco/
+          if-no-files-found: warning
+          retention-days: 14
 
   # ============================================================
   # 真库集成测试（第二十八轮新增）
@@ -146,6 +190,14 @@ jobs:
 
       - name: 安装依赖
         run: npm ci
+
+      # ★ F5：依赖漏洞闸门。
+      #   为什么只卡 high 及以上：`npm audit` 连 low/moderate 一起报的时候噪音很大
+      #   （间接依赖的 DoS / ReDoS 提示常年存在），会把真正的"能被打"的漏洞淹掉。
+      #   当前基线是 **0 vulnerabilities**（2026-10-18 本地实测），所以加它不会一上来就红。
+      #   ★ 它不是"永久的绿"：将来新披露的漏洞会让这里变红 —— 那正是它该做的事。
+      - name: 依赖漏洞扫描（high 及以上）
+        run: npm audit --audit-level=high
 
       - name: ESLint 检查
         run: npx eslint .

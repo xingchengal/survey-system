@@ -175,4 +175,54 @@
         </plugins>
     </build>
 
+    <!-- ============================================================
+         覆盖率（**可选 profile，默认不启用**）
+
+         ★ 为什么做成 profile 而不是直接挂在 build/plugins：
+           本项目的日常流程是**离线**构建（`mvnw -o test` / IDEA 点测试）。
+           jacoco 插件不在多数人本机的 ~/.m2 里，一旦无条件挂上去，
+           `-o` 构建会直接失败（Could not resolve org.jacoco:jacoco-maven-plugin）。
+           放进 profile 后：默认构建完全不解析它（Maven 只解析已激活的 profile），
+           要覆盖率时显式 `-Pcoverage`（首次需要联网拉一次插件）。
+
+         ★ 怎么用：
+             ./mvnw -B -Pcoverage test        # 生成 target/site/jacoco/（html + xml + csv）
+             CI 的 backend 作业就是这么跑的，并把报告作为 artifact 上传。
+           本地离线（不联网）时**不要**带 -Pcoverage，普通 `-o test` 不受影响。
+
+         ★ 为什么 report 绑 test 阶段：这样 `mvn test` 一条命令就同时跑测试与出报告，
+           不需要为了覆盖率改跑 verify（本项目 verify 还会打 jar，白等一轮）。
+           执行顺序由声明顺序决定 —— 本 profile 只有一个插件，surefire 在 build/plugins 里、
+           先于 profile 合并，实测 surefire 先跑、report 后出（见 docs 的验证记录）。
+         ============================================================ -->
+    <profiles>
+        <profile>
+            <id>coverage</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>0.8.13</version>
+                        <executions>
+                            <execution>
+                                <id>prepare-agent</id>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>report</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
 </project>
