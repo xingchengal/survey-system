@@ -183,6 +183,15 @@ public class Survey {
     public Integer getCollaboratorCount() { return collaboratorCount; }
     public void setCollaboratorCount(Integer collaboratorCount) { this.collaboratorCount = collaboratorCount; }
 
+    /**
+     * 业务生命周期（DRAFT/PUBLISHED/SUSPENDED/ENDED/ARCHIVED），与 status 并存。
+     * ★ 由三条状态 SQL 与举报下架共同维护；读取方**不要**自己拼，用 common/SurveyLifecycle。
+     */
+    private String lifecycle;
+
+    public String getLifecycle() { return lifecycle; }
+    public void setLifecycle(String lifecycle) { this.lifecycle = lifecycle; }
+
     public Integer getMaxResponses() { return maxResponses; }
     public void setMaxResponses(Integer maxResponses) { this.maxResponses = maxResponses; }
 

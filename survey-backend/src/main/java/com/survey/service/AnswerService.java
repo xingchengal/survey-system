@@ -4,6 +4,7 @@ import com.survey.common.BizException;
 import com.survey.common.PageParams;
 import com.survey.common.PageResult;
 import com.survey.common.QuestionType;
+import com.survey.common.SurveyLifecycle;
 import com.survey.common.SurveyStatus;
 import com.survey.common.TextLimits;
 import com.survey.entity.Answer;
@@ -231,6 +232,13 @@ public class AnswerService {
         if (survey.getMaxResponses() != null && survey.getMaxResponses() > 0
                 && answerMapper.countBySurveyId(surveyId) >= survey.getMaxResponses()) {
             throw new BizException("这份问卷已收满 " + survey.getMaxResponses() + " 份答卷，无法继续提交");
+        }
+
+        // ★★ 被举报下架（lifecycle=SUSPENDED）一律拒收。
+        //   注意：**不能只看 status** —— 下架时 status 仍是 1（已发布），
+        //   这正是为什么要新增 lifecycle 而不是硬塞 status=3（会让全站 status==1 判断失效）。
+        if (SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle())) {
+            throw new BizException("该问卷已被下架，无法提交答卷");
         }
 
         // ★ 契约校验（见类注释）：

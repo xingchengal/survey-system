@@ -116,6 +116,8 @@ public class SurveyController {
 
         // ★ 硬校验：只要不是管理员，且不是自己的问卷，就拒绝
         surveyAccessService.requirePermission(old, userId, role, Permission.SURVEY_EDIT, "修改");
+        // ★ 已被举报下架的问卷，非管理员不能再改内容（编辑/发布都冻结，只能申请恢复）
+        surveyAccessService.requireNotSuspended(old, role, "修改");
 
         // ★ 分享码由服务端独占管理：一律沿用数据库里的旧值，不接受客户端传来的 shareCode。
         //   若只在 shareCode == null 时才沿用旧值，客户端传了就会被采纳 ——
@@ -294,6 +296,33 @@ public class SurveyController {
         return answerService.getSurveyStatistics(survey).withoutTextAnswers();
     }
 
+    @OperationLog("恢复上架")
+    @RequireAdmin
+    @Operation(summary = "取消下架（管理员）")
+    @PostMapping("/unsuspend/{id}")
+    public String unsuspend(@PathVariable Integer id) {
+        surveyService.restoreFromSuspend(id);
+        return "已恢复上架";
+    }
+
+    /**
+     * 作者申请恢复上架（H1 闭环）。
+     *
+     * ★ 与上面的 /unsuspend/{id} 是**两个不同的动作**，别再合并：
+     *   /unsuspend 是管理员**直接执行**恢复；本端点只**通知**管理员，lifecycle 保持 SUSPENDED，
+     *   等管理员在审核台点「恢复上架」。合并会让"作者自助恢复"绕过举报审核。
+     * ★ 档位：**只需登录**（不进 admin 档）。归属判断在 Service 里（只有作者本人能申请），
+     *   所以普通用户拿别人的 surveyId 调它只会得到 400「只能为自己的问卷申请恢复」。
+     */
+    @OperationLog("申请恢复上架")
+    @Operation(summary = "作者申请恢复上架（通知全部管理员，需登录）")
+    @PostMapping("/{id}/request-restore")
+    public String requestRestore(@PathVariable Integer id,
+                                 @RequestHeader("X-User-Id") Integer userId) {
+        surveyService.requestRestore(id, userId);
+        return "已提交申请，管理员会尽快处理";
+    }
+
     // ==================== 发布 / 复制 ====================
 
     @OperationLog("发布问卷")
@@ -311,6 +340,8 @@ public class SurveyController {
         }
         // ★ 发布涉及"对外可见"，editor 协作者**没有**这个权限（见 CollaboratorRole）
         surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_PUBLISH, "发布");
+        // ★ 已下架的问卷不能被直接重新发布：那等于绕过举报审核。要恢复只能走申请 → 管理员恢复。
+        surveyAccessService.requireNotSuspended(survey, role, "发布");
         return surveyService.publish(id);
     }
 

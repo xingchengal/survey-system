@@ -1,7 +1,7 @@
 package com.survey.aspect;
 
 import com.survey.annotation.RequireAdmin;
-import com.survey.common.BizException;
+import com.survey.common.ForbiddenException;
 import com.survey.common.Role;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.Aspect;
@@ -52,7 +52,7 @@ public class AdminCheckAspect {
         if (!Role.isAdmin(role)) {
             LOG.warn("越权拦截：{} 需要管理员权限，当前角色={}",
                     joinPoint.getSignature().toShortString(), role);
-            throw new BizException("无权限");
+            throw new ForbiddenException("无权限");
         }
     }
 }

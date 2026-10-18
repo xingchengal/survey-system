@@ -1,9 +1,11 @@
 package com.survey.service;
 
+import com.survey.common.BizException;
 import com.survey.common.CollaboratorRole;
 import com.survey.common.OwnershipGuard;
 import com.survey.common.Permission;
 import com.survey.common.Role;
+import com.survey.common.SurveyLifecycle;
 import com.survey.entity.Survey;
 import com.survey.mapper.SurveyCollaboratorMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,6 +72,37 @@ public class SurveyAccessService {
     }
 
     /**
+     * 已下架（SUSPENDED）问卷的**写操作**闸门。
+     *
+     * ★ 为什么单独一条、不塞进 {@link #requirePermission}：
+     *   版本历史列表用 SURVEY_EDIT 权限去做"只读"校验（文案「查看版本历史」），
+     *   若在 requirePermission 里按权限点一刀切，会把"看历史"也挡掉。
+     *   所以只让真正的写入口显式调用本方法：改标题/设置、保存题目、发布、回滚、加协作者。
+     *
+     * ★ 管理员放行：下架是管理员做出的处置，但恢复前若要应急修正内容（比如改掉违规文案），
+     *   不该被自己的闸门拦住。作者与协作者一律冻结 —— 下架期间内容不能再变，
+     *   否则"下架"就只是藏起来、作者还能继续改，审核失去意义。
+     *
+     * ★ 不拦的操作：看统计、看版本历史、移入回收站/彻底删除、退出协作。
+     *   下架不等于封禁一切 —— 作者仍然有权把自己的问卷删掉。
+     *
+     * @param action 动作名，拼进 400 文案（如 "修改" / "发布"）
+     */
+    public void requireNotSuspended(Survey survey, String role, String action) {
+        if (survey == null) {
+            return;
+        }
+        if (!SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle())) {
+            return;
+        }
+        if (Role.isAdmin(role)) {
+            return;
+        }
+        throw new BizException(
+                "该问卷已被下架，暂不能" + action + "；请先在「我的问卷」申请恢复上架");
+    }
+
+    /**
      * 是不是这份问卷的协作者（任何角色）。
      * ★ 编辑器读题目要用它：协作者没有作者身份，但必须能打开问卷看内容，
      *   否则"邀请你来协作"之后连编辑器都进不去（实测踩过：被答题密码挡住）。
@@ -84,6 +117,12 @@ public class SurveyAccessService {
      *
      * ★ 与 canAccess 同源：作者/管理员 = 四项全有；协作者 = 其角色映射的权限点；其他人 = 空。
      *   顺序固定，便于前端按稳定顺序渲染（也让测试断言好写）。
+     *
+     * ★ 下架收敛（SUSPENDED）：非管理员**拿不到 survey:edit / survey:publish**，
+     *   于是编辑器（SurveyEdit.vue）的保存/发布按钮自动禁用 —— 与后端
+     *   {@link #requireNotSuspended} 的硬拦同一口径，不是只靠前端藏按钮。
+     *   作者保留 survey:data（还能看数据）与 survey:delete（有权删掉自己的问卷）；
+     *   协作者只保留其角色里与"写"无关的权限点（editor → data，analyst → data，viewer → 空）。
      */
     public List<String> permissionsFor(Survey survey, Integer userId, String role) {
         if (survey == null) {
@@ -91,8 +130,14 @@ public class SurveyAccessService {
         }
         List<String> all = List.of(Permission.SURVEY_EDIT, Permission.SURVEY_PUBLISH,
                 Permission.SURVEY_DATA, Permission.SURVEY_DELETE);
-        if (Role.isAdmin(role) || isOwner(survey, userId)) {
+        if (Role.isAdmin(role)) {
             return all;
+        }
+        boolean suspended = SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle());
+        if (isOwner(survey, userId)) {
+            return suspended
+                    ? List.of(Permission.SURVEY_DATA, Permission.SURVEY_DELETE)
+                    : all;
         }
         Integer surveyId = survey.getId();
         if (userId == null || surveyId == null) {
@@ -103,8 +148,11 @@ public class SurveyAccessService {
         if (collaborator == null) {
             return List.of();
         }
-        // 按固定顺序过滤，保证返回顺序稳定
-        return all.stream().filter(collaborator::has).toList();
+        // 按固定顺序过滤，保证返回顺序稳定；下架时把"能改"收掉
+        return all.stream()
+                .filter(collaborator::has)
+                .filter(permission -> !suspended || !Permission.SURVEY_EDIT.equals(permission))
+                .toList();
     }
 
     /** 是否作者本人（与 OwnershipGuard 同口径；这里复制一份判空是为了不额外查库） */

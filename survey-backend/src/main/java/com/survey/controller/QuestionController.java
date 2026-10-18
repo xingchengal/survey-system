@@ -68,6 +68,8 @@ public class QuestionController {
         // ★ H2：能力（survey:edit）× 对象（作者/协作者/管理员）。editor 协作者可以改题，
         //   viewer/analyst 不行 —— 条件跳转规则的编辑也走这条闸门。
         surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_EDIT, "修改");
+        // ★ 已下架的问卷冻结内容：题目是"全量覆盖"语义，下架期间改题会让审核依据失效
+        surveyAccessService.requireNotSuspended(survey, role, "编辑题目");
         // ★ 回收站里的问卷不能改题目。
         //   这个接口是**全量覆盖**语义（没传的旧题会被删掉），在回收站问卷上执行
         //   会让历史答卷的 question_id 悬空 —— 后果比改个标题严重得多。

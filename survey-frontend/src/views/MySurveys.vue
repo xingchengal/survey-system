@@ -102,7 +102,12 @@
         </div>
 
         <div class="col-status">
-          <span v-if="row.status === 1" class="badge badge-published">
+          <!-- ★ 下架优先于 status 显示：被举报下架时 status 仍是 1（已发布），
+               只看 status 会显示成"已发布"、与"不能作答"的事实矛盾。 -->
+          <span v-if="row.lifecycle === 'SUSPENDED'" class="badge badge-suspended">
+            <span class="dot"></span> 已下架
+          </span>
+          <span v-else-if="row.status === 1" class="badge badge-published">
             <span class="dot"></span> 已发布
           </span>
           <span v-else-if="row.status === 2" class="badge badge-ended">
@@ -133,9 +138,19 @@
         </div>
 
         <div class="col-actions">
-          <el-button class="row-btn rb-edit" :icon="Edit" @click="handleEdit(row)">
+          <!-- ★ 已下架（SUSPENDED）只留「申请恢复 / 统计 / 删除」：
+               下架期间内容冻结（后端也会拦编辑/发布/回滚/加协作者），
+               再摆出"编辑/分享/复制/协作"只会让人点出一串 400，行内按钮也会显得乱。 -->
+          <el-button v-if="row.lifecycle !== 'SUSPENDED'" class="row-btn rb-edit" :icon="Edit" @click="handleEdit(row)">
             <span class="btn-label">编辑</span>
           </el-button>
+          <!-- ★ 只有被举报下架（lifecycle=SUSPENDED）才有这个入口：后端会校验归属，
+               并且只把"申请"变成给全部管理员的通知，不会直接恢复上架。 -->
+          <el-tooltip v-if="row.lifecycle === 'SUSPENDED'" content="问卷已被举报下架，可向管理员申请恢复上架" placement="top">
+            <el-button class="row-btn rb-restore" :icon="RefreshLeft" @click="handleRequestRestore(row)">
+              <span class="btn-label">申请恢复</span>
+            </el-button>
+          </el-tooltip>
           <!-- ★ 只要不是"已发布"就给发布入口，否则会出现"后端能救、界面无路可走"的 UI 死路
                 （后端是允许"延长（或清空）截止时间后重新发布"的）：
                   · 草稿（含 status 为 NULL 的历史数据，后端一律视为草稿）→ 发布
@@ -147,17 +162,17 @@
               <span class="btn-label">{{ row.status === 2 ? '重新发布' : '发布' }}</span>
             </el-button>
           </el-tooltip>
-          <el-button v-if="row.status === 1 || row.status === 2" class="row-btn rb-share" :icon="Share" @click="handleShare(row)">
+          <el-button v-if="(row.status === 1 || row.status === 2) && row.lifecycle !== 'SUSPENDED'" class="row-btn rb-share" :icon="Share" @click="handleShare(row)">
             <span class="btn-label">分享</span>
           </el-button>
           <el-button class="row-btn rb-stats" :icon="DataAnalysis" @click="handleStatistics(row)">
             <span class="btn-label">统计</span>
           </el-button>
-          <el-button class="row-btn rb-copy" :icon="CopyDocument" @click="handleCopy(row)">
+          <el-button v-if="row.lifecycle !== 'SUSPENDED'" class="row-btn rb-copy" :icon="CopyDocument" @click="handleCopy(row)">
             <span class="btn-label">复制</span>
           </el-button>
           <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
-          <el-button v-if="row.userId === currentUserId()" class="row-btn rb-collab" :icon="Connection" @click="openCollaborators(row)">
+          <el-button v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'" class="row-btn rb-collab" :icon="Connection" @click="openCollaborators(row)">
             <span class="btn-label">协作</span>
           </el-button>
           <el-button class="row-btn rb-delete" :icon="Delete" @click="handleDelete(row)">
@@ -172,10 +187,12 @@
       <div class="shared-title">🤝 共享给我的问卷（{{ sharedSurveys.length }}）</div>
       <div v-for="item in sharedSurveys" :key="item.id" class="shared-row">
         <span class="shared-name">{{ item.title }}<span class="id-badge">#{{ item.id }}</span></span>
-        <span class="shared-role">{{ item.status === 1 ? '已发布' : '未发布' }}</span>
-        <el-button size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
+        <!-- ★ 下架后协作者只能看数据/退出：不能再进编辑器改内容，也不再受理"申请权限" -->
+        <span v-if="item.lifecycle === 'SUSPENDED'" class="shared-role suspended">已下架</span>
+        <span v-else class="shared-role">{{ item.status === 1 ? '已发布' : '未发布' }}</span>
+        <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
         <el-button size="small" @click="handleStatistics(item)">统计</el-button>
-        <el-button size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
+        <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
         <el-button size="small" type="danger" plain @click="leaveCollaboration(item)">退出</el-button>
       </div>
     </div>
@@ -405,7 +422,7 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, CopyDocument, Edit, Promotion, Share, DataAnalysis, Delete,
-  Search, MagicStick, Connection } from '@element-plus/icons-vue'
+  Search, MagicStick, Connection, RefreshLeft } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
 //   http.js 统一带 Authorization: Bearer token、统一按 HTTP 状态码判成败、统一弹后端 message，
@@ -476,6 +493,7 @@ export default {
       Share: markRaw(Share),
       DataAnalysis: markRaw(DataAnalysis),
       Connection: markRaw(Connection),
+      RefreshLeft: markRaw(RefreshLeft),
       Delete: markRaw(Delete),
       Search: markRaw(Search),
       MagicStick: markRaw(MagicStick)
@@ -886,6 +904,29 @@ export default {
       }).catch(() => {})
     },
 
+    /**
+     * 申请恢复上架（只有 lifecycle=SUSPENDED 的问卷会出现这个按钮）。
+     * ★ 这个动作**不会**恢复问卷：它给全部管理员发一条「恢复上架申请」通知，
+     *   管理员在 /admin/reviews 点「恢复上架」才真正生效（后端会再校验一次 lifecycle）。
+     */
+    async handleRequestRestore(row) {
+      try {
+        await ElMessageBox.confirm(
+          `《${row.title}》已被举报下架。提交申请后全部管理员会收到通知，并在「举报审核」里决定是否恢复；恢复前它不能接收答卷。`,
+          '申请恢复上架',
+          { confirmButtonText: '提交申请', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch {
+        return // 用户取消
+      }
+      try {
+        await api.survey.requestRestore(row.id)
+        ElMessage.success('已提交申请，管理员会尽快处理')
+      } catch {
+        // 失败提示由接口层统一弹出（如"该问卷没有被下架，无需申请"）
+      }
+    },
+
     handleShare(row) {
       if (!row.shareCode) {
         ElMessage.warning('该问卷还没有分享码')
@@ -1087,6 +1128,13 @@ export default {
 }
 .shared-name .id-badge { margin-left: 8px; }
 .shared-role { font-size: 12px; color: var(--ink-3); }
+.shared-role.suspended {
+  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
 
 .list-header {
   display: grid;
@@ -1208,6 +1256,10 @@ export default {
 .badge-draft { background: #fff8e8; color: #d97706; border-color: #ffe7bd; }
 .badge-draft .dot { background: #d97706; }
 
+/* 已下架 = 红（与"已结束"的灰刻意区分：前者是举报审核的结果，需要作者行动） */
+.badge-suspended { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.badge-suspended .dot { background: #dc2626; }
+
 .badge-ended { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
 .badge-ended .dot { background: #64748b; }
 
@@ -1303,6 +1355,19 @@ export default {
   color: #fff;
   border-color: #4f46e5;
   box-shadow: 0 6px 14px rgba(79, 70, 229, 0.3);
+}
+
+/* 申请恢复 = 红橙（"需要管理员处理"的行动项，与举报下架的红色徽标同一色系） */
+.rb-restore {
+  background: #fff1f0;
+  color: #c2410c;
+  border-color: #ffd9cf;
+}
+.rb-restore:hover {
+  background: #ea580c;
+  color: #fff;
+  border-color: #ea580c;
+  box-shadow: 0 6px 14px rgba(234, 88, 12, 0.3);
 }
 
 /* 编辑 = 天空蓝（主操作） */

@@ -97,6 +97,8 @@ public class SurveyVersionController {
         Survey survey = requireOwnership(version.getSurveyId(), userId, role);
         // ★ 回收站里的问卷不能回滚：回滚走的是"全量覆盖式保存"，会让历史答卷的 question_id 悬空。
         OwnershipGuard.requireNotInRecycleBin(survey, "回滚版本");
+        // ★ 已下架问卷同样不能回滚（回滚会改题目，等于绕开"下架期间内容冻结"）
+        surveyAccessService.requireNotSuspended(survey, role, "回滚版本");
         SurveyVersion created = questionService.rollbackToVersion(version, userId);
         // ★ 回滚改的是题目（t_question/t_option），同样不会动 t_survey 的时间戳
         surveyService.touchUpdatedTime(version.getSurveyId());

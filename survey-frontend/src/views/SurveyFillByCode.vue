@@ -49,6 +49,15 @@
     </div>
 
     <div v-else style="max-width: 700px; margin: 0 auto;">
+      <!-- ★ 举报入口：**悬浮在右上角**，不再插进问卷头部。
+           原来它占了一行文档流，把「填写进度」条直接挤到下面（用户实测：进度条被顶掉）。
+           悬浮按钮不占布局、始终可达，且只在登录后出现（举报必须留身份，匿名点了也只会 401）。 -->
+      <el-tooltip v-if="loggedIn" content="举报该问卷" placement="left">
+        <button type="button" class="report-fab" @click="openReport">
+          <el-icon><Warning /></el-icon>
+          <span>举报</span>
+        </button>
+      </el-tooltip>
       <!-- 问卷头部 -->
       <el-card class="mb-20">
         <h2 style="margin: 0 0 10px 0;">{{ survey.title }}</h2>
@@ -62,6 +71,9 @@
             ⏰ 距截止：{{ countdown }}
           </el-tag>
         </div>
+
+        <!-- ★ 举报入口已移到页面右上角的悬浮按钮（见上方 .report-fab）：
+             原位置占一行，会把「填写进度」挤下去。 -->
 
         <!-- ★ 公开结果入口**填写前也可见**：以前只有"提交成功页"才有这个按钮，
              填完关掉页面就再也找不到路（再打开链接还会被"已收满"挡住）。 -->
@@ -259,7 +271,7 @@
 
 <script>
 import { ElMessage } from 'element-plus'
-import { CircleCheckFilled } from '@element-plus/icons-vue'
+import { CircleCheckFilled, Warning } from '@element-plus/icons-vue'
 // ★ 统一接口层：本页是**匿名答题页**，所有请求走 src/api/。
 //   ⚠️ silent 说明（本页最关键的一点）：本页任何接口失败都**不能触发"登录过期跳转"**，
 //     否则匿名答题流程会被打断。实际情况：
@@ -272,10 +284,11 @@ import { CircleCheckFilled } from '@element-plus/icons-vue'
 //     /api/question/list/、/api/answer/submit-share/），根本不会返回 401，
 //     所以去掉 silent 也不会触发跳转。
 import api from '../api'
+import { isLoggedIn } from '../utils/auth'
 import { RATING_LABELS, hasOptions as hasOptionType } from '../utils/questionTypes'
 
 export default {
-  components: { CircleCheckFilled },
+  components: { CircleCheckFilled, Warning },
   data() {
     return {
       shareCode: null,
@@ -286,6 +299,8 @@ export default {
       history: [],
       answers: {},
       submitted: false,
+      /** 是否已登录：举报需要登录身份，匿名访客不显示入口（点了也只会 401） */
+      loggedIn: false,
       /**
        * 为什么现在不能填：'' = 可以填；'full' 已收满 / 'expired' 已截止 / 'ended' 已结束。
        * ★ 三者都要在**进页面时**就判出来 —— 以前只有"提交"那一刻才知道，填写人会白填一遍。
@@ -375,6 +390,9 @@ export default {
       if (this.closedReason === 'full') {
         return `该问卷已收满 ${this.survey.maxResponses} 份答卷，无法继续填写`
       }
+      if (this.closedReason === 'suspended') {
+        return '该问卷已被下架，无法继续填写'
+      }
       if (this.closedReason === 'expired') {
         return `该问卷已于 ${this.survey.endTime} 截止，无法继续填写`
       }
@@ -384,6 +402,9 @@ export default {
     closedHint() {
       if (this.closedReason === 'full') {
         return '收集上限由作者在「设置」里设定；达到上限后提交一律会被拒收，所以这里直接拦住，不用白填一遍。'
+      }
+      if (this.closedReason === 'suspended') {
+        return '该问卷因举报被管理员下架，暂时不接收答卷。'
       }
       if (this.closedReason === 'expired') {
         return '到了截止时间就不再收答卷（提交会被后端拒绝），所以不再让你从头填。'
@@ -403,6 +424,7 @@ export default {
   },
   mounted() {
     this.shareCode = this.$route.params.shareCode
+    this.loggedIn = isLoggedIn()
     // ★ 从"打开页面"开始计时（而不是等题目加载完）：用户的阅读时间也该算进答题耗时
     this.startedAt = Date.now()
     this.loadSurvey()
@@ -444,6 +466,12 @@ export default {
           this.loading = false
           return
         }
+        // ★ 被举报下架：status 仍是 1（已发布），只能看 lifecycle —— 这是 H1 新增的语义
+        if (data.lifecycle === 'SUSPENDED') {
+          this.closedReason = 'suspended'
+          this.loading = false
+          return
+        }
         if (data.responsesFull === true) {
           this.closedReason = 'full'
           this.loading = false
@@ -459,6 +487,9 @@ export default {
           this.loading = false
           return
         }
+        // ★ 无密码问卷必须直接置为"已验证"：进度条与题目区都以 passwordVerified 为门控，
+        //   不置 true 的话进度条**永远不显示**（这也是"进度条不见了"的一半原因）。
+        this.passwordVerified = true
         await this.loadQuestions()
       } catch {
         // ★ 加载失败（问卷不存在/已下线/网络异常）→ 走"问卷不存在"空态
@@ -513,6 +544,23 @@ export default {
       } finally {
         this.verifying = false
       }
+    },
+
+    /** 举报：弹框填理由（后端校验 1~500 字、不能举报自己、草稿不可举报） */
+    async openReport() {
+      let reason
+      try {
+        const { value } = await this.$prompt('请描述举报理由（例如：内容违规、诱导分享）', '举报该问卷', {
+          inputType: 'textarea',
+          confirmButtonText: '提交举报',
+          cancelButtonText: '取消'
+        })
+        reason = (value || '').trim()
+      } catch {
+        return // 用户取消
+      }
+      await api.survey.report(this.survey.id, reason)
+      ElMessage.success('举报已提交，管理员会尽快处理')
     },
 
     goPublicResult() {
@@ -934,5 +982,38 @@ export default {
   background: #fffbeb;
   border: 1px solid #fde68a;
   border-radius: 8px;
+}
+
+/* ==================== 举报悬浮按钮 ==================== */
+/* 固定右上角、不参与文档流：既不挡标题/描述，也不会把「填写进度」挤下去。
+   白底半透明 + 灰字，低调但随时可达；hover 才变红，避免喧宾夺主。 */
+.report-fab {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 2000;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #6b7280;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(6px);
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+.report-fab:hover {
+  color: #dc2626;
+  background: #fef2f2;
+  border-color: #fecaca;
+  transform: translateY(-1px);
+}
+.report-fab .el-icon {
+  font-size: 15px;
 }
 </style>

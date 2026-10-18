@@ -188,7 +188,7 @@
           <div class="quick-action" @click="$router.push('/admin/surveys')">
             <el-icon :size="32" color="#67c23a"><Document /></el-icon>
             <div class="text-subtitle">全部问卷</div>
-            <div class="text-hint">查看 / 删除违规</div>
+            <div class="text-hint">查看 / 模板 / 删除</div>
           </div>
         </el-col>
         <el-col :span="6" :xs="12" :sm="12" :md="6">

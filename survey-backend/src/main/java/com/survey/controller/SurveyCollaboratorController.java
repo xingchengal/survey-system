@@ -6,6 +6,7 @@ import com.survey.common.CollaboratorRole;
 import com.survey.common.OwnershipGuard;
 import com.survey.dto.CollaboratorView;
 import com.survey.entity.Survey;
+import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyCollaboratorService;
 import com.survey.service.SurveyService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -50,6 +51,9 @@ public class SurveyCollaboratorController {
     @Autowired
     private SurveyCollaboratorService collaboratorService;
 
+    @Autowired
+    private SurveyAccessService surveyAccessService;
+
     @Operation(summary = "某问卷的协作者列表（作者/管理员）")
     @GetMapping("/api/survey/{surveyId}/collaborators")
     public List<CollaboratorView> list(@PathVariable Integer surveyId,
@@ -66,6 +70,8 @@ public class SurveyCollaboratorController {
                          @RequestHeader("X-User-Id") Integer userId,
                          @RequestHeader("X-User-Role") String role) {
         Survey survey = requireManageable(surveyId, userId, role);
+        // ★ 已下架的问卷不能再扩员 / 改角色：下架期间内容冻结，不该把更多人拉进编辑链
+        surveyAccessService.requireNotSuspended(survey, role, "管理协作者");
         String username = body.get("username") == null ? null : String.valueOf(body.get("username")).trim();
         String collaboratorRole = body.get("role") == null ? null : String.valueOf(body.get("role")).trim();
         if (username == null || username.isEmpty()) {
@@ -83,6 +89,8 @@ public class SurveyCollaboratorController {
                              @RequestHeader("X-User-Id") Integer userId,
                              @RequestHeader("X-User-Role") String role) {
         Survey survey = requireManageable(surveyId, userId, role);
+        // ★ 同上：下架期间不能改协作者角色
+        surveyAccessService.requireNotSuspended(survey, role, "管理协作者");
         String collaboratorRole = body.get("role") == null ? null : String.valueOf(body.get("role")).trim();
         collaboratorService.changeRole(survey, targetUserId, collaboratorRole);
         return "已改为 " + collaboratorRole;

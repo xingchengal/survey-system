@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.survey.common.QuestionType;
+import com.survey.common.SurveyLifecycle;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
 import com.survey.common.PageParams;
@@ -15,6 +16,8 @@ import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
+import com.survey.mapper.UserMapper;
+import com.survey.service.NotificationService;
 import com.survey.mapper.AnswerMapper;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
@@ -73,6 +76,17 @@ public class SurveyService {
     private AnswerDetailMapper answerDetailMapper;
     @Autowired
     private StatsCacheService statsCacheService;
+
+    /**
+     * 恢复上架申请的收件人来源（所有有效管理员）。
+     * ★ 只用 findAdminIds()，不要在这里再写一条 `SELECT ... role='admin'` ——
+     *   已注销管理员必须被排除，那个过滤条件只应有一份。
+     */
+    @Autowired
+    private UserMapper userMapper;
+
+    @Autowired
+    private NotificationService notificationService;
 
     // ===== 分享码生成 =====
 
@@ -388,6 +402,65 @@ public class SurveyService {
             return;   // 作者本人：这是他自己的问卷
         }
         requireAccessPassword(survey, submitted);
+    }
+
+    /**
+     * 取消下架（恢复上架）。
+     * ★ 只允许 SUSPENDED → PUBLISHED：下架是举报审核的结果，撤销也该走同一个入口，
+     *   而不是让管理员随便把任意问卷改成 PUBLISHED（那会把草稿"发布"出去）。
+     */
+    public void restoreFromSuspend(Integer surveyId) {
+        Survey survey = surveyMapper.findById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (!SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle())) {
+            throw new BizException("该问卷当前不是下架状态");
+        }
+        surveyMapper.updateLifecycle(surveyId, SurveyLifecycle.PUBLISHED.code());
+    }
+
+    /**
+     * 作者申请恢复上架（H1 闭环的另一半：下架之后作者要有可点的出路）。
+     *
+     * ★ 为什么必须有这条：举报通过后问卷 lifecycle=SUSPENDED，而下面的
+     *   {@link #restoreFromSuspend} 是**管理员专属**入口 —— 作者在「我的问卷」里
+     *   除了看着它不能作答之外没有任何操作，只能线下找人。这条把"申请"落成一条
+     *   给**全部有效管理员**的站内通知，管理员点通知就去审核台处理。
+     *
+     * ★ 三个判断都在这里、而不是 Controller：
+     *   ① 问卷存在；② 确实处于 SUSPENDED（没被下架就没什么可申请的）；
+     *   ③ 只有作者本人能替自己申请（管理员也走这条，不能替别人申请 ——
+     *      管理员有 restoreFromSuspend，不需要"申请"）。
+     *   ★ 归属判断用 equals 而不是 `==`：userId 是 Integer，超过 127 时 `==` 比的是引用，
+     *     会随机把作者自己判成"不是你的问卷"。
+     *
+     * ★ 通知走 NotificationService.send（异步、内部自己兜异常），
+     *   所以这里不会因为某个管理员的通知写失败而让整次申请 500。
+     *
+     * @param surveyId 问卷 id
+     * @param userId   当前登录用户（作者）id
+     */
+    public void requestRestore(Integer surveyId, Integer userId) {
+        Survey survey = surveyMapper.findById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (!SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle())) {
+            throw new BizException("该问卷没有被下架，无需申请");
+        }
+        if (survey.getUserId() == null || !survey.getUserId().equals(userId)) {
+            throw new BizException("只能为自己的问卷申请恢复");
+        }
+        // 一次查出全部管理员，再逐条发通知（人数是个位数，不需要并发）
+        // ★ link 带 ?status=APPROVED：申请恢复对应的那条举报早已是「已通过」，
+        //   不带筛选的话管理员点通知会落在「待处理」空列表上，找不到这份问卷。
+        //   审核页 ReviewManage.vue 的 mounted 会读这个 query 作为初始筛选。
+        for (Integer adminId : userMapper.findAdminIds()) {
+            notificationService.send(adminId, "恢复上架申请",
+                    "作者申请恢复《" + survey.getTitle() + "》，请到举报审核页处理",
+                    "review", "/admin/reviews?status=APPROVED");
+        }
     }
 
     /**

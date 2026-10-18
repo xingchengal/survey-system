@@ -52,6 +52,16 @@ export default {
    *  ★ status / shareCode / userId 后端一律**静默忽略** —— 要改状态必须走 publish()，否则页面不会有任何变化 */
   update: (data) => http.put('/api/survey/update', data),
 
+  /** 举报问卷（需登录；理由 1~500 字） */
+  report: (surveyId, reason) => http.post(`/api/survey/${surveyId}/report`, { reason }),
+
+  /**
+   * 作者申请恢复上架（需登录；只有**自己名下、且 lifecycle=SUSPENDED** 的问卷能申请）。
+   * ★ 它只是"通知全部管理员"，不会改 lifecycle —— 真正恢复是管理员的
+   *   reviewApi.unsuspend(surveyId)（/api/survey/unsuspend/{id}）。
+   */
+  requestRestore: (id) => http.post(`/api/survey/${id}/request-restore`),
+
   /** 按 id 查问卷详情 */
   detail: (id) => http.get(`/api/survey/${id}`),
 

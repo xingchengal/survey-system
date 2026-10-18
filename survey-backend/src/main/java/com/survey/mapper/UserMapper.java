@@ -49,6 +49,13 @@ import java.util.List;
 public interface UserMapper {
 
     /**
+     * 所有有效管理员的 id（恢复上架申请要通知他们）。
+     * ★ 带 deleted_at IS NULL：已注销的管理员不该收到通知。
+     */
+    @Select("SELECT id FROM t_user WHERE role = 'admin' AND deleted_at IS NULL")
+    java.util.List<Integer> findAdminIds();
+
+    /**
      * 按用户名查（登录、注册查重都用它）。
      * ★ 带 `deleted_at IS NULL`：**已注销账号登不进去**，而且失败路径与"密码错"完全一致
      *   （`UserService.login` 拿到 null 就返回 null → Controller 抛同一句「账号或密码错误」），

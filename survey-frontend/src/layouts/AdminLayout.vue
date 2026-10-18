@@ -38,7 +38,7 @@
             </el-menu-item>
             <el-menu-item index="/admin/recycle">
               <el-icon><Delete /></el-icon>
-              <span>违规问卷管理</span>
+              <span>回收站</span>
             </el-menu-item>
             <el-menu-item index="/admin/announcements">
               <el-icon><Bell /></el-icon>
@@ -47,6 +47,10 @@
             <el-menu-item index="/admin/logs">
               <el-icon><Memo /></el-icon>
               <span>操作日志</span>
+            </el-menu-item>
+            <el-menu-item index="/admin/reviews">
+              <el-icon><Warning /></el-icon>
+              <span>举报审核</span>
             </el-menu-item>
             <el-menu-item index="/admin/demo">
               <el-icon><MagicStick /></el-icon>

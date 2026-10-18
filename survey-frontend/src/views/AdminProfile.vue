@@ -125,7 +125,7 @@
               <div class="quick-action" @click="$router.push('/admin/surveys')">
                 <el-icon :size="26" color="#67c23a"><Document /></el-icon>
                 <div class="qa-title">全部问卷</div>
-                <div class="qa-desc">违规处理</div>
+                <div class="qa-desc">管理 / 模板</div>
               </div>
             </el-col>
             <el-col :span="6" :xs="12" :sm="12" :md="6">
@@ -145,8 +145,8 @@
             <el-col :span="6" :xs="12" :sm="12" :md="6">
               <div class="quick-action" @click="$router.push('/admin/recycle')">
                 <el-icon :size="26" color="#ef4444"><Delete /></el-icon>
-                <div class="qa-title">违规问卷</div>
-                <div class="qa-desc">回收站处理</div>
+                <div class="qa-title">回收站</div>
+                <div class="qa-desc">全部用户的删除记录</div>
               </div>
             </el-col>
             <el-col :span="6" :xs="12" :sm="12" :md="6">

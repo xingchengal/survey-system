@@ -227,6 +227,7 @@ CREATE TABLE `t_survey` (
   `view_count` int DEFAULT '0' COMMENT '访问次数',
   `deleted_by` int DEFAULT NULL COMMENT '删除人ID（谁移入回收站的）',
   `deleted_at` datetime DEFAULT NULL COMMENT '移入回收站的时间：NULL=不在回收站，非NULL=何时被删；恢复时置回 NULL',
+  `lifecycle` varchar(20) DEFAULT 'DRAFT' COMMENT '业务生命周期：DRAFT/PUBLISHED/SUSPENDED/ENDED/ARCHIVED；与 status 并存，由 Service 同步',
   `access_password` varchar(20) DEFAULT NULL COMMENT '答题密码：NULL=不需要；非空时加载题目与提交答卷都要带 X-Survey-Password',
   `max_responses` int DEFAULT NULL COMMENT '最多收集多少份答卷：NULL=不限；达到后拒绝新提交',
   `thank_text` varchar(500) DEFAULT NULL COMMENT '提交后的感谢语：NULL=默认「提交成功，感谢您的参与」',
@@ -365,5 +366,21 @@ SELECT u.id, r.id
 FROM `t_user` u
 JOIN `t_role` r ON r.code = u.role
 WHERE u.deleted_at IS NULL;
+
+CREATE TABLE `t_survey_review` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `survey_id` int NOT NULL COMMENT '被举报的问卷',
+  `reporter_id` int NOT NULL COMMENT '举报人（登录用户）',
+  `reason` varchar(500) NOT NULL COMMENT '举报理由（用户填写）',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / APPROVED / REJECTED',
+  `action` varchar(20) DEFAULT NULL COMMENT '处理动作：SUSPEND / WARN / IGNORE（仅 APPROVED 时填）',
+  `handled_by` int DEFAULT NULL COMMENT '处理人（管理员）',
+  `handled_at` datetime DEFAULT NULL COMMENT '处理时间',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_survey` (`survey_id`),
+  KEY `idx_reporter` (`reporter_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷举报表';
 
 SET FOREIGN_KEY_CHECKS = 1;

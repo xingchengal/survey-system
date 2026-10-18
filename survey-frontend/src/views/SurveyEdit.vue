@@ -39,9 +39,21 @@
       </template>
     </el-alert>
 
+    <!-- ★ 被举报下架：内容冻结，只能查看；恢复正常后自动解除 -->
+    <el-alert
+      v-if="isSuspended"
+      class="mb-16"
+      type="error"
+      show-icon
+      :closable="false"
+      title="该问卷已被举报下架，内容已冻结：可以查看，不能保存 / 发布 / 回滚。"
+    >
+      请回到「我的问卷」点「申请恢复」，管理员处理后会解除限制。
+    </el-alert>
+
     <!-- ★ 只读/无发布权（协作者 viewer / analyst）：先把话说清，再把按钮禁掉 -->
     <el-alert
-      v-if="!canEditSurvey || !canPublishSurvey"
+      v-else-if="!canEditSurvey || !canPublishSurvey"
       class="mb-16"
       type="info"
       show-icon
@@ -674,6 +686,14 @@ export default {
       return this.surveyInfo.deleted !== null && this.surveyInfo.deleted !== 0
     },
     /**
+     * 是否被举报下架（lifecycle=SUSPENDED）。
+     * ★ 下架期间内容冻结：后端会拦保存/发布/回滚/加协作者，
+     *   前端把提示写成"申请恢复"而不是泛泛的"只读权限"。
+     */
+    isSuspended() {
+      return this.surveyInfo.lifecycle === 'SUSPENDED'
+    },
+    /**
      * 「已结束」的问卷是否已经把截止时间改到了未来（或清空）。
      * ★ 与后端 SurveyService.publish 的判定保持一致：endTime 为 null 或晚于当前时间 → 允许重新发布。
      */
@@ -761,6 +781,9 @@ export default {
           endTime: data.endTime,
           // ★ 带上 deleted —— 回收站里的问卷禁止保存/发布，页面要能判断并给出提示
           deleted: data.deleted == null ? 0 : data.deleted,
+          // ★ 带上 lifecycle —— 被举报下架（SUSPENDED）的问卷内容冻结，
+          //   页面要显示"申请恢复"的提示，而不是泛泛的"只读权限"。
+          lifecycle: data.lifecycle || null,
           updatedTime: data.updatedTime || null,
           // ===== 问卷设置（GET /api/survey/{id} 是作者接口，会带回真实密码）=====
           accessPassword: data.accessPassword || '',

@@ -90,6 +90,12 @@ const routes = [
         meta: { title: '操作日志', roles: ['admin'] }
       },
       {
+        path: 'admin/reviews',
+        name: 'ReviewManage',
+        component: () => import('../views/ReviewManage.vue'),
+        meta: { title: '举报审核', roles: ['admin'] }
+      },
+      {
         path: 'admin/demo',
         name: 'DemoData',
         component: () => import('../views/DemoData.vue'),

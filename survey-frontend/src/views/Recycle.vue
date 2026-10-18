@@ -2,7 +2,7 @@
   <div>
     <div class="page-header">
       <div>
-        <h2 class="page-title">{{ isAdmin ? '违规问卷管理' : '回收站' }}</h2>
+        <h2 class="page-title">{{ isAdmin ? '回收站（全部用户）' : '回收站' }}</h2>
         <p class="page-subtitle">被移入回收站的问卷可以随时恢复或彻底删除</p>
       </div>
     </div>
@@ -14,14 +14,17 @@
       <TableDensity />
     </div>
 
-    <el-alert class="mb-16" :title="isAdmin ? '这里是所有被下架的问卷，可恢复或彻底删除' : '回收站里的问卷不会出现在正常列表，可随时恢复或彻底删除'" type="info" :closable="false" />
+    <!-- ★ 文案必须如实：这张表是**回收站**（t_survey.deleted=1），不是"被举报下架"的问卷。
+         下架走的是 lifecycle=SUSPENDED、deleted 仍为 0，列在「举报审核」里 ——
+         旧文案写"这里是所有被下架的问卷"，会让人以为它与举报审核是同一份数据。 -->
+    <el-alert class="mb-16" :title="isAdmin ? '这里汇总全部用户移入回收站的问卷，可恢复或彻底删除；被举报下架的问卷不在这里，请到「举报审核」处理' : '回收站里的问卷不会出现在正常列表，可随时恢复或彻底删除'" type="info" :closable="false" />
 
     <div class="table-card">
     <PageState
       :loading="loading"
       :error="error"
       :empty="surveys.length === 0"
-      :empty-text="isAdmin ? '暂无违规问卷' : '回收站是空的'"
+      empty-text="回收站是空的"
       @retry="loadRecycle"
     >
     <el-table class="w-full" :data="surveys" stripe border max-height="560">
@@ -182,7 +185,7 @@ export default {
 
     handlePermanentDelete(row) {
       const msg = this.isAdmin
-        ? `⚠️ 确定彻底删除违规问卷「${row.title}」吗？所有相关答卷也会一并删除！`
+        ? `⚠️ 确定彻底删除「${row.title}」吗？所有相关答卷也会一并删除，且不可恢复！`
         : `确定彻底删除「${row.title}」吗？此操作不可恢复！`
       ElMessageBox.confirm(msg, '警告', {
         confirmButtonText: '确定彻底删除',

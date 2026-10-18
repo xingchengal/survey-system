@@ -1,7 +1,7 @@
 package com.survey.aspect;
 
 import com.survey.annotation.RequireAdmin;
-import com.survey.common.BizException;
+import com.survey.common.ForbiddenException;
 import com.survey.common.Role;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.Signature;
@@ -57,7 +57,7 @@ class AdminCheckAspectTest {
     /**
      * 拒绝分支会打一行 warn 日志（格式是 {@code joinPoint.getSignature().toShortString()}），
      * 所以 JoinPoint 必须能给出一个签名 —— 否则切面在"记日志"这一步就 NPE 了，
-     * 测试看起来像"没抛 BizException"，其实是日志语句先炸了。
+     * 测试看起来像"没抛 ForbiddenException"，其实是日志语句先炸了。
      */
     private static JoinPoint joinPoint() {
         Signature signature = mock(Signature.class);
@@ -75,10 +75,10 @@ class AdminCheckAspectTest {
     }
 
     @Test
-    @DisplayName("角色 = user → 400「无权限」，且是 BizException（不写异常日志）")
+    @DisplayName("角色 = user → 400「无权限」，且是 ForbiddenException（不写异常日志）")
     void userRole_shouldBeRejected() {
         withRoleHeader(Role.USER);
-        BizException ex = assertThrows(BizException.class,
+        ForbiddenException ex = assertThrows(ForbiddenException.class,
                 () -> aspect.requireAdmin(joinPoint()));
         assertEquals("无权限", ex.getMessage(),
                 "文案必须是「无权限」：前端与审计表都按这一个口径断言");
@@ -88,7 +88,7 @@ class AdminCheckAspectTest {
     @DisplayName("角色头缺失 → 拒绝（不能把 null 当成管理员）")
     void missingRole_shouldBeRejected() {
         withRoleHeader(null);
-        BizException ex = assertThrows(BizException.class,
+        ForbiddenException ex = assertThrows(ForbiddenException.class,
                 () -> aspect.requireAdmin(joinPoint()));
         assertEquals("无权限", ex.getMessage());
     }
@@ -100,10 +100,10 @@ class AdminCheckAspectTest {
         // 所以不需要"大小写/空格容错"；这里钉住的是"切面不自作主张放宽"。
         withRoleHeader("ADMIN");
         assertFalse(Role.isAdmin("ADMIN"), "Role.isAdmin 是区分大小写的常量比较");
-        assertThrows(BizException.class, () -> aspect.requireAdmin(joinPoint()));
+        assertThrows(ForbiddenException.class, () -> aspect.requireAdmin(joinPoint()));
 
         withRoleHeader(" admin ");
-        assertThrows(BizException.class, () -> aspect.requireAdmin(joinPoint()),
+        assertThrows(ForbiddenException.class, () -> aspect.requireAdmin(joinPoint()),
                 "带空白的角色不当成管理员 —— 若要放宽，先改 Role.isAdmin，别在切面里另写一套");
     }
 

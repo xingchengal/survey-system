@@ -47,12 +47,14 @@ public interface SurveyMapper {
      * ★ deleted_at 是回收站列表要展示的"什么时候删的"；显式写 NOW()，
      *   不依赖 updated_time 的 ON UPDATE 推断（虽然此刻两者相等）。
      */
-    @Update("UPDATE t_survey SET deleted = 1, deleted_by = #{userId}, deleted_at = NOW() " +
+    @Update("UPDATE t_survey SET deleted = 1, deleted_by = #{userId}, deleted_at = NOW(), lifecycle = 'ARCHIVED' " +
             "WHERE id = #{id}")
     int moveToRecycle(@Param("id") Integer id, @Param("userId") Integer userId);
 
     /** 从回收站恢复：deleted=0，清掉操作人信息与删除时间。 */
-    @Update("UPDATE t_survey SET deleted = 0, deleted_by = NULL, deleted_at = NULL WHERE id = #{id}")
+    @Update("UPDATE t_survey SET deleted = 0, deleted_by = NULL, deleted_at = NULL, "
+            + "lifecycle = CASE WHEN status = 1 THEN 'PUBLISHED' WHEN status = 2 THEN 'ENDED' ELSE 'DRAFT' END "
+            + "WHERE id = #{id}")
     int restoreFromRecycle(Integer id);
 
     /** 物理删除。★ 不级联删题目/答卷，优先走回收站那条路径。 */
@@ -103,7 +105,13 @@ public interface SurveyMapper {
      *   调用点一眼可数（grep updateStatusAndShareCode 即可），
      *   比"人人都能通过 update 顺手改状态"安全得多。
      */
-    @Update("UPDATE t_survey SET status = #{status}, share_code = #{shareCode} WHERE id = #{id}")
+    /** 只改业务生命周期（举报下架用；status/share_code 都不动） */
+    @Update("UPDATE t_survey SET lifecycle = #{lifecycle} WHERE id = #{id}")
+    int updateLifecycle(@Param("id") Integer id, @Param("lifecycle") String lifecycle);
+
+    @Update("UPDATE t_survey SET status = #{status}, share_code = #{shareCode}, "
+            + "lifecycle = CASE WHEN #{status} = 1 THEN 'PUBLISHED' WHEN #{status} = 2 THEN 'ENDED' ELSE 'DRAFT' END "
+            + "WHERE id = #{id}")
     int updateStatusAndShareCode(@Param("id") Integer id,
                                  @Param("status") Integer status,
                                  @Param("shareCode") String shareCode);

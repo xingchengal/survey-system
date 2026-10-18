@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">全部问卷</h2>
-        <p class="page-subtitle">共 {{ total }} 份 · 可查看、设为模板或删除违规问卷</p>
+        <p class="page-subtitle">共 {{ total }} 份 · 可查看、设为模板或移入回收站</p>
       </div>
     </div>
 
@@ -307,18 +307,18 @@ export default {
       }
     },
 
-    // ===== 把违规问卷移入回收站 =====
+    // ===== 把问卷移入回收站 =====
     // 关联：成功后要重新拉列表（recycle 不改本地数组，必须重新 loadSurveys）。
     handleDelete(row) {
-      ElMessageBox.confirm(`确定将问卷「${row.title}」移入违规问卷管理吗？`, '提示', {
-        confirmButtonText: '移入违规管理',
+      ElMessageBox.confirm(`确定将问卷「${row.title}」移入回收站吗？`, '提示', {
+        confirmButtonText: '移入回收站',
         cancelButtonText: '取消',
         type: 'warning'
       }).then(async () => {
         try {
           // ★ 失败由 http.js 按状态码弹错并 throw，所以页面按"能 await 成功就是成功"写即可。
           await api.survey.recycle(row.id)
-          ElMessage.success('已移入违规问卷管理')
+          ElMessage.success('已移入回收站')
           this.loadSurveys()
         } catch {
           // HTTP 层失败（4xx/5xx、401、网络异常）的提示已由 http.js 统一弹出，这里不再重复弹
