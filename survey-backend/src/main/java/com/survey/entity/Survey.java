@@ -216,9 +216,19 @@ public class Survey {
     private Integer isTemplate;       // 0=普通问卷，1=模板
     private String templateCategory;  // 模板分类
 
+    /**
+     * 该模板被「从模板创建」使用的次数（热度）。
+     * ★ 只在 SurveyService.createFromTemplate 里用数据库自增累加；
+     *   普通问卷恒为 0，模板广场/模板管理按它降序展示"热门"。
+     */
+    private Integer templateUseCount;
+
     public Integer getIsTemplate() { return isTemplate; }
     public void setIsTemplate(Integer isTemplate) { this.isTemplate = isTemplate; }
 
     public String getTemplateCategory() { return templateCategory; }
     public void setTemplateCategory(String templateCategory) { this.templateCategory = templateCategory; }
+
+    public Integer getTemplateUseCount() { return templateUseCount; }
+    public void setTemplateUseCount(Integer templateUseCount) { this.templateUseCount = templateUseCount; }
 }

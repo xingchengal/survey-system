@@ -798,7 +798,13 @@ public class SurveyService {
         if (!isTemplate && !SurveyStatus.isPublished(source.getStatus())) {
             throw new BizException("该问卷不是模板，也未发布，无法复制");
         }
-        return copySurvey(templateId, userId);
+        Survey copy = copySurvey(templateId, userId);
+        // ★ 热度统计：只有"真的用了模板"才 +1；复制一份已发布问卷（isTemplate=false）不算模板使用。
+        //   与 copySurvey 在同一个事务里：复制失败回滚时计数也不会动。
+        if (isTemplate) {
+            surveyMapper.incrementTemplateUseCount(templateId);
+        }
+        return copy;
     }
 
     /**

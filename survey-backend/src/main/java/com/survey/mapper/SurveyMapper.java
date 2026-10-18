@@ -209,7 +209,8 @@ public interface SurveyMapper {
      * 模板广场列表：is_template = 1，可按标题/分类搜索。
      * ★ 它同时被 TemplateSeederService 用来做幂等判断 —— 那里判的是
      *   **"是否已有预置模板（user_id = 0）"**，而不是"是否存在任意模板"。
-     * ★ ORDER BY id ASC：模板按插入顺序展示，保持分类聚合的观感。
+     * ★ ORDER BY template_use_count DESC, id ASC：热门模板排在前面（模板广场与模板管理共用），
+     *   使用次数相同的按插入顺序，保证列表稳定。
      */
     @Select("<script>" +
             "SELECT * FROM t_survey WHERE is_template = 1 AND deleted = 0 " +
@@ -217,9 +218,17 @@ public interface SurveyMapper {
             "AND (title LIKE CONCAT('%', #{keyword}, '%') " +
             "OR template_category LIKE CONCAT('%', #{keyword}, '%')) " +
             "</if>" +
-            "ORDER BY id ASC" +
+            "ORDER BY template_use_count DESC, id ASC" +
             "</script>")
     List<Survey> findTemplates(@Param("keyword") String keyword);
+
+    /**
+     * 模板被使用一次（从模板创建成功时调用）。
+     * ★ 用数据库自增而不是"读出来 +1 再写回"：两个用户同时套用同一模板时不会互相覆盖。
+     * ★ 取消模板后再设回模板，计数**保留**：历史热度不应该因为身份变化而清零。
+     */
+    @Update("UPDATE t_survey SET template_use_count = template_use_count + 1 WHERE id = #{id}")
+    int incrementTemplateUseCount(@Param("id") Integer id);
 
     /** 设为模板 / 取消模板，并写模板分类（管理员操作，Controller 已校验角色）。 */
     @Update("UPDATE t_survey SET is_template = #{isTemplate}, template_category = #{category} WHERE id = #{id}")

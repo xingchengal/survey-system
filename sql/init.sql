@@ -240,6 +240,7 @@ CREATE TABLE `t_survey` (
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',
+  `template_use_count` int NOT NULL DEFAULT '0' COMMENT '该模板被"从模板创建"使用的次数（热度；非模板恒为 0）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `share_code` (`share_code`),
   -- ★ 管理端问卷列表 / 回收站 / 模板广场都按 "created_time DESC" 排序（见 SurveyMapper 的 5 条查询）

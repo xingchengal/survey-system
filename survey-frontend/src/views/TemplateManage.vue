@@ -21,7 +21,9 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">模板管理</h2>
-        <p class="page-subtitle">模板广场共 {{ templates.length }} 个模板 · 可改分类、编辑内容、取消模板或删除</p>
+        <p class="page-subtitle">
+          模板广场共 {{ templates.length }} 个模板 · 累计被使用 <b>{{ totalUsage }}</b> 次 · 可改分类、编辑内容、取消模板或删除
+        </p>
       </div>
       <div class="header-actions">
         <el-button @click="load">刷新</el-button>
@@ -38,8 +40,8 @@
     />
 
     <div class="toolbar-card">
-      <el-select v-model="categoryFilter" placeholder="全部分类" clearable style="width: 170px;">
-        <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+      <el-select v-model="categoryFilter" placeholder="全部分类" clearable style="width: 190px;">
+        <el-option v-for="c in categories" :key="c" :label="`${c}（${categoryCount(c)}）`" :value="c" />
       </el-select>
       <el-input
         v-model="keyword"
@@ -54,22 +56,58 @@
       <span class="toolbar-tip">也可以把现有问卷「设为模板」（在「全部问卷」里）</span>
     </div>
 
+    <!-- 分类概览：点一下即筛选，避免只靠下拉框"猜"每个分类有多少模板 -->
+    <div v-if="templates.length" class="category-chips">
+      <button
+        type="button"
+        class="cat-chip"
+        :class="{ active: !categoryFilter }"
+        @click="categoryFilter = ''"
+      >
+        全部 <b>{{ templates.length }}</b>
+      </button>
+      <button
+        v-for="item in categoryStats"
+        :key="item.name"
+        type="button"
+        class="cat-chip"
+        :class="{ active: categoryFilter === item.name }"
+        @click="categoryFilter = item.name"
+      >
+        {{ item.name }} <b>{{ item.count }}</b>
+      </button>
+    </div>
+
     <div class="table-card">
-      <el-table v-loading="loading" :data="filtered" empty-text="还没有模板">
-        <el-table-column prop="id" label="ID" width="80" align="center" />
-        <el-table-column label="模板标题" min-width="220">
+      <el-table
+        v-loading="loading"
+        :data="filtered"
+        empty-text="还没有模板"
+        :default-sort="{ prop: 'templateUseCount', order: 'descending' }"
+      >
+        <el-table-column prop="id" label="ID" width="70" align="center" />
+        <el-table-column label="模板标题" min-width="200">
           <template #default="{ row }">
             <el-link type="primary" :underline="false" @click="editContent(row)">{{ row.title }}</el-link>
           </template>
         </el-table-column>
-        <el-table-column prop="description" label="描述" min-width="260" show-overflow-tooltip />
-        <el-table-column label="分类" width="130" align="center">
+        <el-table-column prop="description" label="描述" min-width="220" show-overflow-tooltip />
+        <el-table-column label="分类" width="120" align="center">
           <template #default="{ row }">
             <el-tag size="small" type="success">{{ row.templateCategory || '通用' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createdTime" label="创建时间" width="170" />
-        <el-table-column label="操作" width="300" align="center" fixed="right">
+        <!-- 热度：模板被「从模板创建」使用的次数；后端已按它降序返回，这里再给可排序 -->
+        <el-table-column prop="templateUseCount" label="使用次数" width="110" align="center" sortable>
+          <template #default="{ row }">
+            <span v-if="row.templateUseCount > 0" class="usage-badge">🔥 {{ row.templateUseCount }} 次</span>
+            <span v-else class="usage-empty">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="createdTime" label="创建时间" width="165" />
+        <!-- ★ 不要 fixed="right"：整表宽度超过容器时，固定列会盖住「创建时间」，
+             而这一页 7 列的总宽并不需要固定操作列（见用户截图）。让表格整体滚动即可。 -->
+        <el-table-column label="操作" width="330" align="center">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="editContent(row)">编辑内容</el-button>
             <el-button type="warning" link size="small" @click="openCategory(row)">改分类</el-button>
@@ -163,6 +201,21 @@ export default {
     categories() {
       return [...new Set(this.templates.map((t) => t.templateCategory || '通用'))].sort()
     },
+    /** 分类分布：按模板数降序（分类概览 chips 用） */
+    categoryStats() {
+      const map = new Map()
+      this.templates.forEach((t) => {
+        const category = t.templateCategory || '通用'
+        map.set(category, (map.get(category) || 0) + 1)
+      })
+      return [...map.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'))
+    },
+    /** 全部模板累计被使用次数（顶部副标题） */
+    totalUsage() {
+      return this.templates.reduce((sum, t) => sum + (Number(t.templateUseCount) || 0), 0)
+    },
     /** 改分类时可选的候选：常见分类 + 现有分类（allow-create 仍可输入新值） */
     categoryOptions() {
       const base = ['通用', '满意度调查', '员工调研', '课程评价', '活动反馈', '产品反馈']
@@ -178,6 +231,11 @@ export default {
     this.load()
   },
   methods: {
+    /** 某个分类下有多少模板（筛选下拉的文案用） */
+    categoryCount(category) {
+      return this.templates.filter((t) => (t.templateCategory || '通用') === category).length
+    },
+
     async load() {
       this.loading = true
       try {
@@ -313,5 +371,59 @@ export default {
   margin: 10px 0 0;
   font-size: 12px;
   color: var(--ink-3);
+}
+
+/* 分类概览：一行可点的 chips，比只看下拉框更直观 */
+.category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.16s var(--ease);
+}
+.cat-chip b {
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.cat-chip:hover {
+  border-color: var(--sky-300, #93c5fd);
+  color: var(--sky-600, #2563eb);
+}
+.cat-chip.active {
+  background: var(--sky-50, #eff6ff);
+  border-color: var(--sky-300, #93c5fd);
+  color: var(--sky-700, #1d4ed8);
+}
+.cat-chip.active b {
+  color: var(--sky-600, #2563eb);
+}
+
+/* 使用次数：>0 用暖色小胶囊，0 用灰色破折号 */
+.usage-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff6e8;
+  border: 1px solid #ffe6bf;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 500;
+}
+.usage-empty {
+  color: #cbd5e1;
 }
 </style>

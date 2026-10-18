@@ -168,16 +168,34 @@
           <el-button class="row-btn rb-stats" :icon="DataAnalysis" @click="handleStatistics(row)">
             <span class="btn-label">统计</span>
           </el-button>
-          <el-button v-if="row.lifecycle !== 'SUSPENDED'" class="row-btn rb-copy" :icon="CopyDocument" @click="handleCopy(row)">
-            <span class="btn-label">复制</span>
-          </el-button>
-          <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
-          <el-button v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'" class="row-btn rb-collab" :icon="Connection" @click="openCollaborators(row)">
-            <span class="btn-label">协作</span>
-          </el-button>
-          <el-button class="row-btn rb-delete" :icon="Delete" @click="handleDelete(row)">
-            <span class="btn-label">删除</span>
-          </el-button>
+          <!-- ★ 低频/危险操作收进「更多」：6 个彩色胶囊一字排开会把整行挤满，
+               视觉上没有主次。复制/协作/删除留在菜单里，主区只留最常用的编辑/发布/分享/统计。 -->
+          <el-dropdown
+            class="row-more"
+            trigger="click"
+            placement="bottom-end"
+            @command="cmd => handleMoreCommand(cmd, row)"
+          >
+            <el-button class="row-btn rb-more" :icon="MoreFilled" title="更多操作">
+              <span class="btn-label">更多</span>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="copy" :icon="CopyDocument">复制问卷</el-dropdown-item>
+                <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
+                <el-dropdown-item
+                  v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'"
+                  command="collab"
+                  :icon="Connection"
+                >
+                  协作成员
+                </el-dropdown-item>
+                <el-dropdown-item command="delete" :icon="Delete" divided style="color: #dc2626;">
+                  移入回收站
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </div>
     </div>
@@ -410,6 +428,8 @@
               >
                 <div class="tpl-header">
                   <el-tag size="small" type="success">{{ tpl.templateCategory || '通用' }}</el-tag>
+                  <!-- 热度：来自 t_survey.template_use_count（后端按它降序返回，热门模板排在前面） -->
+                  <span v-if="tpl.templateUseCount > 0" class="tpl-usage">🔥 {{ tpl.templateUseCount }} 次</span>
                 </div>
                 <h4 class="tpl-title">{{ tpl.title }}</h4>
                 <p class="tpl-desc">{{ tpl.description || '暂无描述' }}</p>
@@ -446,7 +466,7 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, CopyDocument, Edit, Promotion, Share, DataAnalysis, Delete,
-  Search, MagicStick, Connection, RefreshLeft } from '@element-plus/icons-vue'
+  Search, MagicStick, Connection, RefreshLeft, MoreFilled } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
 //   http.js 统一带 Authorization: Bearer token、统一按 HTTP 状态码判成败、统一弹后端 message，
@@ -590,6 +610,7 @@ export default {
       DataAnalysis: markRaw(DataAnalysis),
       Connection: markRaw(Connection),
       RefreshLeft: markRaw(RefreshLeft),
+      MoreFilled: markRaw(MoreFilled),
       Delete: markRaw(Delete),
       Search: markRaw(Search),
       MagicStick: markRaw(MagicStick)
@@ -1087,6 +1108,13 @@ export default {
       this.$router.push(`/my/surveys/${row.id}/statistics`)
     },
 
+    /** 「更多」菜单的命令分发（低频/危险操作收在这里，主区保留编辑/发布/分享/统计） */
+    handleMoreCommand(command, row) {
+      if (command === 'copy') this.handleCopy(row)
+      else if (command === 'collab') this.openCollaborators(row)
+      else if (command === 'delete') this.handleDelete(row)
+    },
+
     handleDelete(row) {
       ElMessageBox.confirm(`确定将「${row.title}」移入回收站吗？可以在回收站里恢复。`, '提示', {
         confirmButtonText: '移入回收站',
@@ -1276,7 +1304,7 @@ export default {
      ① minmax(0, 3fr)：标题列可以被压缩（默认下限是 min-content，会把整行撑爆）；
      ② 操作列 minmax(460px, auto)：6 个胶囊按钮实测约 454px，给足下限；
      ③ .col-actions 允许换行：真放不下时换行，绝不向左溢出压住"创建时间"。 */
-  grid-template-columns: minmax(0, 3fr) 96px 170px 172px minmax(460px, auto);
+  grid-template-columns: minmax(0, 1fr) 96px 170px 172px 296px;
   padding: 14px 24px;
   background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
   border-bottom: 1px solid var(--stroke);
@@ -1288,7 +1316,7 @@ export default {
 
 .list-row {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) 96px 170px 172px minmax(460px, auto);
+  grid-template-columns: minmax(0, 1fr) 96px 170px 172px 296px;
   padding: 18px 24px;
   border-bottom: 1px solid #f1f5fd;
   align-items: center;
@@ -1319,6 +1347,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   margin-bottom: 4px;
 }
 
@@ -1338,6 +1367,7 @@ export default {
 }
 
 .title-text {
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   color: #303133;
@@ -1586,6 +1616,22 @@ export default {
   margin: 0;
 }
 
+/* ============== 「更多」下拉：中性灰，不跟主操作抢颜色 ============== */
+.row-more {
+  display: inline-flex;
+}
+.rb-more {
+  background: #f4f7fc;
+  color: #64748b;
+  border-color: #e2e8f0;
+}
+.rb-more:hover {
+  background: #eef2f7;
+  color: #334155;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 10px rgba(100, 116, 139, 0.16);
+}
+
 /* ============== 模板卡片 ============== */
 .template-grid {
   display: grid;
@@ -1611,7 +1657,22 @@ export default {
   border-color: #409eff;
 }
 
-.tpl-header { margin-bottom: 8px; }
+.tpl-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.tpl-usage {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #b45309;
+  background: #fff6e8;
+  border: 1px solid #ffe6bf;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
 
 .tpl-title {
   margin: 0 0 6px 0;
@@ -1648,7 +1709,7 @@ export default {
 /* 宽屏收窄一点、操作列按屏幕逐级压缩；窄屏只留图标（但按钮仍是 30px，不再是小圆点） */
 @media (max-width: 1500px) {
   .list-header, .list-row {
-    grid-template-columns: minmax(0, 2.4fr) 88px 150px 140px minmax(420px, auto);
+    grid-template-columns: minmax(0, 1fr) 88px 150px 140px 284px;
     padding: 14px 18px;
   }
   .row-btn {
@@ -1658,7 +1719,7 @@ export default {
 
 @media (max-width: 1280px) {
   .list-header, .list-row {
-    grid-template-columns: minmax(0, 2fr) 80px 130px 120px minmax(360px, auto);
+    grid-template-columns: minmax(0, 1fr) 82px 132px 120px 264px;
   }
   .row-btn {
     padding: 0 8px;
@@ -1678,7 +1739,10 @@ export default {
     margin-right: 0;
   }
   .list-header, .list-row {
-    grid-template-columns: minmax(0, 2fr) 80px 130px 120px minmax(220px, auto);
+    grid-template-columns: minmax(0, 1fr) 78px 124px 112px 190px;
+  }
+  .col-actions {
+    gap: 6px;
   }
   .template-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1691,7 +1755,7 @@ export default {
   }
   .list-header,
   .list-row {
-    min-width: 800px;
+    min-width: 840px;
   }
 }
 
