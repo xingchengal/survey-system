@@ -4,6 +4,8 @@ import com.survey.entity.Survey;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -152,4 +154,142 @@ class OwnershipGuardTest {
                 survey(null, null), null, null, VISIBLE_MSG));
         assertEquals(VISIBLE_MSG, ex.getMessage());
     }
+
+    // ==================== canAccess / requirePermission（H2：能力 × 对象）====================
+
+    /** 回收站里的问卷（deleted=1） */
+    private static Survey recycled(Integer ownerId) {
+        Survey s = survey(ownerId, SurveyStatus.PUBLISHED.code());
+        s.setDeleted(1);
+        return s;
+    }
+
+    @Test
+    @DisplayName("★ 作者拥有四种问卷权限：不依赖权限点表（作者对自己的数据不该被配置锁住）")
+    void ownerHasEveryPermission() {
+        Survey s = survey(OWNER, SurveyStatus.PUBLISHED.code());
+        for (String p : List.of(Permission.SURVEY_EDIT, Permission.SURVEY_PUBLISH,
+                Permission.SURVEY_DATA, Permission.SURVEY_DELETE)) {
+            assertTrue(OwnershipGuard.canAccess(s, OWNER, Role.USER, p, null), "作者应拥有 " + p);
+        }
+    }
+
+    @Test
+    @DisplayName("管理员：任何问卷、任何权限都放行（corroborator 角色码传 null 也一样）")
+    void adminHasEveryPermission() {
+        Survey s = survey(OTHER, SurveyStatus.DRAFT.code());
+        for (String p : Permission.ALL) {
+            assertTrue(OwnershipGuard.canAccess(s, OWNER, Role.ADMIN, p, null), "管理员应拥有 " + p);
+        }
+    }
+
+    @Test
+    @DisplayName("★★ 协作者权限矩阵：viewer 全无 / editor 能改能看数据、不能删不能发布 / analyst 只看数据")
+    void collaboratorPermissionMatrix() {
+        Survey s = survey(OWNER, SurveyStatus.PUBLISHED.code());
+
+        for (String p : Permission.ALL) {
+            assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, p, "viewer"),
+                    "viewer 不该拥有 " + p);
+        }
+
+        assertTrue(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_EDIT, "editor"));
+        assertTrue(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_DATA, "editor"));
+        assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_DELETE, "editor"),
+                "editor 不能删是 H2 的验收口径之一");
+        assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_PUBLISH, "editor"),
+                "发布让问卷对外可见，只给作者/管理员");
+
+        assertTrue(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_DATA, "analyst"));
+        assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_EDIT, "analyst"));
+        assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_DELETE, "analyst"));
+    }
+
+    @Test
+    @DisplayName("★ 脏数据/空值：协作者角色码为 null、空串、未知值、大小写不符 → 一律无权限（失败方向必须是拒绝）")
+    void unknownCollaboratorRoleIsDenied() {
+        Survey s = survey(OWNER, SurveyStatus.PUBLISHED.code());
+        for (String bad : List.of("", "  ", "Editor", "owner", "admin", "superuser")) {
+            assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_EDIT, bad),
+                    "非法协作者角色码不该放行：" + bad);
+        }
+        assertFalse(OwnershipGuard.canAccess(s, OTHER, Role.USER, Permission.SURVEY_EDIT, null));
+    }
+
+    @Test
+    @DisplayName("★ 匿名（userId=null）不是作者也不是管理员 → 拒绝，且不 NPE")
+    void anonymousHasNoPermission() {
+        Survey s = survey(OWNER, SurveyStatus.PUBLISHED.code());
+        assertFalse(OwnershipGuard.canAccess(s, null, null, Permission.SURVEY_EDIT, null));
+        assertFalse(OwnershipGuard.canAccess(s, null, null, Permission.SURVEY_DATA, "analyst"),
+                "匿名请求不该因为「恰好传了角色码」被放行");
+    }
+
+    @Test
+    @DisplayName("★ 问卷为 null → canAccess=false，requirePermission 抛「问卷不存在」")
+    void nullSurveyIsSafe() {
+        assertFalse(OwnershipGuard.canAccess(null, OWNER, Role.ADMIN, Permission.SURVEY_EDIT, null));
+        BizException ex = assertThrows(BizException.class, () ->
+                OwnershipGuard.requirePermission(null, OWNER, Role.USER, Permission.SURVEY_EDIT, null, "修改"));
+        assertEquals("问卷不存在", ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("★ requirePermission 的文案必须与改造前的 requireOwnerOrAdmin 完全一致（前端与矩阵测试按它断言）")
+    void requirePermissionKeepsLegacyMessage() {
+        Survey s = survey(OWNER, SurveyStatus.DRAFT.code());
+        BizException legacy = assertThrows(BizException.class, () ->
+                OwnershipGuard.requireOwnerOrAdmin(s, OTHER, Role.USER, "删除"));
+        BizException now = assertThrows(BizException.class, () ->
+                OwnershipGuard.requirePermission(s, OTHER, Role.USER, Permission.SURVEY_DELETE, null, "删除"));
+        assertEquals(legacy.getMessage(), now.getMessage());
+        assertEquals("无权限删除他人问卷", now.getMessage());
+    }
+
+    @Test
+    @DisplayName("★ editor 协作者可以保存题目（survey:edit）；analyst 不行")
+    void collaboratorEditPermissionIsEnforced() {
+        Survey s = survey(OWNER, SurveyStatus.PUBLISHED.code());
+        assertDoesNotThrow(() ->
+                OwnershipGuard.requirePermission(s, OTHER, Role.USER, Permission.SURVEY_EDIT, "editor", "修改"));
+        BizException ex = assertThrows(BizException.class, () ->
+                OwnershipGuard.requirePermission(s, OTHER, Role.USER, Permission.SURVEY_EDIT, "analyst", "修改"));
+        assertEquals("无权限修改他人问卷", ex.getMessage());
+    }
+
+    // ==================== requireVisible 与协作者 ====================
+
+    @Test
+    @DisplayName("★ 协作者（任何角色）能读**非回收站**的草稿 —— 否则被邀请来看的人连问卷都打不开")
+    void collaboratorCanViewDraft() {
+        Survey draft = survey(OWNER, SurveyStatus.DRAFT.code());
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(draft, OTHER, Role.USER, "viewer", "无权查看"));
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(draft, OTHER, Role.USER, "editor", "无权查看"));
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(draft, OTHER, Role.USER, "analyst", "无权查看"));
+        // 而陌生人不给看
+        assertEquals("无权查看", assertThrows(BizException.class,
+                () -> OwnershipGuard.requireVisible(draft, OTHER, Role.USER, null, "无权查看")).getMessage());
+    }
+
+    @Test
+    @DisplayName("★★ 回收站优先：协作者**读不到**回收站里的问卷（只有作者/管理员能）")
+    void collaboratorCannotViewRecycled() {
+        Survey inBin = recycled(OWNER);
+        for (String role : List.of("viewer", "editor", "analyst")) {
+            BizException ex = assertThrows(BizException.class, () ->
+                    OwnershipGuard.requireVisible(inBin, OTHER, Role.USER, role, "无权查看"));
+            assertEquals("问卷已在回收站中", ex.getMessage(), "回收站口径必须优先于协作者身份");
+        }
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(inBin, OWNER, Role.USER, null, "无权查看"));
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(inBin, OTHER, Role.ADMIN, null, "无权查看"));
+    }
+
+    @Test
+    @DisplayName("已发布问卷：陌生人与匿名都能读（口径不变）")
+    void publishedIsVisibleToEveryone() {
+        Survey published = survey(OWNER, SurveyStatus.PUBLISHED.code());
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(published, OTHER, Role.USER, null, "无权查看"));
+        assertDoesNotThrow(() -> OwnershipGuard.requireVisible(published, null, null, null, "无权查看"));
+    }
+
 }

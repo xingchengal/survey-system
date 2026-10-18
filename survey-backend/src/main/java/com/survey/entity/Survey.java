@@ -160,6 +160,29 @@ public class Survey {
     public Boolean getResponsesFull() { return responsesFull; }
     public void setResponsesFull(Boolean responsesFull) { this.responsesFull = responsesFull; }
 
+    /**
+     * 当前登录用户对**这一份**问卷的有效权限点（survey:edit / survey:publish / survey:data / survey:delete）。
+     *
+     * ★ 只由 GET /api/survey/{id} 填充（作者接口），其它接口为 null。
+     * ★ 为什么由后端算、而不是前端拼：权限取决于"你是谁 × 这份问卷是谁的 × 你是不是协作者"，
+     *   其中"是不是协作者"只有后端知道。前端拿这个列表**只做显隐**，
+     *   真正的拦截仍在后端 —— localStorage 可改，前端判断永远只是体验层。
+     */
+    private java.util.List<String> myPermissions;
+
+    public java.util.List<String> getMyPermissions() { return myPermissions; }
+    public void setMyPermissions(java.util.List<String> myPermissions) { this.myPermissions = myPermissions; }
+
+    /**
+     * 这份问卷共享给了几个协作者（只在 GET /api/survey/my 里填充）。
+     * ★ 作者需要知道"哪几份是共享出去的" —— 否则只有被邀请的人看得见，
+     *   作者本人反而不知道自己共享过什么。
+     */
+    private Integer collaboratorCount;
+
+    public Integer getCollaboratorCount() { return collaboratorCount; }
+    public void setCollaboratorCount(Integer collaboratorCount) { this.collaboratorCount = collaboratorCount; }
+
     public Integer getMaxResponses() { return maxResponses; }
     public void setMaxResponses(Integer maxResponses) { this.maxResponses = maxResponses; }
 

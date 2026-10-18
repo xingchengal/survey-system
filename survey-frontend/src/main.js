@@ -13,6 +13,7 @@ import './styles/common.css'
 //   页面里不要再写死颜色，统一用这里的变量（--sky-500 / --brand-gradient / --shadow-md ...）。
 import './styles/theme.css'
 import { initTheme } from './utils/theme'
+import { hasPermission } from './utils/auth'
 import App from './App.vue'
 import router from './router'
 // ★ 不要引入"重写 window.fetch"的全局拦截器：token、错误提示、401 处理统一在 api/http.js
@@ -58,6 +59,22 @@ const icons = {
 for (const [name, comp] of Object.entries(icons)) {
   app.component(name, comp)
 }
+
+/**
+ * v-permission：没有该权限点就把元素从 DOM 里拿掉。
+ *
+ * ★ 用法：<el-button v-permission="'survey:publish'">发布</el-button>
+ * ★ 这**只是显隐**，不是安全边界 —— localStorage 改一下就能让它显示。
+ *   真正的拦截在后端（@RequirePermission / SurveyAccessService）。
+ * ★ 用 removeChild 而不是 display:none：隐藏但仍可 Tab 聚焦、仍可被脚本点，容易被误当成授权。
+ */
+app.directive('permission', {
+  mounted(el, binding) {
+    if (!hasPermission(binding.value)) {
+      el.parentNode && el.parentNode.removeChild(el)
+    }
+  }
+})
 
 // ★ 恢复上次的主题（深/浅），必须在挂载前设置，避免闪一下浅色
 initTheme()

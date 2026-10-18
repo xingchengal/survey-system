@@ -1,12 +1,14 @@
 package com.survey.controller;
 
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.common.OwnershipGuard;
 import com.survey.dto.SurveyVersionDiff;
 import com.survey.dto.SurveyVersionSummary;
 import com.survey.entity.Survey;
 import com.survey.entity.SurveyVersion;
 import com.survey.service.QuestionService;
+import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyService;
 import com.survey.service.SurveyVersionService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +53,9 @@ public class SurveyVersionController {
 
     @Autowired
     private QuestionService questionService;
+
+    @Autowired
+    private SurveyAccessService surveyAccessService;
 
     @Operation(summary = "某问卷的版本列表（新的在前，不含题目快照）")
     @GetMapping("/list/{surveyId}")
@@ -107,7 +112,9 @@ public class SurveyVersionController {
         if (survey == null) {
             throw new BizException("问卷不存在");
         }
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "查看版本历史");
+        // ★ 版本历史是**编辑辅助**（对比/回滚都会改内容），按 survey:edit 判；
+        //   文案保持 "查看版本历史" 不变（矩阵测试按它断言）。
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_EDIT, "查看版本历史");
         return survey;
     }
 }

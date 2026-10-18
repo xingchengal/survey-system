@@ -15,6 +15,8 @@ import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
 import com.survey.mapper.RefreshTokenMapper;
 import com.survey.mapper.SurveyMapper;
+import com.survey.mapper.RoleMapper;
+import com.survey.mapper.SurveyCollaboratorMapper;
 import com.survey.mapper.SurveyVersionMapper;
 import com.survey.mapper.UserMapper;
 import com.survey.util.JwtUtil;
@@ -138,8 +140,15 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 74 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 81 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
+            "DELETE /api/collaborator/self/{surveyId}",
+            "POST /api/collaborator/self/{surveyId}/apply",
+            "DELETE /api/survey/{surveyId}/collaborators/{targetUserId}",
+            "GET /api/collaborator/shared",
+            "GET /api/survey/{surveyId}/collaborators",
+            "POST /api/survey/{surveyId}/collaborators",
+            "PUT /api/survey/{surveyId}/collaborators/{targetUserId}",
             "DELETE /api/announcement/delete/{id}",
             "DELETE /api/demo/reset",
             "DELETE /api/error-log/clear",
@@ -258,6 +267,14 @@ class EndpointAuthMatrixTest {
     private AnnouncementMapper announcementMapper;
     @MockitoBean
     private SurveyVersionMapper surveyVersionMapper;
+    /**
+     * ★ H2 新增：协作者表也必须 mock。
+     *   漏掉它的后果不是"少一条数据"，而是 SurveyAccessService 拿着**真实** Mapper
+     *   去查一个被 mock 掉的数据源 —— 归属类用例会以 500 收场，看起来像权限逻辑坏了。
+     *   默认返回 null（= 不是协作者），所以原有 74 端点的"他人问卷 400"口径不变。
+     */
+    @MockitoBean
+    private SurveyCollaboratorMapper surveyCollaboratorMapper;
 
     private String userToken;
     private String otherUserToken;
@@ -329,10 +346,10 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 74；且公开 12 + 管理 20 + 其余 42")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 81；且公开 12 + 管理 20 + 其余 42")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(74, registered.size(),
+        assertEquals(81, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
@@ -340,7 +357,7 @@ class EndpointAuthMatrixTest {
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
         assertEquals(12, PUBLIC.size(), "公开档固定 12 条（新增 GET /api/survey/result/{shareCode}）");
         assertEquals(20, ADMIN.size(), "管理档固定 20 条（@RequireAdmin 方法级 + 类级）");
-        assertEquals(74 - 12 - 20, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
+        assertEquals(81 - 12 - 20, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
         // 两档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");

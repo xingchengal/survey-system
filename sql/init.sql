@@ -288,4 +288,82 @@ CREATE TABLE `t_user` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
+-- =====================================================================
+-- 第三十四轮（§H-H2）：RBAC 与问卷协作者
+-- ★ 与 sql/migration-rbac.sql 保持逐字一致的结构（老库升级走那份脚本）。
+-- =====================================================================
+CREATE TABLE `t_role` (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '角色ID',
+  `code` varchar(50) NOT NULL COMMENT '角色码（唯一）：admin / user / 未来的自定义角色',
+  `name` varchar(50) NOT NULL COMMENT '展示名',
+  `is_builtin` tinyint NOT NULL DEFAULT '0' COMMENT '1=内置角色（不允许删除）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_code` (`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='角色表（RBAC）';
+
+CREATE TABLE `t_role_permission` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `role_id` int NOT NULL COMMENT '角色ID（t_role.id）',
+  `permission_code` varchar(64) NOT NULL COMMENT '权限点，取值为 common/Permission 里的常量',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_permission` (`role_id`,`permission_code`),
+  KEY `idx_permission_code` (`permission_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='角色-权限点关联表';
+
+CREATE TABLE `t_user_role` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '用户ID（t_user.id）',
+  `role_id` int NOT NULL COMMENT '角色ID（t_role.id）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_role` (`user_id`,`role_id`),
+  KEY `idx_role_id` (`role_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户-角色关联表';
+
+CREATE TABLE `t_survey_collaborator` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `survey_id` int NOT NULL COMMENT '问卷ID',
+  `user_id` int NOT NULL COMMENT '被邀请的用户ID',
+  `collaborator_role` varchar(20) NOT NULL COMMENT 'viewer=只读 / editor=可编辑 / analyst=可看数据',
+  `created_by` int DEFAULT NULL COMMENT '邀请人（问卷作者或管理员）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_survey_user` (`survey_id`,`user_id`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷协作者表';
+
+-- 系统种子数据（与 migration-rbac.sql 完全一致；重复导入安全）
+INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('admin', '管理员', 1);
+INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('user', '普通用户', 1);
+
+INSERT IGNORE INTO `t_role_permission` (`role_id`, `permission_code`)
+SELECT r.id, p.code FROM `t_role` r
+JOIN (
+    SELECT 'survey:edit'   AS code UNION ALL
+    SELECT 'survey:publish' UNION ALL
+    SELECT 'survey:data'    UNION ALL
+    SELECT 'survey:delete'  UNION ALL
+    SELECT 'user:manage'    UNION ALL
+    SELECT 'review:handle'  UNION ALL
+    SELECT 'wallet:manage'
+) p
+WHERE r.code = 'admin';
+
+INSERT IGNORE INTO `t_role_permission` (`role_id`, `permission_code`)
+SELECT r.id, p.code FROM `t_role` r
+JOIN (
+    SELECT 'survey:edit'    AS code UNION ALL
+    SELECT 'survey:publish' UNION ALL
+    SELECT 'survey:data'    UNION ALL
+    SELECT 'survey:delete'
+) p
+WHERE r.code = 'user';
+
+INSERT IGNORE INTO `t_user_role` (`user_id`, `role_id`)
+SELECT u.id, r.id
+FROM `t_user` u
+JOIN `t_role` r ON r.code = u.role
+WHERE u.deleted_at IS NULL;
+
 SET FOREIGN_KEY_CHECKS = 1;

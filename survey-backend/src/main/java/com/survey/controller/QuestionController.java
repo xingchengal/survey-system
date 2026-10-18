@@ -1,10 +1,12 @@
 package com.survey.controller;
 
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.dto.QuestionIdItem;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
 import com.survey.service.QuestionService;
+import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyService;
 import com.survey.common.OwnershipGuard;
 import io.swagger.v3.oas.annotations.Operation;
@@ -44,6 +46,9 @@ public class QuestionController {
     @Autowired
     private SurveyService surveyService;
 
+    @Autowired
+    private SurveyAccessService surveyAccessService;
+
     /**
      * 编辑器用这个请求头声明"我是编辑器在读题目"。
      * ★ 只有带它、**且**请求者是作者本人或管理员时，才免答题密码（见
@@ -60,7 +65,9 @@ public class QuestionController {
                                               @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) throw new BizException("问卷不存在");
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "修改");
+        // ★ H2：能力（survey:edit）× 对象（作者/协作者/管理员）。editor 协作者可以改题，
+        //   viewer/analyst 不行 —— 条件跳转规则的编辑也走这条闸门。
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_EDIT, "修改");
         // ★ 回收站里的问卷不能改题目。
         //   这个接口是**全量覆盖**语义（没传的旧题会被删掉），在回收站问卷上执行
         //   会让历史答卷的 question_id 悬空 —— 后果比改个标题严重得多。
@@ -91,7 +98,8 @@ public class QuestionController {
             throw new BizException("问卷不存在");
         }
 
-        OwnershipGuard.requireVisible(survey, userId, role, "问卷尚未发布，无权查看");
+        // ★ 协作者（任何角色）也能读题目：否则被邀请来看的人连问卷都打不开。
+        surveyAccessService.requireVisible(survey, userId, role, "问卷尚未发布，无权查看");
 
         // ★ 答题密码：没设就直通；设了就必须带对请求头。
         //   放在 requireVisible 之后：先判"能不能看"，再判"要不要密码"，
@@ -101,7 +109,12 @@ public class QuestionController {
         //   · 填写页 → 一律比口令（含作者自己打开分享链接），否则"能不能读题"就不再等于
         //     "口令对不对"，密码门会形同虚设。
         if (EDITOR_HEADER.equals(editor)) {
-            surveyService.requireAccessPasswordForEditor(survey, userId, role, password);
+            // ★ 编辑器视角：作者 / 管理员 / **协作者（任何角色）** 都不需要答题口令 ——
+            //   答题密码是给"填写人"的准入门槛，不是给协作成员的。
+            //   少了协作者这一条，被邀请的人一进编辑器就吃 400、题目加载失败（实测踩到）。
+            if (!surveyAccessService.isCollaborator(survey, userId)) {
+                surveyService.requireAccessPasswordForEditor(survey, userId, role, password);
+            }
         } else {
             surveyService.requireAccessPassword(survey, password);
         }

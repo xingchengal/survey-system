@@ -2,6 +2,7 @@ package com.survey.controller;
 
 import com.survey.common.BizException;
 import com.survey.entity.Survey;
+import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyService;
 import com.survey.service.UserService;
 import org.junit.jupiter.api.DisplayName;
@@ -54,6 +55,14 @@ class SurveyControllerRoutingTest {
 
     @Mock
     private SurveyService surveyService;
+
+    /**
+     * ★ H2 起 Controller 的归属校验走 SurveyAccessService（它内部才查协作者表）。
+     *   @InjectMocks 会按类型注入，这里给一个 mock：默认什么也不做 = "可见"，
+     *   本类关心的是**路由分发**（哪些端点还在），不是权限口径（那是 OwnershipGuardTest 的事）。
+     */
+    @Mock
+    private SurveyAccessService surveyAccessService;
     @Mock
     private UserService userService;
 

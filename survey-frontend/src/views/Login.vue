@@ -110,7 +110,7 @@
 <script>
 import { ElMessage } from 'element-plus'
 import api from '../api'
-import { setAuth, homePathFor } from '../utils/auth'
+import { setAuth, setPermissions, homePathFor } from '../utils/auth'
 // 品牌标识（与侧栏 logo、favicon 同一图形，替换原来的 📋 emoji）
 import BrandLogo from '../components/BrandLogo.vue'
 
@@ -165,6 +165,9 @@ export default {
         //   走 utils/auth.setAuth 而不是直接写 localStorage —— 它会保证"**没勾**记住我时主动清掉旧的那枚"，
         //   否则上次登录残留的 refresh token 会让"这次没勾"也依然能续期 7 天（与用户选择不符）。
         setAuth(res.token, res.user, res.refreshToken)
+      // ★ H2：后端登录接口同时下发全局权限点（菜单/按钮显隐用；后端仍会逐次校验）。
+      //   老后端没有这个字段 → setPermissions(undefined) 会清空，hasPermission 走角色兜底。
+      setPermissions(res.permissions)
 
         // ★ 首页按角色区分（管理员 → 系统总览，普通用户 → 个人看板），统一由 homePathFor 决定。
         //   ★ 注意：这里不判断 data.success —— 后端失败是 400（非 2xx），

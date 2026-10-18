@@ -39,6 +39,18 @@
       </template>
     </el-alert>
 
+    <!-- ★ 只读/无发布权（协作者 viewer / analyst）：先把话说清，再把按钮禁掉 -->
+    <el-alert
+      v-if="!canEditSurvey || !canPublishSurvey"
+      class="mb-16"
+      type="info"
+      show-icon
+      :closable="false"
+      :title="!canEditSurvey
+        ? '你在这份问卷上是只读权限：可以查看，不能修改或保存'
+        : '你可以编辑这份问卷，但没有发布权限'"
+    />
+
     <!-- 顶部操作栏 -->
     <div class="edit-header">
       <div>
@@ -55,19 +67,19 @@
         <!-- ★ 注意：这里**不**因为 questionsLoadFailed 而禁用按钮。
              禁用会让点击"完全没反应"，用户根本不知道发生了什么（实测就是这么被卡住的）。
              现在改成：按钮可点，点下去由 saveQuestions 统一说明"为什么不能保存"。 -->
-        <el-button type="primary" :disabled="inRecycleBin || saving" :loading="saving" @click="saveQuestions">保存</el-button>
+        <el-button type="primary" :disabled="inRecycleBin || saving || !canEditSurvey" :loading="saving" @click="saveQuestions">保存</el-button>
         <!-- ★ status 为 0 或 2 都要给发布按钮：后端支持"延长（或清空）结束时间后重新发布"。
               已结束但结束时间仍在过去时，按钮变成"重新发布"并禁用（否则用户点了只吃 400），
               并在下面给出"请先把结束时间改到未来"的提示。 -->
         <el-button
           v-if="surveyInfo.status === 0 || surveyInfo.status === 2"
           type="success"
-          :disabled="inRecycleBin || saving || (surveyInfo.status === 2 && !endExtended)"
+          :disabled="inRecycleBin || saving || !canEditSurvey || !canPublishSurvey || (surveyInfo.status === 2 && !endExtended)"
           @click="publishSurvey"
         >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
         <el-tag v-else-if="surveyInfo.status === 1" type="success" effect="light" round>已发布（可继续修改）</el-tag>
         <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
-        <el-button :disabled="inRecycleBin" @click="settingsVisible = true">设置</el-button>
+        <el-button :disabled="inRecycleBin || !canEditSurvey" @click="settingsVisible = true">设置</el-button>
         <!-- 预览：按填写者视角看当前编辑态（不保存、不产生答卷） -->
         <el-button :disabled="questions.length === 0" @click="openPreview">预览</el-button>
         <!-- 历史版本：回收站里禁用（回滚走的是"全量覆盖式保存"，在回收站问卷上执行会让历史答卷的 question_id 悬空） -->
@@ -644,6 +656,19 @@ export default {
       const user = getUser()
       return Boolean(user && user.role === 'admin')
     },
+    /**
+     * 我对这份问卷能否编辑 / 发布（H2）。
+     * ★ myPermissions 为 null 表示后端没给（老版本/异常），此时**不拦**，避免把老用户挡在门外；
+     *   真正的拦截在后端，前端这里只是"别让按钮点了必 400"。
+     */
+    canEditSurvey() {
+      const perms = this.surveyInfo.myPermissions
+      return !perms || perms.includes('survey:edit')
+    },
+    canPublishSurvey() {
+      const perms = this.surveyInfo.myPermissions
+      return !perms || perms.includes('survey:publish')
+    },
     /** 是否在回收站里（后端口径：deleted != 0；NULL 视为未删除） */
     inRecycleBin() {
       return this.surveyInfo.deleted !== null && this.surveyInfo.deleted !== 0
@@ -742,7 +767,9 @@ export default {
           maxResponses: data.maxResponses == null ? null : data.maxResponses,
           thankText: data.thankText || '',
           redirectUrl: data.redirectUrl || '',
-          publicResult: data.publicResult === 1 ? 1 : 0
+          publicResult: data.publicResult === 1 ? 1 : 0,
+          // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
+          myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
         // 服务端最后更新时间就是"上次保存时间"，进页面即可显示"已保存 · X"
         this.lastSavedAt = this.toTimestamp(data.updatedTime) || null
@@ -1054,6 +1081,11 @@ export default {
       // ★★ 题目没加载出来时**禁止保存**：此时 questions=[]，而保存是全量覆盖语义，
       //   提交空数组 = 把这份问卷的题目全部删掉（用户实测踩到过，历史版本里留下"删除 7 题"）。
       //   要恢复：刷新页面重新加载题目（或先排查后端为什么拒绝返回题目）。
+      // ★ 只读协作者：按钮已禁用，这里再兜一层（键盘回车/脚本触发都能挡住，并给出原因）。
+      if (!this.canEditSurvey) {
+        ElMessage.error('你在这份问卷上没有编辑权限')
+        return false
+      }
       if (this.questionsLoadFailed) {
         // ★ 必须把**原因**说出来：用户看到的是"点了没反应"，实际是题目根本没读到。
         ElMessage.error(

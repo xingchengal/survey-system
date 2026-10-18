@@ -5,6 +5,7 @@ import com.survey.common.PageParams;
 import com.survey.common.PageResult;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Question;
@@ -12,6 +13,7 @@ import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
+import com.survey.service.SurveyAccessService;
 import com.survey.service.QuestionService;
 import com.survey.service.SurveyService;
 import com.survey.common.Role;
@@ -104,6 +106,9 @@ public class AnswerController {
     private SurveyService surveyService;
 
     @Autowired
+    private SurveyAccessService surveyAccessService;
+
+    @Autowired
     private QuestionService questionService;
 
     /** 质控摘要（可疑样本数 / 原因分布 / 最近样本）。 */
@@ -121,10 +126,9 @@ public class AnswerController {
         if (survey == null) {
             throw new BizException("问卷不存在");
         }
-        if (Role.isAdmin(role)) {
-            return survey;
-        }
-        if (userId == null || survey.getUserId() == null || !survey.getUserId().equals(userId)) {
+        // ★ H2：改成"能力 × 对象"：作者 / 管理员 / 能看数据的协作者（analyst、editor）。
+        //   ★ 文案保持 "无权查看他人问卷的数据" 不变 —— 前端与矩阵测试都按它断言。
+        if (!surveyAccessService.hasPermission(survey, userId, role, Permission.SURVEY_DATA)) {
             throw new BizException("无权查看他人问卷的数据");
         }
         return survey;

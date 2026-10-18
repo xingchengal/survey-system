@@ -4,10 +4,13 @@ import com.survey.common.SurveyStatus;
 import com.survey.annotation.RequireAdmin;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.common.PageResult;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerService;
+import com.survey.service.SurveyAccessService;
+import com.survey.service.SurveyCollaboratorService;
 import com.survey.service.SurveyService;
 import com.survey.service.UserService;
 import com.survey.common.OwnershipGuard;
@@ -64,6 +67,12 @@ public class SurveyController {
     private SurveyService surveyService;
 
     @Autowired
+    private SurveyCollaboratorService surveyCollaboratorService;
+
+    @Autowired
+    private SurveyAccessService surveyAccessService;
+
+    @Autowired
     private UserService userService;
 
     /** 公开结果页要复用统计（只读），直接调 AnswerService */
@@ -106,7 +115,7 @@ public class SurveyController {
         if (old == null) throw new BizException("问卷不存在");
 
         // ★ 硬校验：只要不是管理员，且不是自己的问卷，就拒绝
-        OwnershipGuard.requireOwnerOrAdmin(old, userId, role, "修改");
+        surveyAccessService.requirePermission(old, userId, role, Permission.SURVEY_EDIT, "修改");
 
         // ★ 分享码由服务端独占管理：一律沿用数据库里的旧值，不接受客户端传来的 shareCode。
         //   若只在 shareCode == null 时才沿用旧值，客户端传了就会被采纳 ——
@@ -183,7 +192,10 @@ public class SurveyController {
     @Operation(summary = "查询当前用户的问卷（我的问卷）")
     @GetMapping("/my")
     public List<Survey> mySurveys(@RequestHeader("X-User-Id") Integer userId) {
-        return surveyService.listByUserId(userId);
+        List<Survey> mine = surveyService.listByUserId(userId);
+        // ★ 让作者看见"哪几份共享出去了"（只多一次 GROUP BY，不逐条查）
+        surveyCollaboratorService.fillCollaboratorCounts(mine);
+        return mine;
     }
 
     /**
@@ -228,7 +240,10 @@ public class SurveyController {
         //   现在：管理员可读任意；本人可读自己的；已发布（status=1）的问卷对**其它登录用户**也可读
         //   （与分享链接的口径一致）。★ 但本端点**不在 JwtAuthFilter 白名单**里，匿名请求会先被 401
         //   挡住 —— 它是"需登录"的端点，别按公开接口的假设去改它。
-        OwnershipGuard.requireVisible(survey, userId, role, "无权限查看他人未发布的问卷");
+        surveyAccessService.requireVisible(survey, userId, role, "无权限查看他人未发布的问卷");
+        // ★ 顺带告诉前端"你对这份问卷能做什么"：编辑器据此隐藏保存/发布按钮。
+        //   只是显隐提示 —— 每个写操作仍会在后端再判一次。
+        survey.setMyPermissions(surveyAccessService.permissionsFor(survey, userId, role));
         return survey;
     }
 
@@ -294,7 +309,8 @@ public class SurveyController {
         if (survey == null) {
             throw new BizException("问卷不存在，ID：" + id);
         }
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "发布");
+        // ★ 发布涉及"对外可见"，editor 协作者**没有**这个权限（见 CollaboratorRole）
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_PUBLISH, "发布");
         return surveyService.publish(id);
     }
 
@@ -356,7 +372,7 @@ public class SurveyController {
                                 @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
         if (survey == null) throw new BizException("问卷不存在");
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_DELETE, "操作");
         int result = surveyService.moveToRecycle(id, userId);
         if (result <= 0) throw new BizException("操作失败");
         return "已移入回收站";
@@ -370,7 +386,7 @@ public class SurveyController {
                           @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
         if (survey == null) throw new BizException("问卷不存在");
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_DELETE, "操作");
         int result = surveyService.restoreFromRecycle(id);
         if (result <= 0) throw new BizException("操作失败");
         return "已恢复";
@@ -384,7 +400,7 @@ public class SurveyController {
                                   @RequestHeader("X-User-Role") String role) {
         Survey survey = surveyService.getById(id);
         if (survey == null) throw new BizException("问卷不存在");
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作");
+        surveyAccessService.requirePermission(survey, userId, role, Permission.SURVEY_DELETE, "操作");
         int result = surveyService.permanentDelete(id);
         if (result <= 0) throw new BizException("删除失败");
         return "已彻底删除";

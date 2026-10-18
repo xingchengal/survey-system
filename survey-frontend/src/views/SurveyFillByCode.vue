@@ -12,14 +12,14 @@
       </el-result>
     </div>
 
-    <!-- ★ 已收满：**进页面就告知**，不再让人填完才在提交时吃 400 -->
-    <div v-else-if="surveyFull" style="max-width: 600px; margin: 60px auto;">
+    <!-- ★ 不可填写（收满 / 已截止 / 已结束）：**进页面就告知**。
+         以前要等填完、点提交才在服务端吃 400，白填一遍。 -->
+    <div v-else-if="closedReason" style="max-width: 600px; margin: 60px auto;">
       <el-card>
         <h2 style="margin: 0 0 8px 0;">{{ survey.title }}</h2>
         <p v-if="survey.description" style="color: #666; margin: 0 0 16px;">{{ survey.description }}</p>
-        <el-alert type="warning" show-icon :closable="false"
-                  :title="`该问卷已收满 ${survey.maxResponses} 份答卷，无法继续填写`">
-          收集上限由作者在「设置」里设定，达到上限后提交一律会被拒收 —— 所以这里直接拦住，不用白填一遍。
+        <el-alert type="warning" show-icon :closable="false" :title="closedTitle">
+          {{ closedHint }}
         </el-alert>
         <div style="margin-top: 16px;">
           <el-button v-if="survey.publicResult === 1" type="primary" @click="goPublicResult">
@@ -286,8 +286,11 @@ export default {
       history: [],
       answers: {},
       submitted: false,
-      /** 已经收满（后端 /share/{code} 给的 responsesFull）—— 此时不进答题流程 */
-      surveyFull: false,
+      /**
+       * 为什么现在不能填：'' = 可以填；'full' 已收满 / 'expired' 已截止 / 'ended' 已结束。
+       * ★ 三者都要在**进页面时**就判出来 —— 以前只有"提交"那一刻才知道，填写人会白填一遍。
+       */
+      closedReason: '',
       allDone: false,
       countdown: '',
       countdownTimer: null,
@@ -367,6 +370,26 @@ export default {
       if (this.totalSteps === 0) return 0
       return Math.min(100, Math.round(this.completedSteps / this.totalSteps * 100))
     },
+    /** 不可填写页的标题（三种原因各一句话） */
+    closedTitle() {
+      if (this.closedReason === 'full') {
+        return `该问卷已收满 ${this.survey.maxResponses} 份答卷，无法继续填写`
+      }
+      if (this.closedReason === 'expired') {
+        return `该问卷已于 ${this.survey.endTime} 截止，无法继续填写`
+      }
+      return '该问卷已结束，无法继续填写'
+    },
+    /** 不可填写页的说明：讲清"为什么现在拦"，避免访客以为是页面坏了 */
+    closedHint() {
+      if (this.closedReason === 'full') {
+        return '收集上限由作者在「设置」里设定；达到上限后提交一律会被拒收，所以这里直接拦住，不用白填一遍。'
+      }
+      if (this.closedReason === 'expired') {
+        return '到了截止时间就不再收答卷（提交会被后端拒绝），所以不再让你从头填。'
+      }
+      return '作者已经把这份问卷结束了，不再接收答卷。'
+    },
     /** 提交成功页的感谢语：作者自定义优先，否则用默认文案 */
     thankText() {
       const text = this.survey && this.survey.thankText
@@ -395,21 +418,39 @@ export default {
         //   传 { silent: true }：这是匿名答题页，未登录是常态 ——
         //   万一真返回 401，也不该触发"登录已过期"跳转、把答题流程打断。
         const data = await api.survey.byShareCode(this.shareCode, { silent: true })
-        if (!data || !data.id || data.status !== 1) {
+        if (!data || !data.id) {
           this.survey = null
           this.loading = false
           return
         }
         this.survey = data
         // ★ 记一次访问量：api.survey.view() 在 api 层已内置 { silent: true }
-        //   （放在"收满"判断之前：页面确实被打开了，浏览数照记，不因满额而漏统计。）
         //   （失败不弹提示、不跳登录）；
         //   ★ 绝不【加 await】：访问量统计不该拖慢问卷首屏渲染。
         api.survey.view(this.shareCode).catch(() => {})
-        // ★★ 已收满 → 直接给"收满"页（含结果入口），不再加载题目、不再让访客白填一遍。
-        //   放在密码门之前：都已经不能交了，没必要先让人输密码。
+        // ★ 草稿 / 回收站等（既不是已发布也不是已结束）→ 对外一律当作"不存在或已下线"
+        if (data.status !== 1 && data.status !== 2) {
+          this.survey = null
+          this.loading = false
+          return
+        }
+        // ★★ 三种"现在填不了"统一处理（都在**进页面**时判，不让访客白填一遍）：
+        //   ① 已结束（定时任务把 status 置 2，或作者手动结束）
+        //   ② 已收满（后端 /share 算好的 responsesFull，口径与提交守卫一致）
+        //   ③ 已过截止时间（status 可能还没来得及翻，但提交已经会被拒）
+        //   ★ 放在密码门之前：都已经不能交了，没必要先让人输密码。
+        if (data.status === 2) {
+          this.closedReason = 'ended'
+          this.loading = false
+          return
+        }
         if (data.responsesFull === true) {
-          this.surveyFull = true
+          this.closedReason = 'full'
+          this.loading = false
+          return
+        }
+        if (this.isExpired) {
+          this.closedReason = 'expired'
           this.loading = false
           return
         }

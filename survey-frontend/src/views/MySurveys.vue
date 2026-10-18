@@ -95,6 +95,8 @@
           <div class="title-main">
             <span class="title-text">{{ row.title }}</span>
             <span class="id-badge">#{{ row.id }}</span>
+            <!-- ★ 作者视角：哪几份已经共享出去了（数据来自 GET /api/survey/my 的 collaboratorCount） -->
+            <span v-if="row.collaboratorCount > 0" class="shared-badge">🤝 已共享 {{ row.collaboratorCount }} 人</span>
           </div>
           <div class="title-desc">{{ row.description || '暂无描述' }}</div>
         </div>
@@ -125,7 +127,9 @@
 
         <div class="col-created">
           <el-icon class="mr-4"><Calendar /></el-icon>
-          {{ row.createdTime }}
+          <!-- ★ 包一层 span 才能做"超出省略号"：grid 单元格不裁剪内容，
+               日期文本会溢出到右侧操作列、被按钮压在下面（实测截图就是这样重叠的）。 -->
+          <span class="created-text">{{ row.createdTime }}</span>
         </div>
 
         <div class="col-actions">
@@ -152,10 +156,27 @@
           <el-button class="row-btn rb-copy" :icon="CopyDocument" @click="handleCopy(row)">
             <span class="btn-label">复制</span>
           </el-button>
+          <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
+          <el-button v-if="row.userId === currentUserId()" class="row-btn rb-collab" :icon="Connection" @click="openCollaborators(row)">
+            <span class="btn-label">协作</span>
+          </el-button>
           <el-button class="row-btn rb-delete" :icon="Delete" @click="handleDelete(row)">
             <span class="btn-label">删除</span>
           </el-button>
         </div>
+      </div>
+    </div>
+
+    <!-- ★ 共享给我的问卷（H2 协作）：没有这块，被邀请的人根本找不到入口 -->
+    <div v-if="sharedSurveys.length" class="shared-block mb-16">
+      <div class="shared-title">🤝 共享给我的问卷（{{ sharedSurveys.length }}）</div>
+      <div v-for="item in sharedSurveys" :key="item.id" class="shared-row">
+        <span class="shared-name">{{ item.title }}<span class="id-badge">#{{ item.id }}</span></span>
+        <span class="shared-role">{{ item.status === 1 ? '已发布' : '未发布' }}</span>
+        <el-button size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
+        <el-button size="small" @click="handleStatistics(item)">统计</el-button>
+        <el-button size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
+        <el-button size="small" type="danger" plain @click="leaveCollaboration(item)">退出</el-button>
       </div>
     </div>
 
@@ -175,6 +196,57 @@
 
     <el-empty v-if="filteredSurveys.length === 0" description="没有匹配的问卷" />
     </template>
+
+    <!-- ========== 申请变更权限（被邀请人） ========== -->
+    <el-dialog v-model="applyVisible" title="申请变更权限" width="430px">
+      <p class="apply-tip">
+        问卷：{{ applySurvey && applySurvey.title }}<br />
+        请选择你希望申请的角色，提交后作者会收到通知。
+      </p>
+      <el-select v-model="applyRole" style="width: 100%;">
+        <el-option label="只读（viewer）—— 只能看问卷" value="viewer" />
+        <el-option label="可编辑（editor）—— 能改内容，不能删除/发布" value="editor" />
+        <el-option label="只看数据（analyst）—— 只能看统计" value="analyst" />
+      </el-select>
+      <template #footer>
+        <el-button @click="applyVisible = false">取消</el-button>
+        <el-button type="primary" :loading="applying" @click="submitApply">提交申请</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ========== 协作者管理（作者/管理员） ========== -->
+    <el-dialog v-model="collabVisible" title="协作者" width="560px">
+      <div class="collab-add">
+        <el-input v-model="collabForm.username" placeholder="对方的用户名" style="width: 190px;" />
+        <el-select v-model="collabForm.role" style="width: 150px;">
+          <el-option label="只读（viewer）" value="viewer" />
+          <el-option label="可编辑（editor）" value="editor" />
+          <el-option label="只看数据（analyst）" value="analyst" />
+        </el-select>
+        <el-button type="primary" @click="addCollaborator">邀请</el-button>
+      </div>
+      <el-table :data="collaborators" size="small" empty-text="还没有协作者">
+        <el-table-column label="成员">
+          <template #default="{ row }">{{ row.nickname || row.username }}（{{ row.username }}）</template>
+        </el-table-column>
+        <el-table-column label="角色" width="160">
+          <template #default="{ row }">
+            <el-select :model-value="row.collaboratorRole" size="small" @change="(v) => changeCollaboratorRole(row, v)">
+              <el-option label="只读 viewer" value="viewer" />
+              <el-option label="可编辑 editor" value="editor" />
+              <el-option label="只看数据 analyst" value="analyst" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="110">
+          <template #default="{ row }">
+            <el-button link type="danger" @click="removeCollaborator(row)">移除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <p class="collab-hint">只读 = 只能看问卷；可编辑 = 能改内容、不能删除；只看数据 = 只能看统计。<br />
+        被邀请人会收到站内通知；对方也可以在自己的「共享给我」里主动退出。</p>
+    </el-dialog>
 
     <!-- ========== AI 创建问卷对话框 ========== -->
     <el-dialog
@@ -333,14 +405,15 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, CopyDocument, Edit, Promotion, Share, DataAnalysis, Delete,
-  Search, MagicStick
-} from '@element-plus/icons-vue'
+  Search, MagicStick, Connection } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
 //   http.js 统一带 Authorization: Bearer token、统一按 HTTP 状态码判成败、统一弹后端 message，
 //   页面只关心「调哪个接口、拿到什么数据」。
 //   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
 import api from '../api'
+import { getUser } from '../utils/auth'
+import collaboratorApi from '../api/collaborator'
 // 页码记忆（sessionStorage）：从统计/编辑页返回时仍停在第 N 页
 import { readPageNum, savePageNum } from '../utils/pageMemory'
 
@@ -355,6 +428,21 @@ export default {
       surveys: [],
       /** 首次加载骨架屏（数据回来即关，失败也关，避免一直闪） */
       loading: true,
+      /** 共享给我的问卷（H2） */
+      sharedSurveys: [],
+      /** 协作者弹窗 */
+      collabVisible: false,
+      collabSurveyId: null,
+      collaborators: [],
+      collabForm: { username: '', role: 'viewer' },
+      /** 申请变更权限弹窗（用下拉，不用手填） */
+      applyVisible: false,
+      applySurvey: null,
+      applyRole: 'editor',
+      applying: false,
+      /** 列表静默刷新的定时器 / 可见性监听（定时任务每分钟才改 status，列表不能只取一次） */
+      refreshTimer: null,
+      visibilityHandler: null,
       // 新建对话框
       createDialogVisible: false,
       createTab: 'blank',
@@ -387,6 +475,7 @@ export default {
       Promotion: markRaw(Promotion),
       Share: markRaw(Share),
       DataAnalysis: markRaw(DataAnalysis),
+      Connection: markRaw(Connection),
       Delete: markRaw(Delete),
       Search: markRaw(Search),
       MagicStick: markRaw(MagicStick)
@@ -470,6 +559,8 @@ export default {
     // 恢复上次停留的页码（从统计/编辑页返回时不会被弹回第 1 页）
     this.pageNum = readPageNum(PAGE_KEY)
     this.loadSurveys()
+    this.loadSharedSurveys()
+    this.startAutoRefresh()
     // 从看板快捷入口跳过来时直接打开对应弹窗：?ai=1 / ?create=1
     // ★ 打开后把 query 清掉，避免刷新页面又弹一次
     if (this.$route.query.ai) {
@@ -480,7 +571,51 @@ export default {
       this.$router.replace({ path: this.$route.path })
     }
   },
+  beforeUnmount() {
+    this.stopAutoRefresh()
+  },
   methods: {
+    /**
+     * 静默刷新列表（不碰 loading / 分页 / 弹窗）。
+     *
+     * ★ 为什么需要：问卷的「已结束」是后端**定时任务每分钟**扫一次改出来的
+     *   （SurveyService.autoPublishAndClose，cron 每分钟第 0 秒），
+     *   而列表只在 mounted 时取一次 —— 于是"截止时间到了，页面还显示已发布"，
+     *   看起来两边不同步（用户实测报障）。
+     * ★ 频率取 30 秒：后端是每分钟第 0 秒扫一次，取一半周期，
+     *   这样"到点/收满"在页面上最多晚 30 秒出现（再密就是白刷）。
+     */
+    async refreshSilently() {
+      try {
+        this.surveys = await api.survey.my()
+      } catch {
+        // 静默：定时刷新失败不打扰用户（下次再刷）
+      }
+    },
+
+    /** 定时 + 窗口重新可见时各刷一次（切走再回来是最常见的"看到旧数据"场景） */
+    startAutoRefresh() {
+      this.stopAutoRefresh()
+      this.refreshTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') this.refreshSilently()
+      }, 30 * 1000)
+      this.visibilityHandler = () => {
+        if (document.visibilityState === 'visible') this.refreshSilently()
+      }
+      document.addEventListener('visibilitychange', this.visibilityHandler)
+    },
+
+    stopAutoRefresh() {
+      if (this.refreshTimer) {
+        clearInterval(this.refreshTimer)
+        this.refreshTimer = null
+      }
+      if (this.visibilityHandler) {
+        document.removeEventListener('visibilitychange', this.visibilityHandler)
+        this.visibilityHandler = null
+      }
+    },
+
     async loadSurveys() {
       //   只保留 try/catch 避免非 2xx 抛出的 ApiError 变成未捕获异常。
       try {
@@ -490,6 +625,94 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+
+    /** 当前用户 id（只用于"这条问卷是不是我的"的按钮显隐；后端仍会校验） */
+    currentUserId() {
+      const user = getUser()
+      return user ? user.id : null
+    },
+
+    /** 共享给我的问卷（静默失败：没协作者时接口就是空数组） */
+    async loadSharedSurveys() {
+      try {
+        this.sharedSurveys = await collaboratorApi.shared()
+      } catch {
+        this.sharedSurveys = []
+      }
+    },
+
+    async openCollaborators(row) {
+      this.collabSurveyId = row.id
+      this.collabForm = { username: '', role: 'viewer' }
+      this.collabVisible = true
+      await this.reloadCollaborators()
+    },
+
+    async reloadCollaborators() {
+      try {
+        this.collaborators = await collaboratorApi.list(this.collabSurveyId)
+      } catch {
+        this.collaborators = []
+      }
+    },
+
+    async addCollaborator() {
+      if (!this.collabForm.username.trim()) {
+        ElMessage.warning('请输入对方的用户名')
+        return
+      }
+      await collaboratorApi.invite(this.collabSurveyId, this.collabForm.username.trim(), this.collabForm.role)
+      ElMessage.success('已邀请')
+      this.collabForm.username = ''
+      await this.reloadCollaborators()
+    },
+
+    async removeCollaborator(row) {
+      try {
+        await this.$confirm(`把 ${row.nickname || row.username} 从协作者里移除？`, '移除协作者', { type: 'warning' })
+      } catch {
+        return // 用户取消
+      }
+      await collaboratorApi.remove(this.collabSurveyId, row.userId)
+      ElMessage.success('已移除')
+      await this.reloadCollaborators()
+    },
+
+    async changeCollaboratorRole(row, role) {
+      if (role === row.collaboratorRole) return
+      await collaboratorApi.changeRole(this.collabSurveyId, row.userId, role)
+      ElMessage.success('已改为 ' + role)
+      await this.reloadCollaborators()
+    },
+
+    /** 打开"申请变更权限"弹窗（下拉选角色，避免手填写错） */
+    openApply(item) {
+      this.applySurvey = item
+      this.applyRole = 'editor'
+      this.applyVisible = true
+    },
+
+    async submitApply() {
+      this.applying = true
+      try {
+        await collaboratorApi.apply(this.applySurvey.id, this.applyRole)
+        ElMessage.success('已提交申请，作者会收到通知')
+        this.applyVisible = false
+      } finally {
+        this.applying = false
+      }
+    },
+
+    async leaveCollaboration(item) {
+      try {
+        await this.$confirm(`退出协作《${item.title}》？退出后这份问卷会从"共享给我"里消失。`, '退出协作', { type: 'warning' })
+      } catch {
+        return
+      }
+      await collaboratorApi.leave(item.id)
+      ElMessage.success('已退出协作')
+      await this.loadSharedSurveys()
     },
 
     handleSort(command) { this.sortOrder = command },
@@ -832,9 +1055,46 @@ export default {
   box-shadow: var(--shadow-sm);
 }
 
+/* ==================== 共享给我的问卷（H2） ==================== */
+.shared-block {
+  padding: 14px 18px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, #f8fbff, #f2f8ff);
+}
+.shared-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+.shared-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--stroke);
+}
+.shared-row:first-of-type { border-top: none; }
+.shared-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--ink);
+}
+.shared-name .id-badge { margin-left: 8px; }
+.shared-role { font-size: 12px; color: var(--ink-3); }
+
 .list-header {
   display: grid;
-  grid-template-columns: 3fr 96px 170px 160px 430px;
+  /* ★ 三件事一起才不重叠：
+     ① minmax(0, 3fr)：标题列可以被压缩（默认下限是 min-content，会把整行撑爆）；
+     ② 操作列 minmax(460px, auto)：6 个胶囊按钮实测约 454px，给足下限；
+     ③ .col-actions 允许换行：真放不下时换行，绝不向左溢出压住"创建时间"。 */
+  grid-template-columns: minmax(0, 3fr) 96px 170px 172px minmax(460px, auto);
   padding: 14px 24px;
   background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
   border-bottom: 1px solid var(--stroke);
@@ -846,7 +1106,7 @@ export default {
 
 .list-row {
   display: grid;
-  grid-template-columns: 3fr 96px 170px 160px 430px;
+  grid-template-columns: minmax(0, 3fr) 96px 170px 172px minmax(460px, auto);
   padding: 18px 24px;
   border-bottom: 1px solid #f1f5fd;
   align-items: center;
@@ -876,7 +1136,23 @@ export default {
 .title-main {
   display: flex;
   align-items: center;
+  gap: 8px;
   margin-bottom: 4px;
+}
+
+/* "已共享 N 人"角标：与状态徽标同尺寸，颜色走靛蓝（与协作按钮同一色系） */
+.shared-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #4338ca;
+  background: #eef2ff;
+  border: 1px solid #dcdffb;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .title-text {
@@ -964,6 +1240,14 @@ export default {
   align-items: center;
   font-size: 13px;
   color: #909399;
+  min-width: 0;          /* ★ 允许被压缩，而不是顶到隔壁列 */
+  white-space: nowrap;
+}
+
+.created-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .col-actions {
@@ -971,6 +1255,11 @@ export default {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+  /* ★★ 必须允许换行：.col-actions 的内容比所在网格列宽时，
+     justify-content: flex-end 会把溢出部分**推到左边**，
+     正好压在"创建时间"上（实测截图就是重叠）。换行比溢出安全得多。 */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 /* ============== 行内操作按钮：带文字的胶囊，一种功能一个色 ============== */
@@ -1001,6 +1290,19 @@ export default {
 }
 .row-btn:active {
   transform: scale(0.97);
+}
+
+/* 协作者 = 靛蓝（与编辑的蓝、统计的紫刻意区分） */
+.rb-collab {
+  background: #eef2ff;
+  color: #4338ca;
+  border-color: #dcdffb;
+}
+.rb-collab:hover {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+  box-shadow: 0 6px 14px rgba(79, 70, 229, 0.3);
 }
 
 /* 编辑 = 天空蓝（主操作） */
@@ -1147,7 +1449,7 @@ export default {
 /* 宽屏收窄一点、操作列按屏幕逐级压缩；窄屏只留图标（但按钮仍是 30px，不再是小圆点） */
 @media (max-width: 1500px) {
   .list-header, .list-row {
-    grid-template-columns: 2.4fr 88px 150px 140px 400px;
+    grid-template-columns: minmax(0, 2.4fr) 88px 150px 140px minmax(420px, auto);
     padding: 14px 18px;
   }
   .row-btn {
@@ -1157,7 +1459,7 @@ export default {
 
 @media (max-width: 1280px) {
   .list-header, .list-row {
-    grid-template-columns: 2fr 80px 130px 120px 360px;
+    grid-template-columns: minmax(0, 2fr) 80px 130px 120px minmax(360px, auto);
   }
   .row-btn {
     padding: 0 8px;
@@ -1177,7 +1479,7 @@ export default {
     margin-right: 0;
   }
   .list-header, .list-row {
-    grid-template-columns: 2fr 80px 130px 120px 220px;
+    grid-template-columns: minmax(0, 2fr) 80px 130px 120px minmax(220px, auto);
   }
   .template-grid {
     grid-template-columns: repeat(2, 1fr);

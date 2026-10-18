@@ -3,6 +3,7 @@ package com.survey.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.survey.common.BizException;
+import com.survey.common.ForbiddenException;
 import com.survey.entity.ErrorLog;
 import com.survey.entity.User;
 import com.survey.service.ErrorLogService;
@@ -107,6 +108,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public ResponseEntity<Map<String, Object>> handleBizException(BizException e) {
         return buildResponse(HttpStatus.BAD_REQUEST, e.getMessage());
+    }
+
+    /**
+     * 权限不足（{@code @RequirePermission} 切面抛出）→ **403**。
+     *
+     * ★ 为什么不复用 BizException 的 400：见 common/ForbiddenException 的类注释 ——
+     *   400 是"这次请求的参数/状态不对"，403 是"你的身份做不了这件事"，
+     *   前端据此能给出不同引导（改输入 vs 找管理员授权）。
+     * ★ **不写 t_error_log**：与 BizException 同理，这是可预期的业务拒绝，
+     *   不是程序故障；记了只会把真正的异常刷走。
+     * ★ 注意：{@code @RequireAdmin} 目前仍抛 BizException（400），两套口径在 H2-6 统一。
+     */
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<Map<String, Object>> handleForbidden(ForbiddenException e) {
+        return buildResponse(HttpStatus.FORBIDDEN, e.getMessage());
     }
 
     /**

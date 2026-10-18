@@ -30,6 +30,12 @@
 const TOKEN_KEY = 'token'
 const USER_KEY = 'user'
 const REFRESH_KEY = 'refreshToken'
+/**
+ * ★ H2 新增：登录接口下发的**全局权限点**（survey:edit / user:manage …）。
+ *   它只用于**界面显隐**（隐藏按钮/菜单）—— localStorage 可改，后端才是防线。
+ *   "对某一份问卷"的权限不在这里，由 GET /api/survey/{id} 的 myPermissions 单独给。
+ */
+const PERMISSIONS_KEY = 'permissions'
 
 /**
  * 安全解析 JSON：解析失败返回 null（并顺手清掉这个坏值）。
@@ -92,6 +98,46 @@ export function setAuth(token, user, refreshToken) {
   }
 }
 
+/** 取全局权限点（解析失败/未存 → 空数组） */
+export function getPermissions() {
+  const raw = localStorage.getItem(PERMISSIONS_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    localStorage.removeItem(PERMISSIONS_KEY)
+    return []
+  }
+}
+
+/** 保存权限点（登录成功后调用；传非数组视为"没给"，清掉旧值） */
+export function setPermissions(permissions) {
+  if (Array.isArray(permissions)) {
+    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions))
+  } else {
+    localStorage.removeItem(PERMISSIONS_KEY)
+  }
+}
+
+/**
+ * 前端权限判断 —— **只用于显隐**，不是安全边界。
+ *
+ * ★ 兼容老登录态：localStorage 里根本没有权限点（本次上线前登录的会话）时按角色兜底：
+ *   admin 全放行；普通用户放行 survey:*（与 user 角色的种子权限一致），
+ *   否则老用户会在刷新前丢掉一半按钮。
+ */
+export function hasPermission(code) {
+  if (!code) return true
+  const stored = localStorage.getItem(PERMISSIONS_KEY)
+  if (stored == null) {
+    const role = getRole()
+    if (role === 'admin') return true
+    return typeof code === 'string' && code.startsWith('survey:')
+  }
+  return getPermissions().includes(code)
+}
+
 /** 只更新用户信息（如改完昵称/头像后刷新本地缓存），不动 token */
 export function setUser(user) {
   if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
@@ -106,6 +152,9 @@ export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
   localStorage.removeItem(REFRESH_KEY)
+  // ★ 权限点要跟着登录态一起清：否则下次以另一个账号登录前，
+  //   旧权限会短暂留在 localStorage 里（菜单按旧权限渲染）。
+  localStorage.removeItem(PERMISSIONS_KEY)
 }
 
 /**
@@ -120,6 +169,9 @@ export default {
   getToken,
   getUser,
   getRole,
+  getPermissions,
+  setPermissions,
+  hasPermission,
   isLoggedIn,
   setAuth,
   setUser,

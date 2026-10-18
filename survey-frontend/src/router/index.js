@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '../layouts/AdminLayout.vue'
 // ★ 登录态统一从 utils/auth 读，不要各处直接 JSON.parse localStorage
 //   （原因见 utils/auth.js 的类注释：解析失败会导致整个应用白屏）
-import { getUser, isLoggedIn, homePathFor } from '../utils/auth'
+import { getUser, isLoggedIn, homePathFor, hasPermission } from '../utils/auth'
 
 const routes = [
   // ===== 公开页面 =====
@@ -189,6 +189,14 @@ router.beforeEach((to, from, next) => {
   // 4. 角色校验：meta.roles 不含当前角色就是没权限，跳回各自的首页
   const allowedRoles = to.meta.roles
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    next(homePathFor(user.role))
+    return
+  }
+
+  // 5. 权限点校验（H2 新增）：路由写 meta.permission 时按权限点判，同样跳回首页。
+  //    ★ 与 roles 并存：roles 管"管理端/用户端"这种粗粒度，permission 管"这项能力"。
+  //    ★ 前端判断只防误入，真正的拦截在后端（@RequirePermission）。
+  if (to.meta.permission && !hasPermission(to.meta.permission)) {
     next(homePathFor(user.role))
     return
   }

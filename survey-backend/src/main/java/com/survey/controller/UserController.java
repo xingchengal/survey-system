@@ -11,6 +11,7 @@ import com.survey.dto.RefreshRequest;
 import com.survey.dto.RegisterRequest;
 import com.survey.entity.LoginLog;
 import com.survey.entity.User;
+import com.survey.mapper.RoleMapper;
 import com.survey.service.CaptchaService;
 import com.survey.service.LoginLogService;
 import com.survey.service.RefreshTokenService;
@@ -72,6 +73,10 @@ public class UserController {
     /** 注册前的滑块二次校验：register() 只认"已被标记 verified 的凭证"并消费它 */
     @Autowired
     private CaptchaService captchaService;
+
+    /** ★ RBAC：登录时一并下发"角色码 + 权限点"，前端据此渲染菜单/按钮（只是体验层）。 */
+    @Autowired
+    private RoleMapper roleMapper;
 
     /** "记住我"的双 token：长效、可吊销的 refresh token（access token 仍短命，理由见 login()） */
     @Autowired
@@ -213,6 +218,16 @@ public class UserController {
             result.put("refreshToken", refreshToken);
             result.put("refreshExpiresIn", RefreshTokenService.REFRESH_DAYS * 24 * 3600);
         }
+
+        // ===== RBAC：下发角色码与权限点 =====
+        // ★ 只下发"全局"权限点（t_user_role → t_role_permission）；
+        //   "对某一份问卷"的权限（作者/协作者）由 GET /api/survey/{id} 的 myPermissions 单独给。
+        //   前者决定菜单，后者决定这份问卷上的按钮，两者不要混。
+        // ★ 前端**只用来做显隐**；真正的授权在后端（@RequirePermission + SurveyAccessService）。
+        List<String> roleCodes = roleMapper.findRoleCodesByUserId(loginUser.getId());
+        List<String> permissionCodes = roleMapper.findPermissionCodesByUserId(loginUser.getId());
+        result.put("roles", roleCodes == null ? List.of() : roleCodes);
+        result.put("permissions", permissionCodes == null ? List.of() : permissionCodes);
 
         loginUser.setPassword(null);
         result.put("user", loginUser);
