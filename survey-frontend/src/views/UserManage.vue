@@ -8,12 +8,16 @@
     </div>
 
     <div class="toolbar-card">
-      <!-- ★ 账号注销（软删除）：两个视图。
-           "在用用户"里看不到已注销的人（后端按设计过滤了 deleted_at），
-           所以恢复入口必须有一个能**看见**他们的列表，否则 restore 就是"有端点没入口"。
-           ★ 两个视图的行集合、可执行的动作都不同，切换时必须清空选中。 -->
+      <!-- ★ 三个分类视图（G3）：在用 / **已禁用** / 已注销。
+           "在用"= 既没禁用也没注销；"已禁用"= 被管理员处置过、数据都在、可解禁；
+           "已注销"= 用户自己注销的软删除，可恢复。
+           ★ 为什么要独立的「已禁用」入口：禁用是"账号还在但不许登录"，
+             必须有一个地方能一眼看到全部被处置的账号并批量解禁 ——
+             只靠一个状态下拉时，管理员得先想起来"去筛一下已禁用"，很容易漏人。
+           ★ 三个视图的行集合、可执行的动作都不同，切换时必须清空选中。 -->
       <el-radio-group v-model="view" @change="handleViewChange">
         <el-radio-button value="active">在用用户</el-radio-button>
+        <el-radio-button value="disabled">已禁用</el-radio-button>
         <el-radio-button value="deleted">已注销</el-radio-button>
       </el-radio-group>
       <!-- 角色筛选（G3）：后端 /user/page 已改为**含管理员**（原来写死 role='user'），
@@ -22,20 +26,6 @@
         <el-option label="全部角色" value="" />
         <el-option label="管理员" value="admin" />
         <el-option label="普通用户" value="user" />
-      </el-select>
-      <!-- 禁用状态筛选（G3）：只在"在用"视图有意义（已注销的人不参与禁用）。
-           ★ 默认是"全部"，**不是**"只看正常" —— 否则被禁用的人会从列表消失、再也解不了禁。 -->
-      <el-select
-        v-if="view === 'active'"
-        v-model="statusFilter"
-        placeholder="全部状态"
-        clearable
-        class="status-select"
-        @change="handleSearch"
-      >
-        <el-option label="全部状态" value="" />
-        <el-option label="正常" :value="0" />
-        <el-option label="已禁用" :value="1" />
       </el-select>
       <el-input
         v-model="keyword"
@@ -55,21 +45,23 @@
     <!-- 批量操作条：选中 ≥1 项才出现。
          ★ 所有批量动作都是**逐条调单条端点**（Promise.allSettled），后端没有批量端点 ——
            逐条调用能精确报告"哪几个成功、哪几个为什么失败"。
-         ★ 批量删除是**物理删除 + 级联**（该用户名下问卷与答卷一起删），所以文案比单个删除更重。 -->
+         ★ 批量删除是**物理删除 + 级联**（该用户名下问卷与答卷一起删），所以文案比单个删除更重。
+         ★ 动作按当前分类给：在用 → 禁用；已禁用 → 解禁；已注销 → 恢复；删除只在前两档出现。 -->
     <div v-if="selectedRows.length > 0" class="batch-bar">
       <span class="batch-count">已选 <strong>{{ selectedRows.length }}</strong> 项</span>
-      <template v-if="view === 'active'">
-        <el-button type="warning" size="small" :icon="Lock" :loading="batchWorking" @click="handleBatchDisable">批量禁用</el-button>
+      <template v-if="view === 'deleted'">
+        <el-button type="primary" size="small" :icon="RefreshLeft" :loading="batchWorking" @click="handleBatchRestore">批量恢复</el-button>
+      </template>
+      <template v-else-if="view === 'disabled'">
         <el-button type="success" size="small" :icon="Unlock" :loading="batchWorking" @click="handleBatchEnable">批量解禁</el-button>
         <el-button type="danger" size="small" :icon="Delete" :loading="batchWorking" @click="handleBatchDelete">批量删除</el-button>
       </template>
       <template v-else>
-        <el-button type="primary" size="small" :icon="RefreshLeft" :loading="batchWorking" @click="handleBatchRestore">批量恢复</el-button>
+        <el-button type="warning" size="small" :icon="Lock" :loading="batchWorking" @click="handleBatchDisable">批量禁用</el-button>
+        <el-button type="danger" size="small" :icon="Delete" :loading="batchWorking" @click="handleBatchDelete">批量删除</el-button>
       </template>
       <el-button size="small" link @click="clearSelection">取消选择</el-button>
-      <span class="batch-hint">
-        {{ view === 'active' ? '禁用后对方会被立即踢下线（数据保留，可解禁）' : '恢复后对方需用原密码重新登录' }}
-      </span>
+      <span class="batch-hint">{{ batchHint }}</span>
     </div>
 
     <div class="table-card">
@@ -77,7 +69,7 @@
       :loading="loading"
       :error="error"
       :empty="users.length === 0"
-      :empty-text="view === 'deleted' ? '没有被注销的账号' : '暂无用户'"
+      :empty-text="emptyText"
       @retry="loadUsers"
     >
     <el-table
@@ -102,8 +94,11 @@
           </el-tag>
         </template>
       </el-table-column>
-      <!-- 在用视图：禁用状态（G3）。已注销视图：注销时间（管理员要找的通常是刚注销的那个） -->
-      <el-table-column v-if="view === 'active'" label="状态" width="100" align="center">
+      <!-- 在用 / 已禁用两个视图：显示禁用状态（G3）。
+           ★ 不在"已禁用"视图里把状态列写死 —— 那一列的真实来源永远是行上的 disabled 字段，
+             这样即便数据与视图不一致（例如刚解禁还没刷新），标签也不会说谎。
+           已注销视图：换注销时间（管理员要找的通常是刚注销的那个）。 -->
+      <el-table-column v-if="view !== 'deleted'" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.disabled === 1" type="danger" size="small" effect="dark">已禁用</el-tag>
           <el-tag v-else type="success" size="small" effect="plain">正常</el-tag>
@@ -196,10 +191,7 @@ export default {
       keyword: '',
       // 角色筛选（G3）：'' = 全部；后端只认 admin/user
       roleFilter: '',
-      // 禁用状态筛选（G3）：'' = 全部、0 = 正常、1 = 已禁用。
-      // ★ 只在"在用"视图用；切到已注销时清空（那个视图的行都是"已注销"，与禁用无关）
-      statusFilter: '',
-      // 列表视图：在用用户 / 已注销。★ 必须声明在 data 里才是响应式
+      // 列表视图：在用用户 / 已禁用 / 已注销。★ 必须声明在 data 里才是响应式
       // （漏声明时 v-model 只写到实例 ctx 上，切视图后模板不会重渲染）
       view: 'active',
       pageNum: 1,
@@ -220,9 +212,30 @@ export default {
       RefreshLeft: markRaw(RefreshLeft)
     }
   },
+  computed: {
+    /** 空态文案按视图区分：三个视图"没有数据"的含义完全不同 */
+    emptyText() {
+      if (this.view === 'deleted') return '没有被注销的账号'
+      if (this.view === 'disabled') return '没有被禁用的账号'
+      return '暂无用户'
+    },
+
+    /** 批量条的右侧提示：告诉管理员"点下去会发生什么" */
+    batchHint() {
+      if (this.view === 'deleted') return '恢复后对方需用原密码重新登录'
+      if (this.view === 'disabled') return '解禁后对方可重新登录（仍需重登一次）'
+      return '禁用后对方会被立即踢下线（数据保留，可在「已禁用」里解禁）'
+    }
+  },
   mounted() {
-    // ★ 顶栏全局搜索跳过来时带 ?keyword=用户名：直接按它搜一次（页码回 1，避免落在第 3 页看不到人）
-    const kw = this.$route && this.$route.query ? this.$route.query.keyword : ''
+    // ★ 顶栏全局搜索跳过来时带 ?keyword=用户名、或 ?view=disabled（"已禁用"快捷入口）：
+    //   直接按它搜一次（页码回 1，避免落在第 3 页看不到人）
+    const query = (this.$route && this.$route.query) || {}
+    const kw = query.keyword
+    const view = query.view
+    if (typeof view === 'string' && ['active', 'disabled', 'deleted'].includes(view)) {
+      this.view = view
+    }
     if (typeof kw === 'string' && kw.trim()) {
       this.keyword = kw.trim()
       this.pageNum = 1
@@ -244,15 +257,17 @@ export default {
           keyword: this.keyword.trim(),
           role: this.roleFilter
         }
-        // ★ 按视图选接口 —— 已注销的人走 /page-deleted
-        //   （/page 按设计过滤了 deleted_at，用它永远看不到已注销账号，也就无从恢复）
+        // ★ 三个视图对应三个查询：
+        //   已注销 → /page-deleted（/page 按设计过滤 deleted_at，永远看不到他们）
+        //   已禁用 → /page?disabled=1
+        //   在用   → /page?disabled=0（**明确排除**已禁用的人，否则"在用"里混着被处置的账号，
+        //            三个分类就名不副实了）
         if (this.view === 'deleted') {
           const data = await api.user.pageDeleted(params)
           this.users = data.list || []
           this.total = data.total || 0
         } else {
-          // disabled 只在"在用"视图传；'' 会被 toQuery 跳过（= 不筛选）
-          const data = await api.user.page({ ...params, disabled: this.statusFilter })
+          const data = await api.user.page({ ...params, disabled: this.view === 'disabled' ? 1 : 0 })
           this.users = data.list || []
           this.total = data.total || 0
         }
@@ -265,16 +280,15 @@ export default {
     },
 
     /**
-     * 切换「在用用户 / 已注销」视图。
+     * 切换分类视图（在用 / 已禁用 / 已注销）。
      * ★ 先清空列表再拉：否则切换瞬间会看到上一个视图的数据（像是新数据），
-     *   而两边的"ID/角色"长得很像，很容易让人误判。
-     * ★ 同时清空选中与禁用筛选：两个视图可执行的动作不同，留着上一批选中会误操作。
+     *   而三个视图的"ID/角色"长得很像，很容易让人误判。
+     * ★ 同时清空选中：三个视图可执行的动作不同，留着上一批选中会误操作。
      */
     handleViewChange() {
       this.users = []
       this.total = 0
       this.selectedRows = []
-      this.statusFilter = ''
       this.pageNum = 1
       savePageNum(PAGE_KEY, 1)
       this.loadUsers()
@@ -286,11 +300,10 @@ export default {
       this.loadUsers()
     },
 
-    /** 重置筛选条件（G3）：关键词 / 角色 / 禁用状态一起清 */
+    /** 重置筛选条件（G3）：关键词 / 角色一起清（分类视图保持不变 —— 那是导航，不是筛选） */
     handleReset() {
       this.keyword = ''
       this.roleFilter = ''
-      this.statusFilter = ''
       this.handleSearch()
     },
 
@@ -409,18 +422,20 @@ export default {
         .catch(() => {})
     },
 
-    // ===== G3：导出（当前视图 + 当前筛选）=====
+    // ===== G3：导出（当前分类 + 当前筛选）=====
     async handleExport() {
       this.exporting = true
       try {
-        // ★ deleted=true 时后端走「已注销」口径；disabled 只在"在用"视图有意义
+        // ★ deleted=true 时后端走「已注销」口径；已禁用 / 在用 用 disabled 区分
         const params = {
           keyword: this.keyword.trim(),
           role: this.roleFilter,
           deleted: this.view === 'deleted' ? 'true' : 'false'
         }
-        if (this.view === 'active' && this.statusFilter !== '') {
-          params.disabled = this.statusFilter
+        if (this.view === 'disabled') {
+          params.disabled = 1
+        } else if (this.view === 'active') {
+          params.disabled = 0
         }
         // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
         //   失败（如超过 10000 行）由 http.js 统一弹红字并 throw，这里不用再提示。
@@ -510,8 +525,7 @@ export default {
 </script>
 
 <style scoped>
-.role-select,
-.status-select {
+.role-select {
   width: 130px;
   flex: 0 0 auto;
 }

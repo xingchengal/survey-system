@@ -208,7 +208,7 @@
       <template #header>
         <div class="flex-between">
           <span class="text-bold">🧩 技术栈与系统信息</span>
-          <span class="panel-hint">v2.3.0 · 94 端点 · 324 测试 · 21 张表</span>
+          <span class="panel-hint">v2.3.0 · 98 端点 · 339 测试 · 21 张表</span>
         </div>
       </template>
 

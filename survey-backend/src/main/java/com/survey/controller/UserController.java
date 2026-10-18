@@ -65,7 +65,7 @@ import java.util.Map;
  *      由 filter/DocAccessFilter 校验，把「接口文档」限制给管理员；
  *   3. 实体的 password 字段标了 WRITE_ONLY，只收不发 —— 所以接口返回里永远不会带密码。
  */
-@Tag(name = "用户管理", description = "注册、登录、用户列表等")
+@Tag(name = "用户管理", description = "注册、登录、用户列表（含管理员与禁用状态）、禁用/解禁、导出")
 @RestController
 @RequestMapping("/api/user")
 public class UserController {

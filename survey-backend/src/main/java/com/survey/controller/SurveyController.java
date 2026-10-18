@@ -64,7 +64,7 @@ import java.util.Set;
  *   2. 分享码由服务端独占管理：/update 无条件沿用数据库旧值，客户端传了也会被忽略；
  *   3. 权限失败统一抛异常（走 GlobalExceptionHandler → 400 + 统一 JSON），不要 return null。
  */
-@Tag(name = "问卷管理", description = "问卷的增删改查、发布、复制、回收站、统计等")
+@Tag(name = "问卷管理", description = "问卷的增删改查、发布、复制、回收站、统计与导出")
 @RestController
 @RequestMapping("/api/survey")
 public class SurveyController {
