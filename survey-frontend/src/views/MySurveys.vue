@@ -535,7 +535,7 @@
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, CopyDocument, Edit, EditPen, Files, Promotion, Share, DataAnalysis, Delete,
+  Plus, CopyDocument, Edit, EditPen, Promotion, Share, DataAnalysis, Delete,
   Search, MagicStick, Connection, RefreshLeft, MoreFilled } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
@@ -682,7 +682,6 @@ export default {
       RefreshLeft: markRaw(RefreshLeft),
       MoreFilled: markRaw(MoreFilled),
       EditPen: markRaw(EditPen),
-      Files: markRaw(Files),
       Delete: markRaw(Delete),
       Search: markRaw(Search),
       MagicStick: markRaw(MagicStick)
