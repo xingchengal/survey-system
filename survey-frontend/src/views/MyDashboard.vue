@@ -159,7 +159,10 @@
                 </div>
                 <div class="recent-main">
                   <div class="recent-title">{{ row.title }}</div>
-                  <div class="recent-time">{{ row.createdTime }}</div>
+                  <div class="recent-time">
+                    {{ row.createdTime }}
+                    <span v-if="row.responseCount != null"> · {{ row.responseCount }} 份答卷</span>
+                  </div>
                 </div>
                 <el-tag v-if="row.status === 1" type="success" size="small" round>已发布</el-tag>
                 <el-tag v-else-if="row.status === 2" type="danger" size="small" round>已结束</el-tag>

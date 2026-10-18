@@ -99,6 +99,14 @@
             <span v-if="row.collaboratorCount > 0" class="shared-badge">🤝 已共享 {{ row.collaboratorCount }} 人</span>
           </div>
           <div class="title-desc">{{ row.description || '暂无描述' }}</div>
+          <!-- G6：答卷数/回收率（responseCount 由 /api/survey/my 批量回填；浏览量为 0 时不显示回收率） -->
+          <div class="row-metrics" :title="row.viewCount > 0 ? `浏览 ${row.viewCount} 次` : ''">
+            <span class="row-metric">📊 {{ row.responseCount || 0 }} 份答卷</span>
+            <template v-if="row.viewCount > 0">
+              <span class="row-metric-dot">·</span>
+              <span class="row-metric">回收率 {{ recoveryRate(row) }}%</span>
+            </template>
+          </div>
         </div>
 
         <div class="col-status">
@@ -1184,6 +1192,13 @@ export default {
     },
 
     /** 「更多」菜单的命令分发（低频/危险操作收在这里，主区保留编辑/发布/分享/统计） */
+    /** 回收率 = 答卷数 / 浏览量（浏览量 0 时返回 0；超过 100% 按 100 显示，避免看起来像 bug） */
+    recoveryRate(row) {
+      const views = Number(row.viewCount) || 0
+      if (views <= 0) return 0
+      return Math.min(100, Math.round((Number(row.responseCount) || 0) * 100 / views))
+    },
+
     handleMoreCommand(command, row) {
       if (command === 'copy') this.handleCopy(row)
       else if (command === 'collab') this.openCollaborators(row)
@@ -1467,6 +1482,21 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.row-metrics {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+.row-metric {
+  white-space: nowrap;
+}
+.row-metric-dot {
+  color: #c0c4cc;
 }
 
 .col-status { display: flex; justify-content: center; }

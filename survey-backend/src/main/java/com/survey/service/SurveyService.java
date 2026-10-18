@@ -371,8 +371,18 @@ public class SurveyService {
     }
 
     /** 查某个用户的问卷列表（「我的问卷」页）。 */
+    /**
+     * 我的问卷列表 —— 顺带回填每份问卷的**答卷数**（前端列表行显示"N 份答卷/回收率"）。
+     * ★ 用一次 GROUP BY 批量取（countResponsesBySurveyIds），不是逐份 COUNT；
+     *   responseCount 是 Survey 上的非数据库字段，Mapper 不映射它，只有这里回填。
+     */
     public List<Survey> listByUserId(Integer userId) {
-        return surveyMapper.findByUserId(userId);
+        List<Survey> mine = surveyMapper.findByUserId(userId);
+        Map<Integer, Integer> counts = countResponsesBySurveyIds(mine);
+        for (Survey survey : mine) {
+            survey.setResponseCount(counts.getOrDefault(survey.getId(), 0));
+        }
+        return mine;
     }
 
     /** 按 id 查问卷。★ 是各处的"归属校验"基础：拿到 userId 再和登录用户比。 */
@@ -976,6 +986,12 @@ public class SurveyService {
             return b.getCreatedTime().compareTo(a.getCreatedTime());
         });
         if (recent.size() > 5) recent = recent.subList(0, 5);
+
+        // ★ 看板「最近问卷」也要显示每份的答卷数：复用上面同一份批量计数，
+        //   只回填要返回的那 5 条（不额外查库、也不改其它字段）。
+        for (Survey s : recent) {
+            s.setResponseCount(responseCounts.getOrDefault(s.getId(), 0));
+        }
 
         Map<String, Object> result = new HashMap<>();
         result.put("total", c.total());

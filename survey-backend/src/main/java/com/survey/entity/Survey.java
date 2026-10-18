@@ -1,6 +1,7 @@
 package com.survey.entity;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.LocalDateTime;
 
@@ -223,6 +224,14 @@ public class Survey {
      */
     private Integer templateUseCount;
 
+    /**
+     * 答卷数 —— **不是数据库列**，只在 `/api/survey/my` 与 `/my-statistics` 的 recent 里回填。
+     * ★ 由 SurveyService 用一次 `countBySurveyIds` 批量填（避免 N+1）；
+     *   NON_NULL 保证其它接口（详情/管理列表）不会多出 `"responseCount": null`。
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer responseCount;
+
     public Integer getIsTemplate() { return isTemplate; }
     public void setIsTemplate(Integer isTemplate) { this.isTemplate = isTemplate; }
 
@@ -231,4 +240,7 @@ public class Survey {
 
     public Integer getTemplateUseCount() { return templateUseCount; }
     public void setTemplateUseCount(Integer templateUseCount) { this.templateUseCount = templateUseCount; }
+
+    public Integer getResponseCount() { return responseCount; }
+    public void setResponseCount(Integer responseCount) { this.responseCount = responseCount; }
 }
