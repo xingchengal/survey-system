@@ -83,6 +83,10 @@ public interface WalletMapper {
     @Select("SELECT COUNT(*) FROM t_wallet")
     int countWallets();
 
+    /** 全站钱包余额合计（管理端看板的"额度总量"；只是展示，不参与对账） */
+    @Select("SELECT IFNULL(SUM(balance), 0) FROM t_wallet")
+    long sumBalance();
+
     /**
      * 对账：余额与流水汇总不一致的钱包。
      * ★ 口径唯一：SUM(amount) 必须等于 balance（amount 有符号）。

@@ -17,6 +17,8 @@ import com.survey.mapper.RefreshTokenMapper;
 import com.survey.mapper.SurveyMapper;
 import com.survey.mapper.RoleMapper;
 import com.survey.mapper.SurveyCollaboratorMapper;
+import com.survey.mapper.SurveyIpMapper;
+import com.survey.mapper.SurveyReviewMapper;
 import com.survey.mapper.SurveyVersionMapper;
 import com.survey.mapper.UserMapper;
 import com.survey.mapper.WalletMapper;
@@ -296,6 +298,17 @@ class EndpointAuthMatrixTest {
      */
     @MockitoBean
     private SurveyCollaboratorMapper surveyCollaboratorMapper;
+
+    /**
+     * ★ 系统总览新增计数后必须补 mock：SurveyService.getSystemOverview 会读
+     *   t_survey_review 的待处理数；没 mock 时它拿真实代理去访问被 mock 掉的数据源，
+     *   adminReadOnlyEndpoints 的 /system-overview 会 500。
+     *   SurveyIpMapper 同理（提交守卫会读它，虽然这条用例没走到，但保持一致）。
+     */
+    @MockitoBean
+    private SurveyReviewMapper surveyReviewMapper;
+    @MockitoBean
+    private SurveyIpMapper surveyIpMapper;
 
     /**
      * ★ H5 新增：钱包相关 Mapper 也要 mock。

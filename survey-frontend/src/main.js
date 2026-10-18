@@ -27,7 +27,7 @@ import router from './router'
 //     for (const [key, component] of Object.entries(ElementPlusIconsVue)) app.component(key, component)
 //   那会把 @element-plus/icons-vue 的**全部（约 293 个）图标**都注册成全局组件，
 //   它们也就会被整包打进产物 —— 这是打包体积偏大的主要来源之一。
-//   这里只注册项目实际用到的图标（下面这 42 个，与 import 列表一一对应）。
+//   这里只注册项目实际用到的图标（下面这 43 个，与 import 列表一一对应）。
 //
 // ⚠️ 维护提示：以后在页面里用到新图标，需要在①下面的 import 和②icons 对象里各补一行，
 //    否则那个图标不会渲染（控制台会提示组件未注册）。
@@ -37,7 +37,7 @@ import {
   Document, DocumentCopy, Download, EditPen, Expand, Fold, HomeFilled, InfoFilled,
   Loading, MagicStick, Memo, PieChart, Promotion, Rank, Select, Sort, Star, SuccessFilled,
   SwitchButton, Timer, TopRight, User, UserFilled, View, Warning, WarningFilled,
-  Moon, Sunny, Grid, DataLine
+  Moon, Sunny, Grid, DataLine, Wallet
 } from '@element-plus/icons-vue'
 
 const app = createApp(App)
@@ -54,7 +54,7 @@ const icons = {
   Document, DocumentCopy, Download, EditPen, Expand, Fold, HomeFilled, InfoFilled,
   Loading, MagicStick, Memo, PieChart, Promotion, Rank, Select, Sort, Star, SuccessFilled,
   SwitchButton, Timer, TopRight, User, UserFilled, View, Warning, WarningFilled,
-  Moon, Sunny, Grid, DataLine
+  Moon, Sunny, Grid, DataLine, Wallet
 }
 for (const [name, comp] of Object.entries(icons)) {
   app.component(name, comp)

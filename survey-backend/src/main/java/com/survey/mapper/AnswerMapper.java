@@ -76,6 +76,23 @@ public interface AnswerMapper {
             "GROUP BY DATE_FORMAT(a.submit_time, '%Y-%m-%d')")
     List<Map<String, Object>> countDailyByUserId(@Param("userId") Integer userId);
 
+    /** 今日全站答卷数（普通问卷、未删除；与系统总览的 responses 同口径） */
+    @Select("SELECT COUNT(*) FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
+            "WHERE s.deleted = 0 AND (s.is_template IS NULL OR s.is_template = 0) " +
+            "AND a.submit_time >= CURDATE()")
+    int countToday();
+
+    /**
+     * 全站近 7 天**每天答卷数**（管理端看板趋势图）。
+     * ★ 与 countDailyByUserId 同口径（普通问卷、未删除），只是不限 user_id。
+     */
+    @Select("SELECT DATE_FORMAT(a.submit_time, '%Y-%m-%d') AS d, COUNT(*) AS cnt " +
+            "FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
+            "WHERE s.deleted = 0 AND (s.is_template IS NULL OR s.is_template = 0) " +
+            "AND a.submit_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) " +
+            "GROUP BY DATE_FORMAT(a.submit_time, '%Y-%m-%d')")
+    List<Map<String, Object>> countDailyAll();
+
     /**
      * 写入质控标记（提交那一刻算好，在**同一事务**里回写）。
      *

@@ -26,6 +26,7 @@ import com.survey.mapper.SurveyIpMapper;
 import com.survey.mapper.SurveyMapper;
 import com.survey.mapper.SurveyReviewMapper;
 import com.survey.mapper.SurveyVersionMapper;
+import com.survey.mapper.WalletMapper;
 import com.survey.common.TextLimits;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -115,6 +116,10 @@ public class SurveyService {
     private SurveyIpMapper surveyIpMapper;
     @Autowired
     private SurveyReviewMapper surveyReviewMapper;
+
+    /** 管理端总览「额度总量」卡片（只读汇总） */
+    @Autowired
+    private WalletMapper walletMapper;
 
     // ===== 分享码生成 =====
 
@@ -1056,6 +1061,63 @@ public class SurveyService {
 
         int views = surveyMapper.sumViewCount();
 
+        // ===== 2026-10 新增能力对应的真实计数（模板/举报/钱包/今日/趋势/TOP）=====
+        // ★ 全部单条聚合 SQL，不按问卷循环；看板一次请求拿全。
+        int templates = surveyMapper.countTemplates();
+        int recycled = surveyMapper.countRecycled();
+        int pendingReviews = surveyReviewMapper.countPendingAll();
+        long walletBalance = walletMapper.sumBalance();
+        int todaySurveys = surveyMapper.countCreatedToday();
+        int todayAnswers = answerMapper.countToday();
+
+        // 近 7 天趋势：日期补齐成连续 7 天（没有数据的那天补 0）
+        Map<String, Integer> dailySurveys = new HashMap<>();
+        for (Map<String, Object> row : surveyMapper.countDailyCreated()) {
+            Object d = row.get("d");
+            Object cnt = row.get("cnt");
+            if (d != null && cnt instanceof Number) {
+                dailySurveys.put(d.toString(), ((Number) cnt).intValue());
+            }
+        }
+        Map<String, Integer> dailyAnswers = new HashMap<>();
+        for (Map<String, Object> row : answerMapper.countDailyAll()) {
+            Object d = row.get("d");
+            Object cnt = row.get("cnt");
+            if (d != null && cnt instanceof Number) {
+                dailyAnswers.put(d.toString(), ((Number) cnt).intValue());
+            }
+        }
+        List<String> trendDates = new ArrayList<>(7);
+        List<Integer> trendSurveys = new ArrayList<>(7);
+        List<Integer> trendAnswers = new ArrayList<>(7);
+        LocalDate today = LocalDate.now();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        for (int i = 6; i >= 0; i--) {
+            String key = today.minusDays(i).format(fmt);
+            trendDates.add(key);
+            trendSurveys.add(dailySurveys.getOrDefault(key, 0));
+            trendAnswers.add(dailyAnswers.getOrDefault(key, 0));
+        }
+
+        // TOP 5 问卷：按答卷数降序（同分按 id 升序，保证顺序稳定）
+        List<Survey> ranked = new ArrayList<>(normalSurveys);
+        ranked.sort((a, b) -> {
+            int diff = responseCounts.getOrDefault(b.getId(), 0) - responseCounts.getOrDefault(a.getId(), 0);
+            return diff != 0 ? diff : Integer.compare(a.getId(), b.getId());
+        });
+        if (ranked.size() > 5) {
+            ranked = ranked.subList(0, 5);
+        }
+        List<Map<String, Object>> topSurveys = new ArrayList<>(ranked.size());
+        for (Survey s : ranked) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", s.getId());
+            item.put("title", s.getTitle());
+            item.put("status", s.getStatus());
+            item.put("responses", responseCounts.getOrDefault(s.getId(), 0));
+            topSurveys.add(item);
+        }
+
         Map<String, Object> result = new HashMap<>();
         result.put("total", c.total());
         result.put("published", c.published());
@@ -1063,6 +1125,16 @@ public class SurveyService {
         result.put("ended", c.ended());
         result.put("responses", responses);
         result.put("views", views);
+        result.put("templates", templates);
+        result.put("recycled", recycled);
+        result.put("pendingReviews", pendingReviews);
+        result.put("walletBalance", walletBalance);
+        result.put("todaySurveys", todaySurveys);
+        result.put("todayAnswers", todayAnswers);
+        result.put("trendDates", trendDates);
+        result.put("trendSurveys", trendSurveys);
+        result.put("trendAnswers", trendAnswers);
+        result.put("topSurveys", topSurveys);
         return result;
     }
 

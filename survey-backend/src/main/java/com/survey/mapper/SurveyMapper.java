@@ -4,6 +4,7 @@ import com.survey.entity.Survey;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 问卷表（t_survey）的数据访问层 —— 全项目最核心的一张表。
@@ -256,6 +257,31 @@ public interface SurveyMapper {
     @Select("SELECT IFNULL(SUM(view_count), 0) FROM t_survey " +
             "WHERE deleted = 0 AND (is_template IS NULL OR is_template = 0)")
     int sumViewCount();
+
+    // ===== 管理端系统总览的补充计数 =====
+
+    /** 模板总数（模板广场在架模板） */
+    @Select("SELECT COUNT(*) FROM t_survey WHERE is_template = 1 AND deleted = 0")
+    int countTemplates();
+
+    /** 回收站里的问卷数（含模板；管理员看板要看到"待清理"的量） */
+    @Select("SELECT COUNT(*) FROM t_survey WHERE deleted = 1")
+    int countRecycled();
+
+    /** 今日新建的普通问卷数（不含模板、不含回收站） */
+    @Select("SELECT COUNT(*) FROM t_survey WHERE deleted = 0 " +
+            "AND (is_template IS NULL OR is_template = 0) AND created_time >= CURDATE()")
+    int countCreatedToday();
+
+    /**
+     * 全站近 7 天**每天新建的普通问卷数**（看板趋势图）。
+     * ★ 返回 { d, cnt }，没有新建的那天不出现在结果里，补齐 7 天由 Service 负责。
+     */
+    @Select("SELECT DATE_FORMAT(created_time, '%Y-%m-%d') AS d, COUNT(*) AS cnt " +
+            "FROM t_survey WHERE deleted = 0 AND (is_template IS NULL OR is_template = 0) " +
+            "AND created_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) " +
+            "GROUP BY DATE_FORMAT(created_time, '%Y-%m-%d')")
+    List<Map<String, Object>> countDailyCreated();
 
     // ===== 定时任务用的两个查询 =====
 

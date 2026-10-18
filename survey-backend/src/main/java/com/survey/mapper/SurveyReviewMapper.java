@@ -66,6 +66,10 @@ public interface SurveyReviewMapper {
             + "ORDER BY id DESC LIMIT 100")
     List<Map<String, Object>> findByReporter(@Param("reporterId") Integer reporterId);
 
+    /** 全站待处理举报数（管理端看板"待办"卡片；不含已通过/已驳回） */
+    @Select("SELECT COUNT(*) FROM t_survey_review WHERE status = 'PENDING'")
+    int countPendingAll();
+
     /**
      * 彻底删除问卷时清空它的举报记录。
      * ★ 举报是从属于问卷的记录：问卷行都没了，survey_id 再也关联不到任何东西，
