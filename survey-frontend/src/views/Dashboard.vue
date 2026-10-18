@@ -156,10 +156,6 @@
             <el-descriptions-item label="数据库">MySQL 8 · 21 张表</el-descriptions-item>
             <el-descriptions-item label="缓存 / 限流">Redis 统计缓存 + 分布式限流 + 熔断</el-descriptions-item>
           </el-descriptions>
-
-          <div class="feature-tags">
-            <el-tag v-for="tag in featureTags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
-          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -187,6 +183,48 @@
           </div>
         </el-col>
       </el-row>
+    </el-card>
+
+    <!-- 技术栈与系统信息：沿用原总览里那张"项目用了什么"的表，放到页面最底部，
+         不抢运营指标的第一屏；样式与上面的卡片一致（el-card + el-descriptions + 标签）。 -->
+    <el-card class="mt-20">
+      <template #header>
+        <div class="flex-between">
+          <span class="text-bold">🧩 技术栈与系统信息</span>
+          <span class="panel-hint">v2.3.0 · 94 端点 · 324 测试 · 21 张表</span>
+        </div>
+      </template>
+
+      <el-descriptions :column="2" border size="small">
+        <el-descriptions-item label="前端">
+          Vue 3.5（全 Options API）· Vite · Element Plus · ECharts · qrcode · Vue Router
+        </el-descriptions-item>
+        <el-descriptions-item label="后端">
+          Spring Boot 4 · MyBatis · PageHelper · OkHttp · JJWT · Redis（Lettuce）
+        </el-descriptions-item>
+        <el-descriptions-item label="数据库">
+          MySQL 8.x（survey_db · 21 张表 · utf8mb4）
+        </el-descriptions-item>
+        <el-descriptions-item label="缓存 / 限流">
+          Redis 5：统计缓存 + 分布式限流 + 熔断降级（不可用时回退进程内计数）
+        </el-descriptions-item>
+        <el-descriptions-item label="安全机制" :span="2">
+          JWT 双 token（access 12h + refresh 7d）· RBAC 权限点 + AOP 切面 · PBKDF2 加盐哈希 ·
+          滑块验证码 · token_valid_after 吊销 · HttpOnly + SameSite Cookie
+        </el-descriptions-item>
+        <el-descriptions-item label="进阶能力" :span="2">
+          Spring AOP · @Scheduled 定时发布/截止 · @Async 站内通知 · 版本快照/回滚 · 答卷质控 ·
+          矩阵/排序/NPS 统计 · 条件跳转 · 额度钱包
+        </el-descriptions-item>
+        <el-descriptions-item label="AI / 工具" :span="2">
+          Qwen2.5-7B-Instruct（SiliconFlow）· Knife4j（OpenAPI 3）· EasyExcel ·
+          Docker Compose · GitHub Actions（3 个 CI 作业）
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <div class="feature-tags">
+        <el-tag v-for="tag in featureTags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
+      </div>
     </el-card>
   </div>
 </template>
@@ -234,6 +272,7 @@ export default {
       healthTimer: null,
       /** 项目当前能力标签（与 README 功能特性同步；只作展示，不参与逻辑） */
       featureTags: [
+        '十种题型',
         '矩阵/排序/NPS',
         'RBAC 权限',
         '协作者',
@@ -243,7 +282,8 @@ export default {
         '版本历史',
         '答卷质控',
         'Excel 导出',
-        'AI 生成'
+        'AI 生成',
+        'Redis 限流'
       ]
     }
   },
