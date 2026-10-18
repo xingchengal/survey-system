@@ -102,4 +102,27 @@ public class NotificationService {
     public int clearAll(Integer userId) {
         return notificationMapper.deleteAllByUser(userId);
     }
+
+    /**
+     * 删除**指向某份问卷**的通知（问卷被彻底删除 / 用户被删除时由级联逻辑调用）。
+     *
+     * ── 这修的是什么问题（C3 的「通知孤儿」）────────────────
+     *   「收到新答卷」的通知 link 是 `/my/surveys/{id}/statistics`。问卷一旦被彻底删除，
+     *   那条通知**不会**跟着消失 —— 接收人点进去必然「问卷不存在」，
+     *   未读红点也会一直算着它（前端每 30 秒轮询 `/notification/unread`）。
+     *   这不是报错，所以只能靠这里主动清理。
+     *
+     * ── 为什么能精确到"这份问卷"，而不会误删别的通知 ──────────
+     *   全站**只有** AnswerService 发的那一类通知带问卷 id；
+     *   协作者 / 举报审核 / 恢复申请的 link 都是泛化的 `/my/surveys` 或 `/admin/reviews?...`，
+     *   问卷删了之后那些入口仍然有效 ⇒ **不能**按 `/my/surveys/%` 一把清。
+     *   mapper 里用的是「等值 + 带结尾斜杠的前缀」两条，理由见 NotificationMapper。
+     *
+     * @param surveyId 被删除的问卷 id
+     * @return 清掉的通知行数（0 是正常的：没人收到过这份问卷的答卷通知）
+     */
+    public int deleteBySurveyLink(Integer surveyId) {
+        if (surveyId == null) return 0;
+        return notificationMapper.deleteBySurveyLink(surveyId);
+    }
 }

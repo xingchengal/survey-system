@@ -65,6 +65,9 @@ class SurveyServiceCascadeDeleteTest {
     private SurveyIpMapper surveyIpMapper;
     @Mock
     private SurveyReviewMapper surveyReviewMapper;
+    /** 通知不是"从属于问卷"的表（没有 survey_id 列），但**有一部分通知指向问卷** —— 见下面的测试 */
+    @Mock
+    private NotificationService notificationService;
 
     @InjectMocks
     private SurveyService surveyService;
@@ -87,17 +90,45 @@ class SurveyServiceCascadeDeleteTest {
         verify(surveyCollaboratorMapper).deleteBySurveyId(SURVEY_ID);
         verify(surveyIpMapper).deleteBySurveyId(SURVEY_ID);
         verify(surveyReviewMapper).deleteBySurveyId(SURVEY_ID);
+        // ★ C3「通知孤儿」：指向该问卷的站内通知也要一起清掉
+        //   （否则接收人点进去必然「问卷不存在」、未读红点永远消不掉）
+        verify(notificationService).deleteBySurveyLink(SURVEY_ID);
 
         // 问卷本体必须在所有子表之后删，否则 survey_id 再也定位不到子表
         InOrder order = inOrder(surveyVersionMapper, surveyCollaboratorMapper,
-                surveyIpMapper, surveyReviewMapper, surveyMapper);
+                surveyIpMapper, surveyReviewMapper, notificationService, surveyMapper);
         order.verify(surveyVersionMapper).deleteBySurveyId(SURVEY_ID);
         order.verify(surveyCollaboratorMapper).deleteBySurveyId(SURVEY_ID);
         order.verify(surveyIpMapper).deleteBySurveyId(SURVEY_ID);
         order.verify(surveyReviewMapper).deleteBySurveyId(SURVEY_ID);
+        order.verify(notificationService).deleteBySurveyLink(SURVEY_ID);
         order.verify(surveyMapper).deleteById(SURVEY_ID);
 
         verify(statsCacheService).evictSurvey(eq(SURVEY_ID), anyList());
+    }
+
+    /**
+     * C3 的「通知孤儿」：只有「收到新答卷」这类通知的 link 带问卷 id
+     * （`/my/surveys/{id}/statistics`），问卷彻底删除后它必须一起消失。
+     *
+     * ★ 与其它子表的区别：通知不是"从属于问卷"的表（没有 survey_id 列），
+     *   所以这里**不能**用 deleteBySurveyId，只能按 link 精确匹配 ——
+     *   放 `/my/surveys/%` 会把协作者/审核那些仍然有效的通知一起删掉。
+     */
+    @Test
+    @DisplayName("★ 彻底删除时按 link 清掉指向该问卷的通知（C3 通知孤儿）")
+    void cascadeDelete_shouldRemoveNotificationsPointingToSurvey() {
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of());
+        when(surveyMapper.deleteById(SURVEY_ID)).thenReturn(1);
+        when(notificationService.deleteBySurveyLink(SURVEY_ID)).thenReturn(3);
+
+        surveyService.cascadeDeleteSurvey(SURVEY_ID);
+
+        verify(notificationService).deleteBySurveyLink(SURVEY_ID);
+        // 与问卷本体同属一个事务、且在本体之前清（顺序与其它子表一致）
+        InOrder order = inOrder(notificationService, surveyMapper);
+        order.verify(notificationService).deleteBySurveyLink(SURVEY_ID);
+        order.verify(surveyMapper).deleteById(SURVEY_ID);
     }
 
     @Test
@@ -106,6 +137,6 @@ class SurveyServiceCascadeDeleteTest {
         assertEquals(0, surveyService.cascadeDeleteSurvey(null));
         verifyNoInteractions(surveyMapper, questionMapper, optionMapper, answerMapper,
                 answerDetailMapper, surveyVersionMapper, surveyCollaboratorMapper,
-                surveyIpMapper, surveyReviewMapper);
+                surveyIpMapper, surveyReviewMapper, notificationService);
     }
 }

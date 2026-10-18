@@ -67,4 +67,25 @@ public interface NotificationMapper {
      */
     @Delete("DELETE FROM t_notification WHERE user_id = #{userId}")
     int deleteAllByUser(Integer userId);
+
+    /**
+     * 删除**指向某份问卷**的通知（问卷彻底删除时清理孤儿）。
+     *
+     * ── 两条条件各自的用途 ────────────────────────────────
+     *   · `link = '/my/surveys/{id}'`：将来若有"跳到问卷详情"的通知，这一条兜住；
+     *   · `link LIKE '/my/surveys/{id}/%'`：当前唯一实际的形态
+     *     （`AnswerService` 发的"收到新答卷" → `/my/surveys/{id}/statistics`）。
+     *
+     * ★ 为什么不写 `link LIKE '%/{id}/%'` 或 `'%{id}%'`：
+     *   那是**子串匹配**，`id=1` 会把 `/my/surveys/11/statistics`、`/my/surveys/21/...`
+     *   一起删掉（典型的 id 子串误伤）。前缀里带上 `surveys/` 与结尾斜杠，
+     *   才能保证匹配的是"这个 id 的路径段"而不是"包含这个数字的任意路径"。
+     * ★ 也**不要**放宽成 `/my/surveys%`：协作者邀请、举报处理结果等通知的 link 就是
+     *   `/my/surveys`，问卷删了之后那个列表仍然有效，一把清会把无关通知也删掉。
+     * ★ 参数是 Integer，不存在 LIKE 通配符注入；调用方传 null 时由 Service 拦掉。
+     */
+    @Delete("DELETE FROM t_notification "
+            + "WHERE link = CONCAT('/my/surveys/', #{surveyId}) "
+            + "OR link LIKE CONCAT('/my/surveys/', #{surveyId}, '/%')")
+    int deleteBySurveyLink(@Param("surveyId") Integer surveyId);
 }

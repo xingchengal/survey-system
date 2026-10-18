@@ -253,7 +253,7 @@ public class SurveyService {
      * 级联物理删除一份问卷及其全部子数据。
      *
      * ★ 删除顺序必须**自底向上**（先子后父），与 UserService.deleteUser 的既有顺序保持一致：
-     *     答卷明细 → 答卷 → 选项 → 题目 → 版本/协作/IP/举报 → 问卷
+     *     答卷明细 → 答卷 → 选项 → 题目 → 版本/协作/IP/举报 → 通知（按 link 清）→ 问卷
      *   反过来删（先删问卷）会留下永远查不到、也永远删不掉的子表垃圾。
      * ★ 两处复用：permanentDelete（回收站彻底删）、UserService.deleteUser（删用户时连带删
      *   他名下的问卷）—— 集中在这里就避免了"两份实现、改一处漏一处"。
@@ -292,6 +292,13 @@ public class SurveyService {
         int collaboratorRows = surveyCollaboratorMapper.deleteBySurveyId(surveyId);
         int ipRows = surveyIpMapper.deleteBySurveyId(surveyId);
         int reviewRows = surveyReviewMapper.deleteBySurveyId(surveyId);
+        // 5.5) 站内通知：全站**只有**「收到新答卷」这类通知的 link 带问卷 id
+        //      （`/my/surveys/{id}/statistics`）。问卷一删，那条通知点进去必然「问卷不存在」，
+        //      而且它是**未读**的，会让接收人的红点永远消不掉（前端每 30 秒轮询未读数）。
+        //      ⇒ 在这里随问卷一起清掉（C3「通知孤儿」）。
+        //      ★ 与上面几张表的区别：通知**不是**"从属于问卷"的表，只有一部分通知指向问卷，
+        //        所以清理条件是「link 精确指到这份问卷」，不是 deleteBySurveyId（那张表没有 survey_id 列）。
+        int notificationRows = notificationService.deleteBySurveyLink(surveyId);
         // 6) 问卷本体
         int rows = surveyMapper.deleteById(surveyId);
         // 7) 统计缓存：问卷与题目都已不存在，这些 key 不会再被任何正常请求读到
@@ -300,8 +307,9 @@ public class SurveyService {
         //      与"自增"相反，后者绝不能在事务里做（回滚会造成缓存比库多）。
         statsCacheService.evictSurvey(surveyId, questionIds);
         LOG.info("级联删除问卷 id={}：清理答卷 {} 份 / 明细 {} 条 / 版本 {} 条 / 协作者 {} 条 / "
-                        + "IP {} 条 / 举报 {} 条，以及其选项与题目，删除问卷 {} 行",
-                surveyId, answerRows, detailRows, versionRows, collaboratorRows, ipRows, reviewRows, rows);
+                        + "IP {} 条 / 举报 {} 条 / 站内通知 {} 条，以及其选项与题目，删除问卷 {} 行",
+                surveyId, answerRows, detailRows, versionRows, collaboratorRows, ipRows, reviewRows,
+                notificationRows, rows);
         return rows;
     }
 
