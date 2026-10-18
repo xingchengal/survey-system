@@ -73,6 +73,19 @@ public class Survey {
     /** 是否公开结果页：0 = 不公开，1 = 开启（匿名可访问 /api/survey/result/{shareCode}）。 */
     private Integer publicResult;
 
+    /**
+     * 考试模式：0 = 普通问卷（不判分），1 = 判分。
+     * ★ 只有 1 时 {@link com.survey.common.Grader} 才会在提交时算分并把结果写进 t_answer。
+     * ★ 开启时必须至少有一道题 {@code score > 0}（校验在 SurveyService.normalizeSurveySettings）。
+     */
+    private Integer gradeEnabled;
+
+    /**
+     * 及格分：NULL = 不判及格（只出分）。
+     * ★ 取值必须在 0 ~ 该问卷总分之间（总分 = 所有 score&gt;0 的题目分值之和）。
+     */
+    private Integer passScore;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
 
@@ -204,6 +217,12 @@ public class Survey {
 
     public Integer getPublicResult() { return publicResult; }
     public void setPublicResult(Integer publicResult) { this.publicResult = publicResult; }
+
+    public Integer getGradeEnabled() { return gradeEnabled; }
+    public void setGradeEnabled(Integer gradeEnabled) { this.gradeEnabled = gradeEnabled; }
+
+    public Integer getPassScore() { return passScore; }
+    public void setPassScore(Integer passScore) { this.passScore = passScore; }
 
     /**
      * IP 限制：0=关闭，1=同一 IP 只能提交一次（属于「高级设置包」）。

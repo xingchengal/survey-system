@@ -1,10 +1,11 @@
 -- ============================================================
--- 问卷系统 · 数据库结构（MySQL 8，库名 survey_db，共 13 张表）
+-- 问卷系统 · 数据库结构（MySQL 8，库名 survey_db，共 21 张表）
 -- ============================================================
 -- 来源：mysqldump --no-data --default-character-set=utf8mb4 survey_db
 --       ★ 但**不是**原样 dump —— 里面手工补了"个人中心即将用到"的结构
 --         （t_login_log 与 t_user 的两列），所以它代表**目标结构**，比任一时刻的现库更全。
--- 更新日期：2026-10-17（第二十八轮：补性能索引；此前已含 t_survey_version 与答卷质控 3 列）
+-- 更新日期：2026-10-19（第四十五轮：考试判分，4 张表共 7 列）
+--          2026-10-17（第二十八轮：补性能索引；此前已含 t_survey_version 与答卷质控 3 列）
 --
 -- 为什么要有这个文件（评审【工程性】+《待解决问题》C1：仓库里 0 个 .sql 文件，
 -- 换台机器/重装数据库后无法重建 survey_db，答辩演示换机器时有风险）：
@@ -83,6 +84,9 @@ CREATE TABLE `t_answer` (
   `duration_ms` int DEFAULT NULL COMMENT '答题耗时（毫秒）。由答题页上报；NULL=未上报。★ 客户端值，可伪造，只作质控信号、不作安全边界',
   `quality_flag` tinyint NOT NULL DEFAULT '0' COMMENT '质控标记：0=正常，1=可疑（命中任一无效样本规则，规则码见 quality_reasons）',
   `quality_reasons` varchar(200) DEFAULT NULL COMMENT '命中的规则码，逗号分隔：TOO_FAST / STRAIGHT_LINE / OPTION_MISMATCH / DUP_TITLE_CONFLICT',
+  `total_score` int DEFAULT NULL COMMENT '本次答卷总分（提交那一刻的分值快照）；NULL=未判分',
+  `earned_score` int DEFAULT NULL COMMENT '本次得分；NULL=未判分（普通问卷，或判分上线前的历史答卷）★ 统计一律只算非 NULL 的行',
+  `is_passed` tinyint DEFAULT NULL COMMENT '是否及格：NULL=未设及格线或未判分；0=不及格；1=及格（得分 >= 及格分）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_survey_user` (`survey_id`,`user_id`),
   -- ★ 答卷列表分页 / 质控样本 / 导出预检：都是 "WHERE survey_id = ? ORDER BY submit_time DESC"。
@@ -179,6 +183,7 @@ CREATE TABLE `t_option` (
   `content` varchar(500) NOT NULL COMMENT '选项内容',
   `sort_order` int DEFAULT '0' COMMENT '选项顺序',
   `next_question_id` int DEFAULT NULL COMMENT '选中此选项后跳到哪一题（NULL表示下一题）',
+  `is_correct` tinyint NOT NULL DEFAULT '0' COMMENT '是否正确答案：0=否，1=是。★ 只有单选/多选/下拉有判分意义；判分按 content 比对（明细表没有 option_id）',
   PRIMARY KEY (`id`),
   KEY `idx_question_id` (`question_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=8510 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='题目选项表';
@@ -194,6 +199,7 @@ CREATE TABLE `t_question` (
   `sort_order` int DEFAULT '0' COMMENT '题目顺序',
   `matrix_rows` varchar(2000) DEFAULT NULL COMMENT '矩阵题行标题：JSON 数组文本（仅 type=8），如 ["服务态度","响应速度"]',
   `matrix_cols` varchar(2000) DEFAULT NULL COMMENT '矩阵题列标题：JSON 数组文本（仅 type=8），如 ["很满意","满意","一般"]',
+  `score` int NOT NULL DEFAULT '0' COMMENT '分值：0=不参与判分；>0 表示考试模式下计分（只有单选/多选/下拉允许 >0，保存时校验）',
   PRIMARY KEY (`id`),
   KEY `idx_survey_id` (`survey_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3186 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷题目表';
@@ -237,6 +243,8 @@ CREATE TABLE `t_survey` (
   `thank_text` varchar(500) DEFAULT NULL COMMENT '提交后的感谢语：NULL=默认「提交成功，感谢您的参与」',
   `redirect_url` varchar(500) DEFAULT NULL COMMENT '提交后跳转链接：NULL=不跳转；只允许 http/https',
   `public_result` tinyint NOT NULL DEFAULT '0' COMMENT '是否公开结果页：0=不公开，1=开启（匿名可访问 /r/{shareCode}）',
+  `grade_enabled` tinyint NOT NULL DEFAULT '0' COMMENT '考试模式：0=普通问卷（不判分），1=判分（提交时算分并写入 t_answer 三个分数字段）',
+  `pass_score` int DEFAULT NULL COMMENT '及格分：NULL=不判及格（只出分）；开启考试模式时取值必须在 0 ~ 本卷总分之间',
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',

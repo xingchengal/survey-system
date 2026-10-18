@@ -28,8 +28,9 @@ import java.util.Map;
 @Mapper
 public interface AnswerMapper {
 
-    // 提交答卷
-    @Insert("INSERT INTO t_answer(survey_id, user_id) VALUES(#{surveyId}, #{userId})")
+    // 提交答卷（★ 判分结果与表头一起插入：分数字段为 null 表示这份问卷不判分）
+    @Insert("INSERT INTO t_answer(survey_id, user_id, total_score, earned_score, is_passed) " +
+            "VALUES(#{surveyId}, #{userId}, #{totalScore}, #{earnedScore}, #{isPassed})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Answer answer);
 
@@ -146,6 +147,33 @@ public interface AnswerMapper {
     // 根据答卷ID查询
     @Select("SELECT * FROM t_answer WHERE id = #{id}")
     Answer findById(Integer id);
+
+    /**
+     * 查登录用户对某问卷**最近一次**答卷（"我的成绩"用）。
+     *
+     * ★ 为什么取最近一条而不是唯一一条：匿名侧不防重、登录侧有 uk_survey_user 约束
+     *   （同一 survey_id + user_id 只能一行），所以正常只会有一条；这里仍按 id DESC 取一条，
+     *   是为了在历史脏数据（唯一键上线前）存在时也有确定结果，不抛 TooManyResults。
+     */
+    @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} AND user_id = #{userId} " +
+            "ORDER BY id DESC LIMIT 1")
+    Answer findLatestBySurveyAndUser(@Param("surveyId") Integer surveyId, @Param("userId") Integer userId);
+
+    /**
+     * 判分摘要（统计页的"平均分 / 及格率"）。
+     *
+     * ★ 口径：只统计 {@code earned_score IS NOT NULL} 的答卷 —— 普通问卷与判分上线前的历史答卷
+     *   不能被算成"考了 0 分"，否则平均分会被历史数据拉垮。
+     * ★ 用一条聚合 SQL（走 idx_survey_submit_time 的等值前缀），返回
+     *   { cnt / avg_score / pass_cnt }；无已判分答卷时 cnt=0、avg_score=null、pass_cnt=null。
+     */
+    @Select("<script>SELECT COUNT(*) AS cnt, AVG(earned_score) AS avg_score, " +
+            "SUM(CASE WHEN is_passed = 1 THEN 1 ELSE 0 END) AS pass_cnt " +
+            "FROM t_answer WHERE survey_id = #{surveyId} AND earned_score IS NOT NULL " +
+            "<if test='excludeInvalid'>AND quality_flag = 0</if>" +
+            "</script>")
+    Map<String, Object> selectScoreSummary(@Param("surveyId") Integer surveyId,
+                                           @Param("excludeInvalid") boolean excludeInvalid);
 
     /**
      * 查"这个（登录）用户对这份问卷已经交过几份答卷"—— 用于**答卷防重**，

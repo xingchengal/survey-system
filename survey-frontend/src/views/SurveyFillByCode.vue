@@ -33,7 +33,27 @@
     </div>
 
     <div v-else-if="submitted" style="max-width: 600px; margin: 80px auto;">
-      <el-result icon="success" title="提交成功！" :sub-title="thankText">
+      <!-- ★ 考试判分：交卷后立刻出分。
+           ★ 为什么必须在这里给：匿名答卷没有 user_id，之后无法再查自己的成绩
+             （登录用户才走 GET /api/answer/score/{surveyId}）。
+           ★ 只显示分数与是否及格，**不显示正确答案**（作者没开"提交后显示答案"）。
+           ★ 普通问卷 submitResult 为 null，本卡片不渲染，页面与改造前完全一致。 -->
+      <el-card v-if="submitResult" class="score-card">
+        <div class="score-head">本次得分</div>
+        <div class="score-main">
+          <span class="score-value">{{ submitResult.earnedScore }}</span>
+          <span class="score-total">/ {{ submitResult.totalScore }} 分</span>
+        </div>
+        <div class="score-meta">
+          <el-tag v-if="submitResult.passed === 1" type="success" size="large" round>及格</el-tag>
+          <el-tag v-else-if="submitResult.passed === 0" type="danger" size="large" round>未及格</el-tag>
+          <span v-if="submitResult.passScore != null" class="score-pass">
+            及格线 {{ submitResult.passScore }} 分
+          </span>
+        </div>
+      </el-card>
+      <el-result :icon="submitResult ? 'info' : 'success'" :title="submitResult ? '已交卷' : '提交成功！'"
+                 :sub-title="thankText">
         <template #extra>
           <div class="submit-actions">
             <el-button v-if="survey.publicResult === 1" type="primary" @click="goPublicResult">
@@ -363,6 +383,8 @@ export default {
       history: [],
       answers: {},
       submitted: false,
+      /** 考试判分的交卷结果（null = 普通问卷 / 未判分）；只在"提交成功"页用来渲染成绩卡 */
+      submitResult: null,
       /** 是否已登录：举报需要登录身份，匿名访客不显示入口（点了也只会 401） */
       loggedIn: false,
       /**
@@ -1073,7 +1095,9 @@ export default {
         // ★ 上报答题耗时（毫秒）：后端的"答题过快"质控规则靠它。
         //   没打开计时（startedAt=0）就不传 —— 后端会当作"未上报"、不判这条规则。
         const durationMs = this.startedAt ? Math.max(0, Date.now() - this.startedAt) : null
-        await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
+        // ★ 返回值带判分结果（普通问卷 graded=false / 分数全 null，此时不渲染成绩卡）
+        const result = await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
+        this.submitResult = result && result.graded ? result : null
         this.submitted = true
         this.startRedirectTimer()
         // ★ 提交成功后静默刷新一次分享信息：限量问卷往往"你交完就满了"，
@@ -1104,6 +1128,8 @@ export default {
         this.redirectTimer = null
       }
       this.submitted = false
+      // ★ 清掉上次的成绩卡：否则"再填一份"交卷前会先闪一下上一次的分数
+      this.submitResult = null
       this.answers = {}
       this.initAnswers()
       this.currentOrder = 1
@@ -1115,6 +1141,44 @@ export default {
 </script>
 
 <style scoped>
+/* 考试判分：交卷后的成绩卡（只展示分数与是否及格，不展示正确答案） */
+.score-card {
+  margin-bottom: 4px;
+  text-align: center;
+  border-radius: var(--r-lg, 16px);
+}
+.score-head {
+  font-size: 13px;
+  color: var(--ink-3, #64748b);
+  letter-spacing: 1px;
+}
+.score-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.score-value {
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--sky-600, #0284c7);
+}
+.score-total {
+  font-size: 16px;
+  color: var(--ink-3, #64748b);
+}
+.score-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.score-pass {
+  font-size: 13px;
+  color: var(--ink-3, #64748b);
+}
 /* G7：题量 / 预计时长 */
 .fill-meta {
   display: flex;

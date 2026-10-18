@@ -1,5 +1,6 @@
 package com.survey.service;
 
+import com.survey.common.Grader;
 import com.survey.common.MatrixConfig;
 import com.survey.common.QuestionType;
 import com.survey.dto.QuestionIdItem;
@@ -247,6 +248,53 @@ public class QuestionService {
                 q.setMatrixRows(null);
                 q.setMatrixCols(null);
             }
+
+            // ★★ 判分配置的校验与归一（考试模式）。
+            //   规则唯一口径在 common/Grader：只有 单选(1) / 多选(2) / 下拉(5) 能设分值。
+            //   为什么必须在**写库之前**校验：
+            //     · 若允许给矩阵/排序/填空设分值，提交时 Grader 会静默跳过它们 ——
+            //       作者以为"这题 10 分"，实际考试总分里根本没有它，成绩看起来永远差 10 分；
+            //     · 若允许"设了分值但没有正确答案"，那题恒不得分，同样只能靠用户自己发现。
+            //   ⇒ 一律 400 + 明确文案，不静默纠正。
+            //   ★ 回滚历史版本（validateOptions=false）不校验也不归一：那是恢复快照，不是新输入。
+            if (validateOptions) {
+                int score = q.getScore() == null ? 0 : q.getScore();
+                if (score < 0) {
+                    throw new BizException("第 " + (i + 1) + " 题的分值不能为负数");
+                }
+                if (score > Grader.MAX_QUESTION_SCORE) {
+                    throw new BizException("第 " + (i + 1) + " 题的分值不能超过 "
+                            + Grader.MAX_QUESTION_SCORE + " 分");
+                }
+                if (score > 0 && !Grader.isGradable(q.getType())) {
+                    throw new BizException("第 " + (i + 1) + " 题：只有单选、多选、下拉可以设置分值");
+                }
+                q.setScore(score);
+
+                if (Grader.isGradable(q.getType())) {
+                    int correctCount = 0;
+                    if (q.getOptions() != null) {
+                        for (Option opt : q.getOptions()) {
+                            boolean correct = opt.getIsCorrect() != null && opt.getIsCorrect() == 1;
+                            // 归一：只认 0/1，避免前端传 2 / true 之类的脏值
+                            opt.setIsCorrect(correct ? 1 : 0);
+                            if (correct) correctCount++;
+                        }
+                    }
+                    if (score > 0 && correctCount == 0) {
+                        throw new BizException("第 " + (i + 1) + " 题设置了分值，但没有指定正确答案");
+                    }
+                    if (score > 0 && QuestionType.isSingle(q.getType()) && correctCount != 1) {
+                        throw new BizException("第 " + (i + 1) + " 题是单选/下拉，必须恰好有一个正确答案");
+                    }
+                } else if (q.getOptions() != null) {
+                    // 非判分题型（如排序题也有 options）：把正确答案标记清掉，
+                    // 否则这些"看起来标了答案"的行会留在库里，将来改型成单选时突然生效。
+                    for (Option opt : q.getOptions()) {
+                        opt.setIsCorrect(0);
+                    }
+                }
+            }
         }
 
         // 1. 查出数据库里现有的题目
@@ -336,6 +384,19 @@ public class QuestionService {
                     throw new BizException(
                             "有选项的跳转目标已不存在（可能刚被删除），请重新设置该题的跳转规则");
                 }
+            }
+        }
+
+        // ★★ 考试模式的一致性：开关开着 → 至少要有一道计分题。
+        //   这条挡的是"先设及格线、后来把计分题全删了/把分值清空"的组合：
+        //   否则提交时总分为 0，成绩卡会显示"0 / 0 分"，用户只会觉得系统坏了。
+        //   ★ 与 SurveyService.normalizeSurveySettings 里"开启考试模式时总分必须 > 0"是一对：
+        //     那边挡"先开开关、还没设分"，这边挡"开完开关、又把分删了"。
+        if (validateOptions) {
+            com.survey.entity.Survey current = surveyMapper.findById(surveyId);
+            if (current != null && current.getGradeEnabled() != null && current.getGradeEnabled() == 1
+                    && Grader.totalScore(questions) == 0) {
+                throw new BizException("这份问卷已开启考试模式，至少要有一道题设置分值");
             }
         }
 

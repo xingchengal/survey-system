@@ -32,6 +32,18 @@ public class Answer {
     /** 命中的规则码，逗号分隔（TOO_FAST / STRAIGHT_LINE / OPTION_MISMATCH / DUP_TITLE_CONFLICT） */
     private String qualityReasons;
 
+    /**
+     * 本次答卷的总分（提交那一刻的配置快照）。NULL = 未判分。
+     * ★ 存快照而不是每次按当前分值重算：作者事后改分值不能让"上周的 80 分"变成 76 分。
+     */
+    private Integer totalScore;
+
+    /** 本次得分。NULL = 未判分（普通问卷，或判分上线前的历史答卷）。 */
+    private Integer earnedScore;
+
+    /** 是否及格：NULL = 未设及格线或未判分；0/1 由 {@link com.survey.common.Grader} 判定。 */
+    private Integer isPassed;
+
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
 
@@ -52,4 +64,13 @@ public class Answer {
 
     public String getQualityReasons() { return qualityReasons; }
     public void setQualityReasons(String qualityReasons) { this.qualityReasons = qualityReasons; }
+
+    public Integer getTotalScore() { return totalScore; }
+    public void setTotalScore(Integer totalScore) { this.totalScore = totalScore; }
+
+    public Integer getEarnedScore() { return earnedScore; }
+    public void setEarnedScore(Integer earnedScore) { this.earnedScore = earnedScore; }
+
+    public Integer getIsPassed() { return isPassed; }
+    public void setIsPassed(Integer isPassed) { this.isPassed = isPassed; }
 }

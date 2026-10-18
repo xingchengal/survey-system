@@ -32,6 +32,13 @@ public class Question {
     private String matrixRows;     // 矩阵题行标题（JSON 数组文本），仅 type=8
     private String matrixCols;     // 矩阵题列标题（JSON 数组文本），仅 type=8
 
+    /**
+     * 分值：0 = 不参与判分（默认）；&gt;0 表示这道题在考试模式下计分。
+     * ★ 只有单选(1)/多选(2)/下拉(5) 允许 &gt;0 —— 保存时校验（QuestionService.doSaveQuestions）。
+     * ★ 判分口径见 {@link com.survey.common.Grader}；总分 = 本问卷所有 &gt;0 的分值之和。
+     */
+    private Integer score;
+
     // 关键：用来接收前端传过来的选项列表（非数据库字段，见类注释）
     private List<Option> options;
 
@@ -59,6 +66,9 @@ public class Question {
 
     public String getMatrixCols() { return matrixCols; }
     public void setMatrixCols(String matrixCols) { this.matrixCols = matrixCols; }
+
+    public Integer getScore() { return score; }
+    public void setScore(Integer score) { this.score = score; }
 
     public List<Option> getOptions() { return options; }
     public void setOptions(List<Option> options) { this.options = options; }

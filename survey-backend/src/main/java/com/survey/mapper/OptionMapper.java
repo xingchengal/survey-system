@@ -30,9 +30,9 @@ import java.util.List;
 @Mapper
 public interface OptionMapper {
 
-    /** 插入选项（含 next_question_id 跳转规则），自增 id 回填到实体。 */
-    @Insert("INSERT INTO t_option(question_id, content, sort_order, next_question_id) " +
-            "VALUES(#{questionId}, #{content}, #{sortOrder}, #{nextQuestionId})")
+    /** 插入选项（含跳转规则与"是否正确答案"），自增 id 回填到实体。 */
+    @Insert("INSERT INTO t_option(question_id, content, sort_order, next_question_id, is_correct) " +
+            "VALUES(#{questionId}, #{content}, #{sortOrder}, #{nextQuestionId}, IFNULL(#{isCorrect}, 0))")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Option option);
 

@@ -248,6 +248,19 @@
           {{ qTypeLabel(q.type) }}
         </el-tag>
         <el-checkbox class="ml-10" v-model="q.required" :true-value="1" :false-value="0">必填</el-checkbox>
+        <!-- 考试判分：分值（0 = 不参与判分）。只有单选/多选/下拉显示这个输入框。 -->
+        <div v-if="qIsGradable(q.type)" class="q-score">
+          <span class="q-score-label">分值</span>
+          <el-input-number
+            v-model="q.score"
+            :min="0"
+            :max="100"
+            :step="1"
+            size="small"
+            controls-position="right"
+            style="width: 92px;"
+          />
+        </div>
         <div class="q-spacer"></div>
         <el-button type="danger" link size="small" @click="removeQuestion(qIndex)">删除题目</el-button>
       </div>
@@ -334,6 +347,17 @@
             <el-icon><component :is="qOptionIcon(q.type)" /></el-icon>
           </span>
           <el-input v-model="opt.content" class="option-input" placeholder="请输入选项内容" maxlength="500" />
+
+          <!-- 考试判分：标记"正确答案"。只有单选/多选/下拉能判分（后端 Grader 同口径）。
+               ★ 单选/下拉只能有一个正确答案，由 onCorrectChange 互斥处理。 -->
+          <el-checkbox
+            v-if="qIsGradable(q.type)"
+            v-model="opt.isCorrect"
+            class="option-correct"
+            :true-value="1"
+            :false-value="0"
+            @change="onCorrectChange(q, oIndex)"
+          >正确答案</el-checkbox>
 
           <!-- 跳转设置：单选和多选都支持 -->
           <!-- ★ `:value` 必须是 question.id：保存时后端会按数组重排 sort_order、并删掉本次没传的题，
@@ -531,6 +555,34 @@
             防刷用：开启后同一网络出口只能提交一份答卷。
             ★ 同一公司/校园网/NAT 后的多个真实用户会被当成同一个人，请确认场景后再开启。
           </div>
+        </el-form-item>
+
+        <el-divider content-position="left">考试判分</el-divider>
+
+        <el-form-item label="考试模式">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.gradeEnabled" :active-value="1" :inactive-value="0" />
+            <el-tag v-if="surveyInfo.gradeEnabled === 1" type="success" size="small">
+              当前总分 {{ examTotalScore }} 分
+            </el-tag>
+          </div>
+          <div class="setting-hint">
+            开启后提交答卷时自动判分（单选 / 多选 / 下拉才有分值）。
+            ★ 选择题要标出「正确答案」、并给题目填分值，否则保存会被后端拒绝。
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="surveyInfo.gradeEnabled === 1" label="及格分">
+          <el-input-number
+            v-model="surveyInfo.passScore"
+            :min="0"
+            :max="examTotalScore"
+            :step="1"
+            controls-position="right"
+            placeholder="留空不判及格"
+            style="width: 200px;"
+          />
+          <span class="setting-inline">留空表示只出分；{{ examTotalScore }} 分满分</span>
         </el-form-item>
       </el-form>
 
@@ -784,7 +836,10 @@ export default {
         maxResponses: null,
         thankText: '',
         redirectUrl: '',
-        publicResult: 0
+        publicResult: 0,
+        // 考试判分：0 = 普通问卷，1 = 判分；passScore 为 null 表示只出分不判及格
+        gradeEnabled: 0,
+        passScore: null
       },
       questions: [],
 
@@ -891,6 +946,14 @@ export default {
     canPublishSurvey() {
       const perms = this.surveyInfo.myPermissions
       return !perms || perms.includes('survey:publish')
+    },
+    /** 考试模式：当前可判分题目的分值合计（设置弹窗展示，同时是及格分的上限） */
+    examTotalScore() {
+      return (this.questions || []).reduce((sum, q) => {
+        if (!this.qIsGradable(q.type)) return sum
+        const score = Number(q.score) || 0
+        return sum + (score > 0 ? score : 0)
+      }, 0)
     },
     /** 是否在回收站里（后端口径：deleted != 0；NULL 视为未删除） */
     inRecycleBin() {
@@ -1028,6 +1091,9 @@ export default {
           publicResult: data.publicResult === 1 ? 1 : 0,
           // ★ IP 限制（高级设置包）：默认 0，老后端不返回该字段时也不会误开
           ipLimit: data.ipLimit === 1 ? 1 : 0,
+          // ★ 考试判分：老后端不返回时按"普通问卷"处理（不误开），及格分保持 null
+          gradeEnabled: data.gradeEnabled === 1 ? 1 : 0,
+          passScore: data.passScore == null ? null : data.passScore,
           // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
@@ -1078,7 +1144,14 @@ export default {
       return (data || []).map(q => ({
         ...q,
         required: q.required || 0,
-        options: q.options || [],
+        // ★ 分值：老数据/老后端可能没有这一列 —— 统一归一成 0（不参与判分），
+        //   否则 el-input-number 拿到 undefined 会显示成空白、保存时又被当成"没传"。
+        score: q.score == null ? 0 : q.score,
+        options: (q.options || []).map(o => ({
+          ...o,
+          // ★ 正确答案标记：只认 0/1，避免历史脏值（true / 2）让勾选框显示异常
+          isCorrect: o.isCorrect === 1 ? 1 : 0
+        })),
         // ★ 后端给的是 JSON 文本；编辑器内部统一用数组（新增/删除行更直观）。
         //   保存前再由 toSavePayload 转回 JSON 文本（见 stringifyMatrixAxis）。
         matrixRows: isMatrix(q.type) ? parseMatrixAxis(q.matrixRows) : [],
@@ -1088,10 +1161,10 @@ export default {
 
     addQuestion(type) {
       // ★ 草稿阶段的题没有数据库 id，先发一个临时 id（负数），否则"跳转目标"下拉框无值可用。
-      const newQ = { id: this.tempQuestionId--, type, title: '', required: 0, options: [] }
+      const newQ = { id: this.tempQuestionId--, type, title: '', required: 0, options: [], score: 0 }
       // 单选 / 多选 / 下拉 / 排序：都给两个空选项起步；评分 / 日期 / 文本类不需要选项
       if (hasOptions(type)) {
-        newQ.options = [{ content: '' }, { content: '' }]
+        newQ.options = [{ content: '', isCorrect: 0 }, { content: '', isCorrect: 0 }]
       }
       // 矩阵：2 行 × 3 列起步（最少 1 行 2 列，留一点余量让作者一进页面就能改）
       if (isMatrix(type)) {
@@ -1447,6 +1520,29 @@ export default {
           opts[j].content = text
         }
       }
+      // ★★ 考试配置的前端预检（后端 QuestionService / SurveyService 还有同口径校验）：
+      //    ① 开启考试模式时至少要有一道题设了分值 —— 否则"总分 0"，成绩卡只能是 0/0；
+      //    ② 设了分值的题必须标正确答案；单选/下拉只能有一个。
+      //   放在这里是为了把"第几题错"说清楚，后端的 400 文案只有一句笼统的话。
+      if (this.surveyInfo.gradeEnabled === 1) {
+        if (this.examTotalScore <= 0) {
+          ElMessage.warning('已开启考试模式，请先给至少一道单选/多选/下拉题设置分值')
+          return false
+        }
+        for (let i = 0; i < this.questions.length; i++) {
+          const q = this.questions[i]
+          if (!this.qIsGradable(q.type) || !(Number(q.score) > 0)) continue
+          const correct = (q.options || []).filter(o => o.isCorrect === 1).length
+          if (correct === 0) {
+            ElMessage.warning(`第 ${i + 1} 题设置了 ${q.score} 分，但没有勾选「正确答案」`)
+            return false
+          }
+          if ((q.type === 1 || q.type === 5) && correct !== 1) {
+            ElMessage.warning(`第 ${i + 1} 题是单选/下拉，只能有一个正确答案`)
+            return false
+          }
+        }
+      }
       // ★ 门控不能静默：上一次保存还卡着（网络挂了/请求没返回）时，
       //   用户再点会像"按钮坏了"——这里必须说清楚。
       if (this.saving) {
@@ -1462,7 +1558,33 @@ export default {
         //    而不是让后端拒绝（提示不够具体）或静默把规则丢掉（用户以为还在）。
         if (!this.validateJumpTargets()) return false
 
-        // 1. 更新问卷信息（含时间字段）
+        // 1. 保存题目
+        //   api.question.save(surveyId, questions) 的第二个参数就是**本次完整题目数组**
+        //   （后端是全量覆盖语义，见 src/api/question.js 的注释），
+        //   返回值是**按下标一一对应**的题目 id 列表（后端保存后回显）。
+        // ★ 失败时后端返回 400 + message，由 http.js 弹红字并 throw。
+        //
+        // ★★ 草稿阶段新加的题还没有数据库 id，而"跳转目标"必须存真 id，所以：
+        //    ① 先**预存**一次（提交完整数组，去掉"指向临时题"的跳转）拿到真实 id；
+        //    ② 用真实 id 替换掉题目 id 与所有跳转目标；
+        //    ③ 再正式保存一次（此时跳转目标全是真 id）。
+        //    首次保存因此是两次往返，之后题目都有真 id，永远只有一次。
+        //
+        // ★★ 为什么题目必须排在"更新问卷信息"**之前**（第四十五轮踩到）：
+        //   开启考试模式时，后端要按**库里题目的分值**校验总分与及格分；
+        //   若先存设置，读到的是上一版分值（首次开启时全是 0）→ 一律 400
+        //   「开启考试模式前，请先给题目设置分值」，用户会以为功能坏了。
+        const pending = await this.ensureRealQuestionIds()
+        if (!pending) return false
+        // ★ 换完真 id 之后再查一次：预存可能被后端重建了题目（id 变了），
+        //   这时"原来解析得通的目标"有可能解析不通了 —— 必须拦在正式提交之前。
+        if (!this.validateJumpTargets()) return false
+        // 第二次提交做**有限重发**：第一次已经成功、只是它的响应丢了（网络抖动）时，
+        // 重发一次就能救回来 —— 否则用户以为没保存，再点一次反而要走完整流程。
+        const idItems = await this.saveWithRetry()
+        this.applyServerIdOrder(idItems)
+
+        // 2. 更新问卷信息（含时间字段与考试设置）
         // ★ 这里【不要】再传 shareCode：
         //   分享码由服务端独占管理（SurveyController.update() 会无条件沿用数据库里的旧值），
         //   传了也会被忽略，属于冗余参数，而且容易让人误以为前端能改分享码。
@@ -1481,29 +1603,13 @@ export default {
           maxResponses: this.surveyInfo.maxResponses ?? null,
           thankText: this.surveyInfo.thankText || null,
           redirectUrl: this.surveyInfo.redirectUrl || null,
-          publicResult: this.surveyInfo.publicResult === 1 ? 1 : 0
+          publicResult: this.surveyInfo.publicResult === 1 ? 1 : 0,
+          // ★ 考试判分：必须每次带上（后端 update 是静态 SQL，不传会被写成 0/NULL），
+          //   关闭考试模式时及格分一并清空（后端也会清，这里传 null 让请求体自解释）。
+          gradeEnabled: this.surveyInfo.gradeEnabled === 1 ? 1 : 0,
+          passScore: this.surveyInfo.gradeEnabled === 1 ? (this.surveyInfo.passScore ?? null) : null
         })
 
-        // 2. 保存题目
-        //   api.question.save(surveyId, questions) 的第二个参数就是**本次完整题目数组**
-        //   （后端是全量覆盖语义，见 src/api/question.js 的注释），
-        //   返回值是**按下标一一对应**的题目 id 列表（后端保存后回显）。
-        // ★ 失败时后端返回 400 + message，由 http.js 弹红字并 throw。
-        //
-        // ★★ 草稿阶段新加的题还没有数据库 id，而"跳转目标"必须存真 id，所以：
-        //    ① 先**预存**一次（提交完整数组，去掉"指向临时题"的跳转）拿到真实 id；
-        //    ② 用真实 id 替换掉题目 id 与所有跳转目标；
-        //    ③ 再正式保存一次（此时跳转目标全是真 id）。
-        //    首次保存因此是两次往返，之后题目都有真 id，永远只有一次。
-        const pending = await this.ensureRealQuestionIds()
-        if (!pending) return false
-        // ★ 换完真 id 之后再查一次：预存可能被后端重建了题目（id 变了），
-        //   这时"原来解析得通的目标"有可能解析不通了 —— 必须拦在正式提交之前。
-        if (!this.validateJumpTargets()) return false
-        // 第二次提交做**有限重发**：第一次已经成功、只是它的响应丢了（网络抖动）时，
-        // 重发一次就能救回来 —— 否则用户以为没保存，再点一次反而要走完整流程。
-        const idItems = await this.saveWithRetry()
-        this.applyServerIdOrder(idItems)
         // ★ 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿
         this.markSaved()
         ElMessage.success('保存成功')
@@ -1579,11 +1685,15 @@ export default {
     toSavePayload(list) {
       return (list || []).map(q => ({
         ...q,
+        // ★ 分值：只有可判分题型保留；其它题型强制 0（后端也会归一，这里让请求体自解释）
+        score: this.qIsGradable(q.type) ? (Number(q.score) || 0) : 0,
         matrixRows: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixRows) : null,
         matrixCols: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixCols) : null,
         options: (q.options || []).map(opt => ({
           content: opt.content,
-          nextQuestionId: opt.nextQuestionId
+          nextQuestionId: opt.nextQuestionId,
+          // ★ 正确答案标记：只有可判分题型保留（排序题也有 options，但正确答案没有意义）
+          isCorrect: this.qIsGradable(q.type) && opt.isCorrect === 1 ? 1 : 0
         }))
       }))
     },
@@ -1636,10 +1746,13 @@ export default {
         type: q.type,
         title: q.title,
         required: q.required,
+        // ★ 预存也要带上分值与正确答案：否则这次"预存"会把考试配置清空（后端是全量覆盖）
+        score: q.score,
         matrixRows: q.matrixRows,
         matrixCols: q.matrixCols,
         options: (q.options || []).map(o => ({
           content: o.content,
+          isCorrect: o.isCorrect,
           nextQuestionId: this.isRealId(o.nextQuestionId) || o.nextQuestionId === -1
             ? o.nextQuestionId
             : null
@@ -1755,6 +1868,25 @@ export default {
     },
     qIsSingle(type) {
       return isSingle(type)
+    },
+    /** 该题型能否判分（与后端 common/Grader.isGradable 同口径：单选 1 / 多选 2 / 下拉 5） */
+    qIsGradable(type) {
+      return type === 1 || type === 2 || type === 5
+    },
+    /**
+     * 勾选「正确答案」后的互斥处理：单选/下拉只能有一个正确答案。
+     * ★ 不在模板里用 radio 的原因：多选需要 checkbox，两套控件会让选项行布局不一致；
+     *   统一 checkbox + 这里互斥，作者看到的行为仍然是"单选只能选一个"。
+     */
+    onCorrectChange(q, changedIndex) {
+      if (!this.qIsGradable(q.type)) return
+      const single = q.type === 1 || q.type === 5
+      if (single && q.options[changedIndex] && q.options[changedIndex].isCorrect === 1) {
+        q.options.forEach((o, i) => {
+          if (i !== changedIndex) o.isCorrect = 0
+        })
+      }
+      this.markDirty()
     },
     openPublicResult() {
       if (!this.surveyInfo.shareCode) return
@@ -2044,6 +2176,21 @@ export default {
 .option-jump {
   width: 158px;
   flex-shrink: 0;
+}
+/* 考试判分：选项行的「正确答案」勾选 + 题头的「分值」 */
+.option-correct {
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+.q-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.q-score-label {
+  font-size: 12px;
+  color: var(--ink-3);
 }
 .option-hint {
   margin: 6px 0 0 36px;

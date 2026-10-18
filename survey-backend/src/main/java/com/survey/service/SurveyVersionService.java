@@ -298,6 +298,11 @@ public class SurveyVersionService {
         if (!Objects.equals(a.getRequired(), b.getRequired())) {
             changes.add("必填设置变化");
         }
+        // ★ 分值也要参与差异判定（第四十五轮）：给题目设/改分值不生成版本的话，
+        //   回滚到旧版本会悄悄退回旧分值，而对比页显示的却是"无变化"。
+        if (!Objects.equals(a.getScore(), b.getScore())) {
+            changes.add("分值变化");
+        }
         if (!Objects.equals(a.getSortOrder(), b.getSortOrder())) {
             changes.add("位置：第 " + (safeOrder(a) + 1) + " 题 → 第 " + (safeOrder(b) + 1) + " 题");
         }
@@ -316,6 +321,8 @@ public class SurveyVersionService {
     /**
      * 选项的"内容签名"：按 sortOrder 排序后把 `内容->跳转目标` 串起来。
      * ★ 必须把 `nextQuestionId` 也算进去 —— 只改跳转规则不改文案，也是**实质变更**。
+     * ★ 第四十五轮补：`isCorrect` 也要算进去 —— 只把某个选项改成"正确答案"同样是实质变更
+     *   （否则版本对比会显示"无变化"，回滚时答案标记也会被悄悄还原）。
      */
     private String optionsSignature(Question q) {
         if (q.getOptions() == null || q.getOptions().isEmpty()) {
@@ -323,7 +330,8 @@ public class SurveyVersionService {
         }
         return q.getOptions().stream()
                 .sorted(Comparator.comparingInt(o -> o.getSortOrder() == null ? 0 : o.getSortOrder()))
-                .map(o -> o.getContent() + "->" + o.getNextQuestionId())
+                .map(o -> o.getContent() + "->" + o.getNextQuestionId()
+                        + (o.getIsCorrect() != null && o.getIsCorrect() == 1 ? "#correct" : ""))
                 .collect(Collectors.joining("|"));
     }
 

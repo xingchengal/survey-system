@@ -1,6 +1,7 @@
 package com.survey.service;
 
 import com.survey.common.BizException;
+import com.survey.common.Grader;
 import com.survey.common.MatrixConfig;
 import com.survey.common.PageParams;
 import com.survey.common.PageResult;
@@ -13,6 +14,7 @@ import com.survey.entity.AnswerDetail;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.dto.SurveyStatisticsDTO;
+import com.survey.dto.SubmitResult;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
 import com.survey.mapper.AnswerMapper;
@@ -165,8 +167,8 @@ public class AnswerService {
      * @param details  每题一行 {questionId, content}
      */
     @Transactional
-    public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details) {
-        doSubmit(surveyId, userId, details, null, null);
+    public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details) {
+        return doSubmit(surveyId, userId, details, null, null);
     }
 
     /**
@@ -179,8 +181,8 @@ public class AnswerService {
      *                   ★ 客户端值、可伪造 —— 只用于质控提示，不作安全边界。
      */
     @Transactional
-    public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
-        doSubmit(surveyId, userId, details, durationMs, null);
+    public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
+        return doSubmit(surveyId, userId, details, durationMs, null);
     }
 
     /**
@@ -190,12 +192,12 @@ public class AnswerService {
      *                 只有问卷开启「IP 限制」时才会用到；为 null 时若问卷要求 IP 限制会 400。
      */
     @Transactional
-    public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details,
+    public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details,
                        Integer durationMs, String clientIp) {
-        doSubmit(surveyId, userId, details, durationMs, clientIp);
+        return doSubmit(surveyId, userId, details, durationMs, clientIp);
     }
 
-    private void doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details,
+    private SubmitResult doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details,
                           Integer durationMs, String clientIp) {
         if (details == null || details.isEmpty()) {
             throw new BizException("答卷内容不能为空");
@@ -362,9 +364,37 @@ public class AnswerService {
             }
         }
 
+        // ★★ 判分（考试模式）：在**写库之前**用已经查出来的题目 + 一次批量查出的选项算分。
+        //   为什么放在这里：
+        //     · 分数要与 t_answer 的 INSERT 一起落库（同一条语句），任何后续回滚都不会留下
+        //       "答卷没了、分数还在"的错位；也避免"先插 0 分再 UPDATE"的两步写入；
+        //     · 明细已经全部校验过（题型/结构/长度），这里不再做二次校验；
+        //     · 只查"设了分值的题"的选项（通常几道到几十道），不构成 N+1。
+        //   ★ 普通问卷（gradeEnabled!=1）完全跳过：不多查一条 SQL，也不改任何字段。
+        Grader.Result grading = null;
+        if (survey.getGradeEnabled() != null && survey.getGradeEnabled() == 1) {
+            List<Integer> gradableQuestionIds = surveyQuestions.stream()
+                    .filter(q -> q.getId() != null && q.getScore() != null && q.getScore() > 0)
+                    .filter(q -> Grader.isGradable(q.getType()))
+                    .map(Question::getId)
+                    .collect(Collectors.toList());
+            Map<Integer, List<Option>> gradableOptions = new HashMap<>();
+            if (!gradableQuestionIds.isEmpty()) {
+                for (Option opt : optionMapper.findByQuestionIds(gradableQuestionIds)) {
+                    gradableOptions.computeIfAbsent(opt.getQuestionId(), k -> new ArrayList<>()).add(opt);
+                }
+            }
+            grading = Grader.grade(survey, surveyQuestions, gradableOptions, details);
+        }
+
         Answer answer = new Answer();
         answer.setSurveyId(surveyId);
         answer.setUserId(userId);
+        if (grading != null) {
+            answer.setTotalScore(grading.totalScore());
+            answer.setEarnedScore(grading.earnedScore());
+            answer.setIsPassed(grading.passed());
+        }
         try {
             answerMapper.insert(answer);
         } catch (DuplicateKeyException e) {
@@ -406,6 +436,9 @@ public class AnswerService {
             String link = "/my/surveys/" + surveyId + "/statistics";
             notifyAfterCommit(survey.getUserId(), title, content, "answer", link);
         }
+
+        // 返回给答题页的分数（普通问卷 graded=false，前端照旧显示感谢语）
+        return SubmitResult.of("提交成功", grading, survey.getPassScore());
     }
 
     /**
@@ -866,7 +899,42 @@ public class AnswerService {
                 items.add(new SurveyStatisticsDTO.QuestionStats(q, null, textByQuestion.get(q.getId())));
             }
         }
-        return new SurveyStatisticsDTO(surveyId, survey.getTitle(), countResponses(surveyId), items);
+
+        // ④ 判分摘要（只有考试问卷才查）：一条聚合 SQL，走 (survey_id, submit_time) 的等值前缀。
+        //   ★ 与图表同口径：excludeInvalid 时只统计 quality_flag = 0 的答卷。
+        //   ★ 不缓存：一条索引聚合的代价可忽略；要缓存必须换 key 版本（见《待解决问题》C6）。
+        SurveyStatisticsDTO.ScoreSummary scoreSummary = null;
+        if (survey.getGradeEnabled() != null && survey.getGradeEnabled() == 1) {
+            Map<String, Object> row = answerMapper.selectScoreSummary(surveyId, excludeInvalid);
+            long gradedCount = row == null || row.get("cnt") == null
+                    ? 0L : ((Number) row.get("cnt")).longValue();
+            if (gradedCount > 0) {
+                Double avg = row.get("avg_score") == null
+                        ? null : round1(((Number) row.get("avg_score")).doubleValue());
+                Double passRate = null;
+                if (survey.getPassScore() != null && row.get("pass_cnt") != null) {
+                    long passCount = ((Number) row.get("pass_cnt")).longValue();
+                    passRate = round1(passCount * 100.0 / gradedCount);
+                }
+                scoreSummary = new SurveyStatisticsDTO.ScoreSummary((int) gradedCount, avg, passRate);
+            }
+        }
+        return new SurveyStatisticsDTO(surveyId, survey.getTitle(), countResponses(surveyId),
+                items, scoreSummary);
+    }
+
+    /** 保留一位小数（平均分 / 及格率都用它，避免前端出现 76.66666666）。 */
+    private static Double round1(double value) {
+        return Math.round(value * 10.0) / 10.0;
+    }
+
+    /**
+     * 登录用户对某问卷的**最近一次**答卷（"我的成绩"用）。
+     * ★ 匿名答卷（user_id = NULL）查不到 —— 匿名考生只在提交那一刻能看到分数。
+     */
+    public Answer getLatestAnswer(Integer surveyId, Integer userId) {
+        if (surveyId == null || userId == null) return null;
+        return answerMapper.findLatestBySurveyAndUser(surveyId, userId);
     }
 
     /** 某问卷的**全部**答卷明细（统计页做整体分析用，注意数据量）。 */

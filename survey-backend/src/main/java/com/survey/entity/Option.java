@@ -27,6 +27,14 @@ public class Option {
     private Integer sortOrder;       // 排序。★ 多选跳转"按选项顺序取第一个命中"依赖它
     private Integer nextQuestionId;  // 条件跳转目标，含义见类注释
 
+    /**
+     * 是否是正确答案：0 = 否（默认），1 = 是。
+     * ★ 只有 单选(1) / 多选(2) / 下拉(5) 的选项有判分意义；其它题型保存时会被归一成 0。
+     * ★ 判分按**选项原文 content** 比对（t_answer_detail 没有 option_id），
+     *   所以考试问卷发布后改选项文字会影响之后提交的判分（已存的得分不变）。
+     */
+    private Integer isCorrect;
+
     // ===== Getter/Setter =====
     public Integer getNextQuestionId() { return nextQuestionId; }
     public void setNextQuestionId(Integer nextQuestionId) { this.nextQuestionId = nextQuestionId; }
@@ -42,4 +50,7 @@ public class Option {
 
     public Integer getSortOrder() { return sortOrder; }
     public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
+
+    public Integer getIsCorrect() { return isCorrect; }
+    public void setIsCorrect(Integer isCorrect) { this.isCorrect = isCorrect; }
 }

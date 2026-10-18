@@ -27,7 +27,21 @@ public record SurveyStatisticsDTO(
         Integer surveyId,
         String title,
         int answerCount,
-        List<QuestionStats> questions) {
+        List<QuestionStats> questions,
+        ScoreSummary scoreSummary) {
+
+    /**
+     * 判分摘要（只有开启了考试模式的问卷才有值，其它问卷为 null）。
+     *
+     * ★ 只统计 {@code earned_score IS NOT NULL} 的答卷：普通问卷与判分上线前的历史答卷
+     *   不能被算成"考了 0 分"，否则平均分会被历史数据拉垮。
+     *
+     * @param gradedCount 已判分的答卷份数
+     * @param avgScore    平均分（保留一位小数；gradedCount=0 时为 null）
+     * @param passRate    及格率百分比（保留一位小数，如 66.7；未设及格线时为 null）
+     */
+    public record ScoreSummary(int gradedCount, Double avgScore, Double passRate) {
+    }
 
     /**
      * 单题的统计结果。
@@ -57,6 +71,7 @@ public record SurveyStatisticsDTO(
                 : questions.stream()
                         .map(q -> new QuestionStats(q.question(), q.chartData(), null))
                         .collect(java.util.stream.Collectors.toList());
-        return new SurveyStatisticsDTO(surveyId, title, answerCount, sanitized);
+        // ★ scoreSummary 原样保留：平均分/及格率是**聚合值**，不含任何个人信息，公开结果页可以展示。
+        return new SurveyStatisticsDTO(surveyId, title, answerCount, sanitized, scoreSummary);
     }
 }

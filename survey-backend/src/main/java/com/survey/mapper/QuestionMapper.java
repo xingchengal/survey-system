@@ -23,8 +23,9 @@ import java.util.List;
 public interface QuestionMapper {
 
     /** 插入题目，并把自增 id 回填到实体（后面要拿它插选项）。 */
-    @Insert("INSERT INTO t_question(survey_id, type, title, required, sort_order, matrix_rows, matrix_cols) " +
-            "VALUES(#{surveyId}, #{type}, #{title}, #{required}, #{sortOrder}, #{matrixRows}, #{matrixCols})")
+    @Insert("INSERT INTO t_question(survey_id, type, title, required, sort_order, matrix_rows, matrix_cols, score) " +
+            "VALUES(#{surveyId}, #{type}, #{title}, #{required}, #{sortOrder}, #{matrixRows}, #{matrixCols}, " +
+            "IFNULL(#{score}, 0))")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Question question);
 
@@ -41,7 +42,8 @@ public interface QuestionMapper {
      * ★ matrix_rows / matrix_cols 必须一起更新，否则矩阵题改一次行列、再保存还是旧的。
      */
     @Update("UPDATE t_question SET type=#{type}, title=#{title}, required=#{required}, " +
-            "sort_order=#{sortOrder}, matrix_rows=#{matrixRows}, matrix_cols=#{matrixCols} WHERE id=#{id}")
+            "sort_order=#{sortOrder}, matrix_rows=#{matrixRows}, matrix_cols=#{matrixCols}, " +
+            "score=IFNULL(#{score}, 0) WHERE id=#{id}")
     int update(Question question);
 
     /** 删掉整份问卷的题目（删除用户/复制失败回滚等场景）。 */

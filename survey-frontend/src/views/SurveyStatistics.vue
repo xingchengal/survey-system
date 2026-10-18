@@ -34,7 +34,7 @@
     <template v-else>
       <!-- ==================== 四个概览 ==================== -->
       <el-row :gutter="20" class="mb-20">
-        <el-col v-for="tile in tiles" :key="tile.key" :span="6">
+        <el-col v-for="tile in tiles" :key="tile.key" :span="scoreSummary ? 4 : 6">
           <div class="stat-tile">
             <div class="stat-ico" :style="{ background: tile.bg, color: tile.color }">
               <el-icon :size="22"><component :is="tile.icon" /></el-icon>
@@ -267,7 +267,7 @@
 // ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
 import echarts from '../utils/echarts'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Memo, Warning, CircleCheck, Share } from '@element-plus/icons-vue'
+import { ChatDotRound, Memo, Warning, CircleCheck, Share, TrendCharts } from '@element-plus/icons-vue'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
 //   http.js 统一带 Authorization、统一按 HTTP 状态码判成败、统一弹后端 message。
 //   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
@@ -296,6 +296,8 @@ export default {
       surveyId: null,
       surveyTitle: '',
       responseCount: 0,
+      /** 判分摘要（考试问卷才有；普通问卷为 null，顶部不渲染平均分/及格率） */
+      scoreSummary: null,
       questions: [],
       chartInstances: {},
       /** 首屏 / 切换口径时的骨架屏 */
@@ -330,16 +332,31 @@ export default {
     }
   },
   computed: {
-    /** 顶部四个概览卡 */
+    /** 顶部概览卡（普通问卷 4 张；考试问卷再加「平均分 / 及格率」两张） */
     tiles() {
       const suspicious = this.quality ? this.quality.suspicious : 0
       const counted = this.excludeInvalid ? Math.max(this.responseCount - suspicious, 0) : this.responseCount
-      return [
+      const tiles = [
         { key: 'responses', label: '回收答卷', value: this.responseCount, icon: ChatDotRound, color: '#2f80ed', bg: 'linear-gradient(135deg,#e8f3ff,#d7e9ff)' },
         { key: 'questions', label: '题目数量', value: this.questions.length, icon: Memo, color: '#7c3aed', bg: 'linear-gradient(135deg,#f3ecff,#e6dbff)' },
         { key: 'suspicious', label: '可疑样本', value: suspicious, icon: Warning, color: '#d97706', bg: 'linear-gradient(135deg,#fff5e6,#ffe9c7)' },
         { key: 'counted', label: '计入统计', value: counted, icon: CircleCheck, color: '#16a34a', bg: 'linear-gradient(135deg,#e9f9ef,#d6f3e3)' }
       ]
+      // ★ 判分摘要只在考试问卷出现（后端 gradedCount=0 时给 null，见 SurveyStatisticsDTO.ScoreSummary）：
+      //   「—」比 0 分更诚实 —— 没有已判分答卷时显示"平均分 0"会让人以为大家都考了 0 分。
+      if (this.scoreSummary) {
+        tiles.push({
+          key: 'avgScore', label: '平均分',
+          value: this.scoreSummary.avgScore == null ? '—' : this.scoreSummary.avgScore,
+          icon: TrendCharts, color: '#0284c7', bg: 'linear-gradient(135deg,#e0f2fe,#bae6fd)'
+        })
+        tiles.push({
+          key: 'passRate', label: '及格率',
+          value: this.scoreSummary.passRate == null ? '—' : this.scoreSummary.passRate + '%',
+          icon: CircleCheck, color: '#0891b2', bg: 'linear-gradient(135deg,#ecfeff,#cffafe)'
+        })
+      }
+      return tiles
     },
     /** 可疑原因的中文汇总（鼠标悬停在徽标上能看到原因分布） */
     qualityHint() {
@@ -408,6 +425,8 @@ export default {
         const data = await api.answer.surveyStatistics(this.surveyId, this.excludeInvalid)
         this.surveyTitle = data.title
         this.responseCount = data.answerCount
+        // ★ 判分摘要：普通问卷后端给 null（见 SurveyStatisticsDTO），这里不做兜底数字
+        this.scoreSummary = data.scoreSummary || null
 
         // 后端每题返回 { question, chartData, textAnswers }；
         // 摊平成模板一直用的结构（题目字段直接铺开 + 两个统计字段）。

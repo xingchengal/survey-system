@@ -48,6 +48,16 @@ export default {
   detail: (answerId) => http.get(`/api/answer/detail/${answerId}`),
 
   /**
+   * 查**我**在某份问卷的成绩（登录用户；考试问卷才有）。
+   *
+   * ★ 只按 `surveyId + 当前登录用户` 定位，不接受 answerId ——
+   *   匿名答卷（user_id = NULL）查不到，匿名考生只在提交那一刻看到分数。
+   * ★ 返回 `{ surveyId, title, totalScore, earnedScore, passScore, passed, submittedAt }`。
+   * ★ 没交过 / 问卷未开判分 → 后端 400 + message（由 http.js 统一提示）。
+   */
+  score: (surveyId) => http.get(`/api/answer/score/${surveyId}`),
+
+  /**
    * 导出某问卷的答卷为 Excel。
    *
    * ★ 走 http.download()：它会从响应头的 Content-Disposition 里解析**后端给的文件名**

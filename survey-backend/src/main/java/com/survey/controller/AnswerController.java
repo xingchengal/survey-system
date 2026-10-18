@@ -12,6 +12,8 @@ import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Question;
 import com.survey.dto.SurveyStatisticsDTO;
+import com.survey.dto.SubmitResult;
+import com.survey.dto.MyScoreDTO;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
@@ -49,6 +51,7 @@ import java.util.*;
  *                  它是"答题人身份落库（t_answer.user_id）/ 答卷防重 / 我的答题历史"的实现路径，
  *                  删掉会把这条路径一起堵死。完整理由（含答卷防重的现状说明）写在下面
  *                  submit() 的 javadoc 里 —— **改它之前先读那段**。
+ *                  另有 GET /score/{surveyId}（查自己的成绩），同样只需登录、不需归属。
  *   需登录+归属  : GET /count|/statistics|/texts|/statistics/survey|/list|/detail|/export|/quality
  *
  * ── 两条重要约定（改这几个端点前务必看）──────────────────
@@ -177,7 +180,7 @@ public class AnswerController {
      */
     @Operation(summary = "提交答卷（登录用户）")
     @PostMapping("/submit/{surveyId}")
-    public String submit(@PathVariable Integer surveyId,
+    public SubmitResult submit(@PathVariable Integer surveyId,
                          @RequestBody List<AnswerDetail> details,
                          @RequestHeader(value = "X-User-Id", required = false) Integer userId,
                          @RequestHeader(value = "X-Survey-Password", required = false) String password,
@@ -192,14 +195,13 @@ public class AnswerController {
         // ★ 答题密码：提交同样要校验（不能只拦"加载题目"，否则直接 POST 就能塞答卷）
         surveyService.requireAccessPassword(survey, password);
         // ★ IP 限制用**连接 IP**（不看 X-Forwarded-For，防止换个请求头绕过）
-        answerService.submit(surveyId, userId, details, clampDuration(durationMs),
+        return answerService.submit(surveyId, userId, details, clampDuration(durationMs),
                 WebUtils.getConnectionIp(request));
-        return "提交成功";
     }
 
     @Operation(summary = "提交答卷（匿名访客，通过分享码）")
     @PostMapping("/submit-share/{shareCode}")
-    public String submitByShareCode(@PathVariable String shareCode,
+    public SubmitResult submitByShareCode(@PathVariable String shareCode,
                                     @RequestBody List<AnswerDetail> details,
                                     @RequestHeader(value = "X-Survey-Password", required = false) String password,
                                     @RequestParam(value = "durationMs", required = false) Long durationMs,
@@ -208,9 +210,9 @@ public class AnswerController {
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
         surveyService.requireAccessPassword(survey, password);
-        answerService.submit(survey.getId(), null, details, clampDuration(durationMs),
+        // ★ 匿名提交同样判分：成绩随返回体回给答题页（之后无法凭身份再查 —— 匿名没有 user_id）。
+        return answerService.submit(survey.getId(), null, details, clampDuration(durationMs),
                 WebUtils.getConnectionIp(request));
-        return "提交成功";
     }
 
     @Operation(summary = "查询某问卷的答卷数量")
@@ -325,6 +327,37 @@ public class AnswerController {
         }
         requireSurveyOwnership(answer.getSurveyId(), userId, role);
         return answerService.listDetailsByAnswerId(answerId);
+    }
+
+    /**
+     * 查询「我在某份问卷的成绩」。
+     *
+     * ★ 权限档位：**需登录**（只查自己，不需要问卷归属）——
+     *   按 (surveyId, 登录用户 id) 定位，不接受 answerId（那要额外做归属/归属人校验）。
+     * ★ 匿名答卷查不到：匿名没有身份可回溯，成绩只在提交那一刻随返回体给出。
+     * ★ 考卷没开判分（earned_score 为 NULL）时明确 400，而不是返回一堆 null 让前端猜。
+     */
+    @Operation(summary = "查询我在某份问卷的成绩")
+    @GetMapping("/score/{surveyId}")
+    public MyScoreDTO myScore(@PathVariable Integer surveyId,
+                              @RequestHeader(value = "X-User-Id", required = false) Integer userId) {
+        if (userId == null) {
+            throw new BizException("请先登录后再查看成绩");
+        }
+        Survey survey = surveyService.getById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        Answer answer = answerService.getLatestAnswer(surveyId, userId);
+        if (answer == null) {
+            throw new BizException("你还没有提交过这份问卷");
+        }
+        if (answer.getEarnedScore() == null) {
+            throw new BizException("这份问卷没有开启考试判分");
+        }
+        return new MyScoreDTO(surveyId, survey.getTitle(), answer.getTotalScore(),
+                answer.getEarnedScore(), survey.getPassScore(), answer.getIsPassed(),
+                answer.getSubmitTime());
     }
 
     @Operation(summary = "导出某问卷的答卷为 Excel")

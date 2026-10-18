@@ -9,6 +9,7 @@ import com.survey.common.SurveyLifecycle;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
 import com.survey.common.DateRanges;
+import com.survey.common.Grader;
 import com.survey.common.PageParams;
 import com.survey.common.SqlLikeEscaper;
 import com.survey.common.PageResult;
@@ -372,6 +373,28 @@ public class SurveyService {
         }
 
         survey.setPublicResult(survey.getPublicResult() != null && survey.getPublicResult() == 1 ? 1 : 0);
+
+        // ★ 考试模式（判分）：gradeEnabled 只认 0/1；关闭时**顺手清掉及格线**，
+        //   避免"开关关了、阈值还在"的幽灵配置（下次再开启时会用上一个旧阈值，用户完全不知道）。
+        //   ★ 开启时必须先有计分题：总分由题目分值算出（与 Grader 同一口径），
+        //     否则提交时会出现"0 / 0 分"的成绩卡。
+        Integer gradeEnabled = survey.getGradeEnabled() != null && survey.getGradeEnabled() == 1 ? 1 : 0;
+        survey.setGradeEnabled(gradeEnabled);
+        if (gradeEnabled == 0) {
+            survey.setPassScore(null);
+        } else {
+            int total = Grader.totalScore(
+                    survey.getId() == null ? List.of() : questionMapper.findBySurveyId(survey.getId()));
+            if (total <= 0) {
+                throw new BizException("开启考试模式前，请先给题目设置分值");
+            }
+            Integer pass = survey.getPassScore();
+            if (pass != null) {
+                if (pass < 0 || pass > total) {
+                    throw new BizException("及格分必须在 0 ~ " + total + " 之间（本卷总分 " + total + " 分）");
+                }
+            }
+        }
     }
 
     /** 去空白；空串返回 null（"清空"在库里统一表示为 NULL） */
