@@ -353,8 +353,58 @@
 
     <!-- ========== 新建问卷对话框（带模板） ========== -->
     <el-dialog v-model="createDialogVisible" title="新建问卷" width="900px" top="8vh">
-      <el-tabs v-model="createTab">
-        <el-tab-pane label="✏️ 空白创建" name="blank">
+      <!-- ★ 双卡片入口：比灰字 tab 更能说明"两种开始方式"，且按用户要求**不放数量徽标**。
+           键盘：左右方向键切换，role=tab + aria-selected 保持可访问性。 -->
+      <div class="create-switch" role="tablist" aria-label="新建问卷方式">
+        <button
+          id="create-tab-blank"
+          ref="createTabBlank"
+          type="button"
+          class="switch-card"
+          :class="{ active: createTab === 'blank' }"
+          role="tab"
+          :aria-selected="createTab === 'blank'"
+          aria-controls="create-panel-blank"
+          :tabindex="createTab === 'blank' ? 0 : -1"
+          @click="switchCreateTab('blank')"
+          @keydown.left.prevent="switchCreateTab('template')"
+          @keydown.right.prevent="switchCreateTab('template')"
+        >
+          <span class="switch-icon"><el-icon><EditPen /></el-icon></span>
+          <span class="switch-text">
+            <b>空白创建</b>
+            <i>从零开始，自由添加题目</i>
+          </span>
+        </button>
+
+        <button
+          id="create-tab-template"
+          ref="createTabTemplate"
+          type="button"
+          class="switch-card"
+          :class="{ active: createTab === 'template' }"
+          role="tab"
+          :aria-selected="createTab === 'template'"
+          aria-controls="create-panel-template"
+          :tabindex="createTab === 'template' ? 0 : -1"
+          @click="switchCreateTab('template')"
+          @keydown.left.prevent="switchCreateTab('blank')"
+          @keydown.right.prevent="switchCreateTab('blank')"
+        >
+          <span class="switch-icon"><el-icon><Files /></el-icon></span>
+          <span class="switch-text">
+            <b>从模板创建</b>
+            <i>选一个现成模板，改成自己的</i>
+          </span>
+        </button>
+      </div>
+
+      <div
+        v-show="createTab === 'blank'"
+        id="create-panel-blank"
+        role="tabpanel"
+        aria-labelledby="create-tab-blank"
+      >
           <!-- ★ 场景类型：像问卷星一样先选"要做什么"，再进入编辑。
                选择后会预填标题/描述与一套可直接改的题目；选「基础问卷」则完全空白。
                ★ 模板只是前端预设（调 add + question.save 两步），不新增后端概念。 -->
@@ -389,9 +439,21 @@
             <el-button @click="createDialogVisible = false">取消</el-button>
             <el-button type="primary" @click="handleCreate">创建并编辑</el-button>
           </div>
-        </el-tab-pane>
 
-        <el-tab-pane label="📋 从模板创建" name="template">
+          <p class="create-hint">
+            没有头绪？
+            <button type="button" class="create-link" @click="switchCreateTab('template')">
+              从模板开始 →
+            </button>
+          </p>
+        </div>
+
+        <div
+          v-show="createTab === 'template'"
+          id="create-panel-template"
+          role="tabpanel"
+          aria-labelledby="create-tab-template"
+        >
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
             <el-radio-group v-model="templateCategory" size="default">
               <el-radio-button value="全部">全部</el-radio-button>
@@ -440,8 +502,7 @@
             </div>
             <el-empty v-else description="没有匹配的模板" :image-size="80" />
           </div>
-        </el-tab-pane>
-      </el-tabs>
+        </div>
     </el-dialog>
 
     <!-- ========== 分享对话框 ========== -->
@@ -465,7 +526,7 @@
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Plus, CopyDocument, Edit, Promotion, Share, DataAnalysis, Delete,
+  Plus, CopyDocument, Edit, EditPen, Files, Promotion, Share, DataAnalysis, Delete,
   Search, MagicStick, Connection, RefreshLeft, MoreFilled } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
@@ -611,6 +672,8 @@ export default {
       Connection: markRaw(Connection),
       RefreshLeft: markRaw(RefreshLeft),
       MoreFilled: markRaw(MoreFilled),
+      EditPen: markRaw(EditPen),
+      Files: markRaw(Files),
       Delete: markRaw(Delete),
       Search: markRaw(Search),
       MagicStick: markRaw(MagicStick)
@@ -869,6 +932,17 @@ export default {
     },
 
     // ============ 新建相关 ============
+    /** 新建弹窗的"空白创建 / 从模板创建"切换（点击、键盘左右键、底部文字链共用） */
+    switchCreateTab(tab) {
+      if (tab !== 'blank' && tab !== 'template') return
+      this.createTab = tab
+      // 让焦点跟随选中项：键盘用户按左右键后能继续用 Tab 进入对应面板
+      this.$nextTick(() => {
+        const ref = tab === 'blank' ? this.$refs.createTabBlank : this.$refs.createTabTemplate
+        if (ref && ref.focus) ref.focus()
+      })
+    },
+
     openCreateDialog() {
       this.createDialogVisible = true
       this.createTab = 'blank'
@@ -1756,6 +1830,132 @@ export default {
   .list-header,
   .list-row {
     min-width: 840px;
+  }
+}
+
+/* ==================== 新建问卷：双卡片入口 ==================== */
+.create-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.switch-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    background-color 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+/* 选中态左侧 4px 渐变条（用伪元素，不占布局） */
+.switch-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: transparent;
+}
+.switch-card:hover {
+  transform: translateY(-1px);
+  border-color: #bfdbfe;
+  box-shadow: var(--shadow-sm);
+}
+.switch-card.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.switch-card.active::before {
+  background: var(--brand-gradient);
+}
+.switch-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 18px;
+  flex-shrink: 0;
+  transition: background-color 0.18s var(--ease), color 0.18s var(--ease);
+}
+.switch-card.active .switch-icon {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.switch-text b {
+  font-size: 14px;
+  color: #303133;
+}
+.switch-text i {
+  font-style: normal;
+  font-size: 12px;
+  color: #909399;
+}
+.create-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.create-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sky-600, #2563eb);
+  font-size: 12px;
+  cursor: pointer;
+}
+.create-link:hover {
+  text-decoration: underline;
+}
+
+html[data-theme="dark"] .switch-card {
+  background: #101d31;
+  border-color: #1d2c44;
+}
+html[data-theme="dark"] .switch-card:hover {
+  border-color: #2563eb;
+}
+html[data-theme="dark"] .switch-card.active {
+  background: #16263f;
+  border-color: #2563eb;
+}
+html[data-theme="dark"] .switch-icon {
+  background: #16263f;
+  color: #94a3b8;
+}
+html[data-theme="dark"] .switch-card.active .switch-icon {
+  background: #1e3a8a;
+  color: #bfdbfe;
+}
+html[data-theme="dark"] .switch-text b {
+  color: #e2e8f0;
+}
+
+/* 窄屏两张卡片改上下排列 */
+@media (max-width: 640px) {
+  .create-switch {
+    grid-template-columns: 1fr;
   }
 }
 
