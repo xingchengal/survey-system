@@ -105,7 +105,7 @@
         <el-card>
           <template #header>
             <div class="flex-between">
-              <span class="text-bold">⚙️ 运营与系统</span>
+              <span class="text-bold">🧭 运营待办</span>
               <el-tag :type="healthTagType" size="small">
                 <span
                   :style="{
@@ -123,21 +123,39 @@
             </div>
           </template>
 
+          <!-- 今日概览：运营第一眼先看"今天发生了什么" -->
+          <div class="ops-summary">
+            <div class="ops-summary-item">
+              <span class="ops-summary-label">今日新增问卷</span>
+              <b>{{ stats.todaySurveys }}</b>
+            </div>
+            <div class="ops-summary-item">
+              <span class="ops-summary-label">今日收到答卷</span>
+              <b>{{ stats.todayAnswers }}</b>
+            </div>
+          </div>
+
           <!-- 待办：点击直达对应页面（数字全部来自 /system-overview，不是假数据） -->
           <div class="ops-list">
             <div class="ops-item" @click="$router.push('/admin/reviews')">
               <span class="ops-label">待处理举报</span>
               <span class="ops-value" :class="{ warn: stats.pendingReviews > 0 }">
-                {{ stats.pendingReviews }}
+                {{ stats.pendingReviews }} <span class="ops-arrow">→</span>
+              </span>
+            </div>
+            <div class="ops-item" @click="$router.push('/admin/wallets')">
+              <span class="ops-label">钱包对账异常</span>
+              <span class="ops-value" :class="{ warn: stats.walletMismatches > 0 }">
+                {{ stats.walletMismatches }} <span class="ops-arrow">→</span>
               </span>
             </div>
             <div class="ops-item" @click="$router.push('/admin/recycle')">
               <span class="ops-label">回收站问卷</span>
-              <span class="ops-value">{{ stats.recycled }}</span>
+              <span class="ops-value">{{ stats.recycled }} <span class="ops-arrow">→</span></span>
             </div>
             <div class="ops-item" @click="$router.push('/admin/templates')">
               <span class="ops-label">在架模板</span>
-              <span class="ops-value">{{ stats.templates }}</span>
+              <span class="ops-value">{{ stats.templates }} <span class="ops-arrow">→</span></span>
             </div>
             <div class="ops-item" @click="$router.push('/admin/wallets')">
               <span class="ops-label">全站额度总量</span>
@@ -145,17 +163,16 @@
             </div>
           </div>
 
-          <el-divider class="my-12" />
+          <!-- 动态提示：按严重程度告诉管理员"现在该关注什么"（不是静态文案） -->
+          <div class="ops-hint" :class="{ warn: opsHintWarn }">
+            <span class="ops-hint-icon">{{ opsHintWarn ? '⚠️' : '💡' }}</span>
+            <span>{{ opsHint }}</span>
+          </div>
 
-          <el-descriptions :column="1" border size="small">
-            <el-descriptions-item label="系统版本">v2.3.0</el-descriptions-item>
-            <el-descriptions-item label="当前用户">
-              {{ currentUser.nickname || currentUser.username }}
-            </el-descriptions-item>
-            <el-descriptions-item label="登录时间">{{ loginTime }}</el-descriptions-item>
-            <el-descriptions-item label="数据库">MySQL 8 · 21 张表</el-descriptions-item>
-            <el-descriptions-item label="缓存 / 限流">Redis 统计缓存 + 分布式限流 + 熔断</el-descriptions-item>
-          </el-descriptions>
+          <div class="ops-footer">
+            <el-button link type="primary" @click="$router.push('/statistics')">系统统计 →</el-button>
+            <el-button link type="primary" @click="$router.push('/admin/logs')">操作日志 →</el-button>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -239,14 +256,11 @@ import {
   chartPalette, chartColor, chartNum, chartPct
 } from '../utils/chartTheme'
 // ★ 失败提示由 src/api/http.js 统一弹出，所以本文件不需要 import ElMessage
-import { getUser } from '../utils/auth'
 
 // 图标已在 main.js 全局注册（新增 Wallet），模板里用 <component :is="'Xxx'" /> 即可
 export default {
   data() {
     return {
-      currentUser: getUser() || {},
-      loginTime: '',
       stats: {
         users: 0,
         total: 0,
@@ -259,6 +273,7 @@ export default {
         recycled: 0,
         pendingReviews: 0,
         walletBalance: 0,
+        walletMismatches: 0,
         todaySurveys: 0,
         todayAnswers: 0,
         trendDates: [],
@@ -346,10 +361,29 @@ export default {
     },
     healthText() {
       return this.serverHealthy ? '服务运行正常' : '服务已离线'
+    },
+    /** 运营提示：按"举报 > 对账 > 回收站 > 今日冷清"的优先级给一句行动建议 */
+    opsHint() {
+      const s = this.stats
+      if (s.pendingReviews > 0) {
+        return `有 ${s.pendingReviews} 条举报待处理，先清审核台，相关问卷会一直保持下架状态`
+      }
+      if (s.walletMismatches > 0) {
+        return `有 ${s.walletMismatches} 个钱包对账不一致，建议到钱包管理里人工核对流水`
+      }
+      if (s.recycled > 0) {
+        return `回收站有 ${s.recycled} 份问卷，可恢复或彻底删除`
+      }
+      if (s.todayAnswers === 0) {
+        return '今天还没有收到答卷，可以检查热门问卷的分享入口是否已发出'
+      }
+      return '暂无高优先级待办，系统运行平稳'
+    },
+    opsHintWarn() {
+      return this.stats.pendingReviews > 0 || this.stats.walletMismatches > 0
     }
   },
   mounted() {
-    this.loginTime = this.formatNow()
     this.loadStats()
     this.checkHealth()
     this.healthTimer = setInterval(this.checkHealth, 5000)
@@ -371,12 +405,6 @@ export default {
     handleResize() {
       if (this.pieChart) this.pieChart.resize()
       if (this.trendChart) this.trendChart.resize()
-    },
-
-    formatNow() {
-      const d = new Date()
-      const pad = n => String(n).padStart(2, '0')
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
     },
 
     // ===== 后端健康检查（运营卡片的绿点/红点）=====
@@ -582,6 +610,29 @@ export default {
 }
 
 /* 运营待办 */
+.ops-summary {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.ops-summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+.ops-summary-label {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.ops-summary-item b {
+  font-size: 18px;
+  line-height: 1.1;
+  color: var(--ink);
+}
 .ops-list {
   display: flex;
   flex-direction: column;
@@ -610,8 +661,50 @@ export default {
 .ops-value.warn {
   color: #d97706;
 }
-.my-12 {
-  margin: 12px 0;
+.ops-arrow {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #c0c4cc;
+}
+
+/* 运营提示：蓝=一般提醒，琥珀=需要马上处理 */
+.ops-hint {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #f0f7ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.ops-hint.warn {
+  background: #fff7e6;
+  color: #b45309;
+}
+.ops-hint-icon {
+  flex-shrink: 0;
+}
+
+.ops-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+html[data-theme="dark"] .ops-summary-item {
+  background: #16263f;
+}
+html[data-theme="dark"] .ops-hint {
+  background: #16263f;
+  color: #93c5fd;
+}
+html[data-theme="dark"] .ops-hint.warn {
+  background: #3a2a12;
+  color: #fbbf24;
 }
 
 .feature-tags {

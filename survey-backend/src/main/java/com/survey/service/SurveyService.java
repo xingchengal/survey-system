@@ -1067,6 +1067,8 @@ public class SurveyService {
         int recycled = surveyMapper.countRecycled();
         int pendingReviews = surveyReviewMapper.countPendingAll();
         long walletBalance = walletMapper.sumBalance();
+        // 对账异常是运营要盯的硬指标：>0 说明流水汇总与余额对不上，必须人工核对
+        int walletMismatches = walletMapper.countMismatches();
         int todaySurveys = surveyMapper.countCreatedToday();
         int todayAnswers = answerMapper.countToday();
 
@@ -1129,6 +1131,7 @@ public class SurveyService {
         result.put("recycled", recycled);
         result.put("pendingReviews", pendingReviews);
         result.put("walletBalance", walletBalance);
+        result.put("walletMismatches", walletMismatches);
         result.put("todaySurveys", todaySurveys);
         result.put("todayAnswers", todayAnswers);
         result.put("trendDates", trendDates);

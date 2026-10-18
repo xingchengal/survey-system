@@ -67,6 +67,7 @@ class SurveyServiceSystemOverviewTest {
         when(surveyMapper.countCreatedToday()).thenReturn(1);
         when(surveyReviewMapper.countPendingAll()).thenReturn(3);
         when(walletMapper.sumBalance()).thenReturn(88L);
+        when(walletMapper.countMismatches()).thenReturn(0);
         when(answerMapper.countToday()).thenReturn(4);
         when(surveyMapper.countDailyCreated()).thenReturn(List.of());
         when(answerMapper.countDailyAll()).thenReturn(List.of());
@@ -90,6 +91,7 @@ class SurveyServiceSystemOverviewTest {
         assertEquals(2, result.get("recycled"));
         assertEquals(3, result.get("pendingReviews"));
         assertEquals(88L, result.get("walletBalance"));
+        assertEquals(0, result.get("walletMismatches"));
         assertEquals(1, result.get("todaySurveys"));
         assertEquals(4, result.get("todayAnswers"));
         assertEquals(7, ((List<?>) result.get("trendDates")).size(),
