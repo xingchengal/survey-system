@@ -68,6 +68,14 @@ public class UserService {
     private SurveyService surveyService;
 
     /**
+     * H5 额度钱包：注册赠送 10 点。
+     * ★ 只用于"注册后赠送"这一处；赠送走独立事务（REQUIRES_NEW），
+     *   失败也不能让注册回滚（账号已经建好了）。
+     */
+    @Autowired
+    private WalletService walletService;
+
+    /**
      * ⚠️ 仅用于兼容历史数据 —— 库里已存在的 MD5 密码就是这个格式，删掉它会让这批老账号登不进去。
      * 新密码一律走 {@link #hashPassword(String)}。MD5 无盐、速度快，已不适合存密码。
      */
@@ -242,6 +250,13 @@ public class UserService {
         //   ★ 两步写必须同事务：插了用户却没写进手机号，用户会以为"我明明填了"。
         if (user.getPhone() != null && user.getId() != null) {
             userMapper.updatePhone(user.getId(), user.getPhone());
+        }
+        // ★ H5：注册赠送 10 点额度（独立事务，幂等键 signup:{userId}）。
+        //   赠送失败只记日志，绝不让注册回滚 —— 钱包是附加权益，账号才是主流程。
+        try {
+            walletService.grantSignupBonus(user.getId());
+        } catch (Exception e) {
+            LOG.warn("注册赠送额度失败（不影响注册）：userId={} —— {}", user.getId(), e.getMessage());
         }
         return "注册成功";
     }

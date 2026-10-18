@@ -2,6 +2,7 @@ package com.survey.service;
 
 import com.survey.common.BizException;
 import com.survey.common.CollaboratorRole;
+import com.survey.common.WalletFeature;
 import com.survey.dto.CollaboratorView;
 import com.survey.entity.Survey;
 import com.survey.entity.User;
@@ -10,6 +11,7 @@ import com.survey.mapper.UserMapper;
 import com.survey.service.NotificationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -28,10 +30,11 @@ import java.util.List;
  *   ④ 不能邀请作者本人（作者本来就全权，多一条协作者记录只会让列表更乱）；
  *   ⑤ 重复邀请 / 对非协作者改角色或移除 → 400（不静默成功）。
  *
- * ── 为什么没有 @Transactional ─────────────────────────
- *   每个方法都只有**一条**写语句（insert / update / delete），
- *   多语句事务在这里没有意义；加了反而给人"这里有原子性保证"的错觉。
- *   ★ 真正的并发风险是"同一个用户被同时邀请两次"：由唯一键
+ * ── 事务边界 ──────────────────────────────────────────
+ *   改角色 / 移除 只有**一条**写语句，不需要事务；
+ *   **invite 例外**：H5 起邀请可能要先扣协作者名额费，扣费与插入必须原子
+ *   （扣了钱没插进去 = 用户白付），所以 invite 标了 @Transactional。
+ *   ★ 并发风险"同一用户被同时邀请两次"仍由唯一键
  *     uk_survey_user(survey_id,user_id) 兜底 —— 第二个请求会拿到 DuplicateKey，
  *     这里不额外捕获，让它变成 500（极端并发下的脏请求，值得被看见）。
  */
@@ -48,6 +51,14 @@ public class SurveyCollaboratorService {
     @Autowired
     private NotificationService notificationService;
 
+    /**
+     * H5 额度钱包：协作者名额（前 2 名免费，之后每名 1 点）。
+     * ★ invite() 因此加了 @Transactional：扣费与插入必须原子 ——
+     *   扣了钱却插入失败（或反过来）都会让用户困惑/白付。
+     */
+    @Autowired
+    private WalletService walletService;
+
     /** 某份问卷的协作者列表（含昵称；已注销账号不列出） */
     public List<CollaboratorView> list(Survey survey) {
         return collaboratorMapper.listBySurveyId(survey.getId());
@@ -61,6 +72,7 @@ public class SurveyCollaboratorService {
      * @param roleCode       viewer / editor / analyst
      * @param operatorUserId 邀请人（写进 created_by，便于追溯）
      */
+    @Transactional
     public void invite(Survey survey, String targetUsername, String roleCode, Integer operatorUserId) {
         requireValidRole(roleCode);
         if (targetUsername == null || targetUsername.isBlank()) {
@@ -83,6 +95,12 @@ public class SurveyCollaboratorService {
         String existing = collaboratorMapper.findCollaboratorRole(survey.getId(), targetUserId);
         if (existing != null) {
             throw new BizException("该用户已经是协作者（当前角色：" + existing + "），请直接改角色");
+        }
+        // ★ H5：名额收费 —— 前 FREE_COLLABORATORS 名免费，之后每名 1 点（同一人只扣一次）。
+        //   余额不足会在这里 400，邀请不会落库（与扣费同事务）。
+        int currentCount = collaboratorMapper.countBySurvey(survey.getId());
+        if (currentCount >= WalletFeature.FREE_COLLABORATORS) {
+            walletService.chargeCollaborator(survey.getId(), survey.getUserId(), targetUserId);
         }
         collaboratorMapper.insert(survey.getId(), targetUserId, roleCode, operatorUserId);
         // ★ 通知被邀请人：不通知的话对方根本不知道自己被拉进来了

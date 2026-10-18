@@ -32,6 +32,10 @@
               <el-icon><Document /></el-icon>
               <span>全部问卷</span>
             </el-menu-item>
+            <el-menu-item index="/admin/templates">
+              <el-icon><DocumentCopy /></el-icon>
+              <span>模板管理</span>
+            </el-menu-item>
             <el-menu-item index="/statistics">
               <el-icon><PieChart /></el-icon>
               <span>系统统计</span>
@@ -52,6 +56,10 @@
               <el-icon><Warning /></el-icon>
               <span>举报审核</span>
             </el-menu-item>
+            <el-menu-item index="/admin/wallets">
+              <el-icon><Wallet /></el-icon>
+              <span>钱包管理</span>
+            </el-menu-item>
             <el-menu-item index="/admin/demo">
               <el-icon><MagicStick /></el-icon>
               <span>演示数据</span>
@@ -71,6 +79,10 @@
             <el-menu-item index="/my/recycle">
               <el-icon><Delete /></el-icon>
               <span>回收站</span>
+            </el-menu-item>
+            <el-menu-item index="/my/wallet">
+              <el-icon><Wallet /></el-icon>
+              <span>我的钱包</span>
             </el-menu-item>
           </template>
         </el-menu>
@@ -241,7 +253,7 @@
 import {
   DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
   DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-  ChatDotRound, BellFilled, InfoFilled, Close
+  ChatDotRound, BellFilled, InfoFilled, Close, Wallet
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 // ★ 统一走接口层：不要在本布局里自己 fetch —— http.js 统一带 Authorization、
@@ -260,7 +272,7 @@ export default {
     BrandLogo,
     DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
     DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-    ChatDotRound, BellFilled, InfoFilled, Close
+    ChatDotRound, BellFilled, InfoFilled, Close, Wallet
   },
   data() {
     return {

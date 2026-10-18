@@ -262,7 +262,8 @@
         </el-table-column>
       </el-table>
       <p class="collab-hint">只读 = 只能看问卷；可编辑 = 能改内容、不能删除；只看数据 = 只能看统计。<br />
-        被邀请人会收到站内通知；对方也可以在自己的「共享给我」里主动退出。</p>
+        被邀请人会收到站内通知；对方也可以在自己的「共享给我」里主动退出。<br />
+        <b>名额计费</b>：每份问卷前 2 名协作者免费，之后每邀请 1 名消耗 1 点（同一人只扣一次）。</p>
     </el-dialog>
 
     <!-- ========== AI 创建问卷对话框 ========== -->
@@ -285,6 +286,8 @@
           <strong>💡 使用说明</strong>
         </template>
         输入问卷主题，AI 会自动生成问卷标题、描述和 5-8 道题目。生成后可以手动调整内容。
+        <br />
+        <span class="ai-cost-hint">本次生成消耗 <b>3 点</b>额度（生成失败自动退回），可在「我的钱包」查看流水。</span>
       </el-alert>
 
       <el-form :model="aiForm" label-width="90px">
@@ -334,6 +337,24 @@
     <el-dialog v-model="createDialogVisible" title="新建问卷" width="900px" top="8vh">
       <el-tabs v-model="createTab">
         <el-tab-pane label="✏️ 空白创建" name="blank">
+          <!-- ★ 场景类型：像问卷星一样先选"要做什么"，再进入编辑。
+               选择后会预填标题/描述与一套可直接改的题目；选「基础问卷」则完全空白。
+               ★ 模板只是前端预设（调 add + question.save 两步），不新增后端概念。 -->
+          <div class="scene-picker">
+            <button
+              v-for="s in sceneTemplates"
+              :key="s.code"
+              type="button"
+              class="scene-card"
+              :class="{ active: newForm.scene === s.code }"
+              @click="pickScene(s)"
+            >
+              <span class="scene-emoji">{{ s.emoji }}</span>
+              <span class="scene-name">{{ s.name }}</span>
+              <span class="scene-desc">{{ s.desc }}</span>
+            </button>
+          </div>
+
           <el-form class="form-panel" :model="newForm" label-width="80px">
             <el-form-item label="标题">
               <!-- ★ maxlength 与后端 TextLimits.SURVEY_TITLE(200) / SURVEY_DESCRIPTION(500) 对齐，否则超长只有提交后吃 400 -->
@@ -343,6 +364,9 @@
               <el-input v-model="newForm.description" type="textarea" :rows="3" placeholder="请输入问卷描述（选填）" maxlength="500" show-word-limit />
             </el-form-item>
           </el-form>
+          <p v-if="sceneQuestions.length" class="scene-hint">
+            将自动加入 {{ sceneQuestions.length }} 道预设题目，创建后可直接在编辑器里修改。
+          </p>
           <div style="text-align: right; margin-top: 20px;">
             <el-button @click="createDialogVisible = false">取消</el-button>
             <el-button type="primary" @click="handleCreate">创建并编辑</el-button>
@@ -437,6 +461,74 @@ import { readPageNum, savePageNum } from '../utils/pageMemory'
 /** 本页在 sessionStorage 里的页码键 */
 const PAGE_KEY = 'MySurveys'
 
+/**
+ * 场景模板（问卷星式"先选类型再创建"）。
+ *
+ * ★ 只是**前端预设**：创建时先 POST /api/survey/add，再把 questions 用
+ *   POST /api/question/save/{id} 落库（type 取值与 common/QuestionType 一致）。
+ *   所以不需要后端新增"问卷类型"概念，也不会限制用户之后随便改。
+ * ★ 基础问卷 = 完全空白（默认），其余类型给一套可直接改的题目。
+ */
+const SCENE_TEMPLATES = [
+  {
+    code: 'basic', emoji: '📝', name: '基础问卷', desc: '从空白开始',
+    title: '', description: '', questions: []
+  },
+  {
+    code: 'exam', emoji: '📊', name: '考试测评', desc: '评分 + 选择题 + 建议',
+    title: '课程测评问卷',
+    description: '请根据本次体验完成以下问题，感谢你的参与。',
+    questions: [
+      { type: 6, title: '请为本次课程整体打分（1~5 分）', required: 1 },
+      { type: 1, title: '你对课程节奏的感受是？', required: 1, options: ['太快', '合适', '太慢'] },
+      { type: 2, title: '你希望加强哪些内容？', required: 0, options: ['理论', '案例', '实操', '答疑'] },
+      { type: 4, title: '还有什么建议？', required: 0 }
+    ]
+  },
+  {
+    code: 'vote', emoji: '🗳️', name: '投票', desc: '快速收集选择',
+    title: '投票问卷',
+    description: '请选择你支持的一项，并可以补充理由。',
+    questions: [
+      { type: 1, title: '请选择你支持的一项', required: 1, options: ['选项 A', '选项 B', '选项 C'] },
+      { type: 4, title: '补充理由（选填）', required: 0 }
+    ]
+  },
+  {
+    code: 'signup', emoji: '📋', name: '报名登记', desc: '姓名 + 联系方式 + 场次',
+    title: '活动报名表',
+    description: '请填写以下信息完成报名，我们会尽快与你联系。',
+    questions: [
+      { type: 3, title: '姓名', required: 1 },
+      { type: 3, title: '手机号', required: 1 },
+      { type: 1, title: '参加场次', required: 1, options: ['上午场', '下午场'] },
+      { type: 4, title: '备注（选填）', required: 0 }
+    ]
+  },
+  {
+    code: 'satisfaction', emoji: '⭐', name: '满意度调查', desc: '评分 + 选项 + 建议',
+    title: '满意度调查',
+    description: '请根据你的真实体验打分，帮助我们持续改进。',
+    questions: [
+      { type: 6, title: '整体满意度（1~5 分）', required: 1 },
+      { type: 1, title: '你最满意的方面是？', required: 1, options: ['服务', '环境', '效率', '价格'] },
+      { type: 2, title: '希望改进的地方', required: 0, options: ['等待时间', '沟通', '设施', '其他'] },
+      { type: 4, title: '其他建议', required: 0 }
+    ]
+  },
+  {
+    code: 'market', emoji: '📈', name: '市场调研', desc: '人群 + 渠道 + 意愿',
+    title: '市场调研问卷',
+    description: '我们想了解你的真实需求，问卷大约需要 2 分钟。',
+    questions: [
+      { type: 1, title: '你的年龄段', required: 1, options: ['18-25', '26-35', '36-45', '46 岁以上'] },
+      { type: 2, title: '你通过哪些渠道了解我们？', required: 0, options: ['朋友推荐', '社交媒体', '搜索引擎', '线下活动'] },
+      { type: 6, title: '购买意愿（1~5 分）', required: 1 },
+      { type: 4, title: '其他想法', required: 0 }
+    ]
+  }
+]
+
 // 图标已在 main.js 里全局注册，这里不再重复注册
 // （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
@@ -463,7 +555,11 @@ export default {
       // 新建对话框
       createDialogVisible: false,
       createTab: 'blank',
-      newForm: { title: '', description: '' },
+      newForm: { title: '', description: '', scene: 'basic' },
+      /** 场景模板目录（纯前端预设，选择后预填标题/描述/题目） */
+      sceneTemplates: SCENE_TEMPLATES,
+      /** 当前场景带出的题目（创建时随问卷一起保存） */
+      sceneQuestions: [],
       // 模板相关
       templateKeyword: '',
       templateCategory: '全部',
@@ -755,8 +851,34 @@ export default {
     openCreateDialog() {
       this.createDialogVisible = true
       this.createTab = 'blank'
-      this.newForm = { title: '', description: '' }
+      this.newForm = { title: '', description: '', scene: 'basic' }
+      this.sceneQuestions = []
       this.templateCategory = '全部'
+    },
+
+    /** 选场景：预填标题/描述与题目（基础问卷 = 全部清空） */
+    pickScene(scene) {
+      this.newForm.scene = scene.code
+      this.newForm.title = scene.title || ''
+      this.newForm.description = scene.description || ''
+      this.sceneQuestions = (scene.questions || []).map((q) => ({
+        ...q,
+        options: [...(q.options || [])]
+      }))
+    },
+
+    /** 前端预设题目 → 后端 /question/save 的入参（补 sortOrder，选项补序） */
+    toApiQuestions(list) {
+      return list.map((q, index) => ({
+        type: q.type,
+        title: q.title,
+        required: q.required,
+        sortOrder: index + 1,
+        options: (q.options || []).map((content, oi) => ({
+          content,
+          sortOrder: oi + 1
+        }))
+      }))
     },
 
     async handleCreate() {
@@ -775,9 +897,17 @@ export default {
           description: this.newForm.description
         })
         if (data.id) {
+          // 场景模板：把预设题目一并落库（失败不阻塞进入编辑器，用户还能手动加题）
+          if (this.sceneQuestions.length) {
+            try {
+              await api.question.save(data.id, this.toApiQuestions(this.sceneQuestions))
+            } catch {
+              // 题目保存失败由接口层提示；问卷已创建，仍进入编辑器
+            }
+          }
           ElMessage.success('创建成功，即将进入编辑页')
           this.createDialogVisible = false
-          this.newForm = { title: '', description: '' }
+          this.newForm = { title: '', description: '', scene: 'basic' }
           this.$router.push(`/my/surveys/${data.id}/edit`)
         }
       } catch {
@@ -1022,11 +1152,15 @@ export default {
   50% { background-position: 100% 50%; }
 }
 
+.ai-cost-hint {
+  display: inline-block;
+  margin-top: 6px;
+  color: #b45309;
+}
 .ai-loading {
   text-align: center;
   padding: 20px 0;
-}
-.ai-loading-icon { margin-bottom: 12px; }
+}.ai-loading-icon { margin-bottom: 12px; }
 .ai-loading-text {
   font-size: 15px;
   font-weight: 500;
@@ -1559,5 +1693,53 @@ export default {
   .list-row {
     min-width: 800px;
   }
+}
+
+/* ==================== 场景类型选择（新建问卷） ==================== */
+.scene-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.scene-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+.scene-card:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+.scene-card.active {
+  border-color: #2f80ed;
+  background: #eef5ff;
+  box-shadow: 0 2px 10px rgba(47, 128, 237, 0.12);
+}
+.scene-emoji {
+  font-size: 18px;
+  line-height: 1.2;
+}
+.scene-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+.scene-desc {
+  font-size: 11px;
+  color: #909399;
+}
+.scene-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #b45309;
 }
 </style>

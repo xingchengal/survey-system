@@ -14,9 +14,11 @@
         <el-button :disabled="responseCount === 0" @click="openShare">
           <el-icon><Share /></el-icon> 分享报告
         </el-button>
-        <el-button type="primary" :disabled="responseCount === 0" @click="exportExcel">
-          <el-icon><Download /></el-icon> 导出 Excel
-        </el-button>
+        <el-tooltip content="导出消耗 1 点额度 / 次（管理员免费）" placement="top">
+          <el-button type="primary" :disabled="responseCount === 0" @click="exportExcel">
+            <el-icon><Download /></el-icon> 导出 Excel
+          </el-button>
+        </el-tooltip>
       </div>
     </div>
 

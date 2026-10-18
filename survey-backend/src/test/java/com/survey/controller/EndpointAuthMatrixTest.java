@@ -19,6 +19,8 @@ import com.survey.mapper.RoleMapper;
 import com.survey.mapper.SurveyCollaboratorMapper;
 import com.survey.mapper.SurveyVersionMapper;
 import com.survey.mapper.UserMapper;
+import com.survey.mapper.WalletMapper;
+import com.survey.mapper.WalletTransactionMapper;
 import com.survey.util.JwtUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -79,7 +81,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   {@code mock-maker-subclass}（沙箱禁 Attach API）。Mapper 全是接口，不受影响。
  *
  * ── 维护口径 ───────────────────────────────────────────
- *   ALL_ENDPOINTS 是"87"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
+ *   ALL_ENDPOINTS 是"94"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
  *   docs/问卷系统-端点权限审计表.md 与《交接文档》的端点数。
  */
@@ -98,7 +100,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EndpointAuthMatrixTest {
 
-    // ==================== 一、87 个端点的三档分类（与审计表逐条对应） ====================
+    // ==================== 一、94 个端点的三档分类（与审计表逐条对应） ====================
 
     /** 公开档 12 条（JwtAuthFilter 白名单）。 */
     private static final Set<String> PUBLIC = Set.of(
@@ -116,8 +118,11 @@ class EndpointAuthMatrixTest {
             "GET /api/health"
     );
 
-    /** 管理档 20 条（@RequireAdmin，类级或方法级）。 */
+    /** 管理档 26 条（@RequireAdmin，类级或方法级）。 */
     private static final Set<String> ADMIN = Set.of(
+            "GET /api/wallet/admin/page",
+            "POST /api/wallet/admin/adjust",
+            "GET /api/wallet/admin/reconcile",
             "GET /api/review/list",
             "POST /api/review/{id}/handle",
             "POST /api/survey/unsuspend/{id}",
@@ -143,8 +148,15 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 87 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 94 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
+            "GET /api/wallet",
+            "GET /api/wallet/pricing",
+            "GET /api/wallet/admin/page",
+            "GET /api/wallet/admin/reconcile",
+            "GET /api/wallet/transactions",
+            "POST /api/wallet/admin/adjust",
+            "POST /api/wallet/recharge",
             "DELETE /api/collaborator/self/{surveyId}",
             "POST /api/collaborator/self/{surveyId}/apply",
             "GET /api/review/list",
@@ -285,6 +297,17 @@ class EndpointAuthMatrixTest {
     @MockitoBean
     private SurveyCollaboratorMapper surveyCollaboratorMapper;
 
+    /**
+     * ★ H5 新增：钱包相关 Mapper 也要 mock。
+     *   SurveyService / UserService 现在依赖 WalletService（它再依赖这两个 Mapper），
+     *   不 mock 的话它们会拿真实代理去访问被 mock 掉的数据源 —— 一旦某条用例
+     *   走到 publish/register 的成功路径，就会以 500 收场，看起来像权限逻辑坏了。
+     */
+    @MockitoBean
+    private WalletMapper walletMapper;
+    @MockitoBean
+    private WalletTransactionMapper walletTransactionMapper;
+
     private String userToken;
     private String otherUserToken;
     private String adminToken;
@@ -361,18 +384,18 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 87；且公开 12 + 管理 23 + 其余 52")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 94；且公开 12 + 管理 26 + 其余 56")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(87, registered.size(),
+        assertEquals(94, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
         assertEquals(12, PUBLIC.size(), "公开档固定 12 条（新增 GET /api/survey/result/{shareCode}）");
-        assertEquals(23, ADMIN.size(), "管理档固定 23 条（@RequireAdmin 方法级 + 类级）");
-        assertEquals(87 - 12 - 23, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
+        assertEquals(26, ADMIN.size(), "管理档固定 26 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条）");
+        assertEquals(94 - 12 - 26, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
         // 两档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");
@@ -392,7 +415,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 非公开的 75 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
+    @DisplayName("★ 非公开的 82 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
     void protectedEndpoints_withoutToken_shouldBe401() throws Exception {
         for (String endpoint : ALL_ENDPOINTS) {
             if (PUBLIC.contains(endpoint)) {
@@ -405,7 +428,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 管理档 23 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
+    @DisplayName("★ 管理档 26 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
     void adminEndpoints_withNormalUser_shouldBe403Forbidden() throws Exception {
         for (String endpoint : ADMIN) {
             MvcResult r = mvc.perform(build(endpoint).header("Authorization", "Bearer " + userToken))
@@ -661,7 +684,17 @@ class EndpointAuthMatrixTest {
             "PUT /api/survey/set-template/{id}", "isTemplate=1"
     );
 
-    /** 把 "METHOD /api/xxx/{var}" 变成一次 MockMvc 请求（路径变量填 1，POST/PUT 带空 JSON）。 */
+    /**
+     * 带 @Valid 的 POST 端点：必须给一份**能通过校验**的 JSON，否则 400 会先于切面发生
+     * （参数校验在进入 Controller 方法之前，而 @RequireAdmin 切面在方法调用时）。
+     * ★ 这不是给端点开后门：它只用于"普通用户应被 403"的矩阵用例，body 合法才有机会走到切面。
+     */
+    private static final java.util.Map<String, String> REQUIRED_BODY = java.util.Map.of(
+            "POST /api/wallet/admin/adjust",
+            "{\"userId\":1,\"amount\":1,\"reason\":\"matrix\",\"idempotencyKey\":\"matrix:adjust\"}"
+    );
+
+    /** 把 "METHOD /api/xxx/{var}" 变成一次 MockMvc 请求（路径变量填 1，POST/PUT 带 JSON）。 */
     private MockHttpServletRequestBuilder build(String endpoint) {
         int sp = endpoint.indexOf(' ');
         String method = endpoint.substring(0, sp);
@@ -670,10 +703,11 @@ class EndpointAuthMatrixTest {
         if (query != null) {
             path = path + "?" + query;
         }
+        String body = REQUIRED_BODY.getOrDefault(endpoint, "{}");
         return switch (method) {
             case "GET" -> get(path);
-            case "POST" -> post(path).contentType(MediaType.APPLICATION_JSON).content("{}");
-            case "PUT" -> put(path).contentType(MediaType.APPLICATION_JSON).content("{}");
+            case "POST" -> post(path).contentType(MediaType.APPLICATION_JSON).content(body);
+            case "PUT" -> put(path).contentType(MediaType.APPLICATION_JSON).content(body);
             case "DELETE" -> delete(path);
             default -> throw new IllegalArgumentException("未覆盖的 HTTP 方法：" + endpoint);
         };

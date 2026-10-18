@@ -1,5 +1,59 @@
 <template>
   <div class="edit-page">
+    <div class="editor-shell">
+      <!-- 左侧题型面板（占整个页面最左，像问卷星）（像问卷星那样按类别摆，题型多了也直观；窄屏自动落到底部） -->
+      <aside class="add-sidebar">
+        <div class="add-bar-title">添加题目</div>
+        <div class="add-group">
+          <div class="add-group-title">选择题</div>
+          <div class="add-actions">
+            <button type="button" class="add-tile add-single" @click="addQuestion(1)">
+              <span class="add-ico"><el-icon><CircleCheck /></el-icon></span>
+              <span class="add-text"><b>单选题</b><i>只能选一个</i></span>
+            </button>
+            <button type="button" class="add-tile add-multi" @click="addQuestion(2)">
+              <span class="add-ico"><el-icon><Select /></el-icon></span>
+              <span class="add-text"><b>多选题</b><i>可选多个</i></span>
+            </button>
+            <button type="button" class="add-tile add-select" @click="addQuestion(5)">
+              <span class="add-ico"><el-icon><ArrowDown /></el-icon></span>
+              <span class="add-text"><b>下拉选择</b><i>选项多时更清爽</i></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="add-group">
+          <div class="add-group-title">填空题</div>
+          <div class="add-actions">
+            <button type="button" class="add-tile add-text-tile" @click="addQuestion(3)">
+              <span class="add-ico"><el-icon><EditPen /></el-icon></span>
+              <span class="add-text"><b>单行文本</b><i>一句话回答</i></span>
+            </button>
+            <button type="button" class="add-tile add-textarea" @click="addQuestion(4)">
+              <span class="add-ico"><el-icon><Memo /></el-icon></span>
+              <span class="add-text"><b>多行文本</b><i>建议与意见</i></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="add-group">
+          <div class="add-group-title">评分与日期</div>
+          <div class="add-actions">
+            <button type="button" class="add-tile add-rating" @click="addQuestion(6)">
+              <span class="add-ico"><el-icon><Star /></el-icon></span>
+              <span class="add-text"><b>评分题</b><i>1~5 星打分</i></span>
+            </button>
+            <button type="button" class="add-tile add-date" @click="addQuestion(7)">
+              <span class="add-ico"><el-icon><Calendar /></el-icon></span>
+              <span class="add-text"><b>日期</b><i>选择年月日</i></span>
+            </button>
+          </div>
+        </div>
+
+        <p class="add-sidebar-tip">更多题型（矩阵、排序、NPS）后续开放</p>
+      </aside>
+
+      <div class="editor-main">
     <!-- ★ 回收站里的问卷禁止保存/发布：点下去**必然 400**（后端 OwnershipGuard.requireNotInRecycleBin /
           SurveyController.update / QuestionController.save 三处都会拦），所以这里明确告知并给恢复入口。 -->
     <el-alert
@@ -66,9 +120,9 @@
     <!-- 顶部操作栏 -->
     <div class="edit-header">
       <div>
-        <h2 class="page-title">问卷编辑器</h2>
+        <h2 class="page-title">{{ isTemplateMode ? '模板编辑器' : '问卷编辑器' }}</h2>
         <p class="page-subtitle">
-          ID #{{ surveyId }} · 题目结构变化会自动生成历史版本
+          ID #{{ surveyId }} · {{ isTemplateMode ? '模板内容会直接展示在模板广场' : '题目结构变化会自动生成历史版本' }}
           <span class="save-state" :class="saveStateClass">{{ saveStateText }}</span>
         </p>
       </div>
@@ -80,18 +134,24 @@
              禁用会让点击"完全没反应"，用户根本不知道发生了什么（实测就是这么被卡住的）。
              现在改成：按钮可点，点下去由 saveQuestions 统一说明"为什么不能保存"。 -->
         <el-button type="primary" :disabled="inRecycleBin || saving || !canEditSurvey" :loading="saving" @click="saveQuestions">保存</el-button>
-        <!-- ★ status 为 0 或 2 都要给发布按钮：后端支持"延长（或清空）结束时间后重新发布"。
-              已结束但结束时间仍在过去时，按钮变成"重新发布"并禁用（否则用户点了只吃 400），
-              并在下面给出"请先把结束时间改到未来"的提示。 -->
-        <el-button
-          v-if="surveyInfo.status === 0 || surveyInfo.status === 2"
-          type="success"
-          :disabled="inRecycleBin || saving || !canEditSurvey || !canPublishSurvey || (surveyInfo.status === 2 && !endExtended)"
-          @click="publishSurvey"
-        >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
-        <el-tag v-else-if="surveyInfo.status === 1" type="success" effect="light" round>已发布（可继续修改）</el-tag>
-        <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
-        <el-button :disabled="inRecycleBin || !canEditSurvey" @click="settingsVisible = true">设置</el-button>
+        <!-- ★ 模板编辑模式：不出现"发布"与"设置"——
+             模板只是在模板广场里被复制，status 与答题密码/限收/公开结果都不会带到副本
+             （copySurvey 只拷 title/description/题目/选项），摆出来只会让管理员误以为它们有用。 -->
+        <el-tag v-if="isTemplateMode" type="info" effect="light" round>模板（无需发布）</el-tag>
+        <template v-else>
+          <!-- ★ status 为 0 或 2 都要给发布按钮：后端支持"延长（或清空）结束时间后重新发布"。
+                已结束但结束时间仍在过去时，按钮变成"重新发布"并禁用（否则用户点了只吃 400），
+                并在下面给出"请先把结束时间改到未来"的提示。 -->
+          <el-button
+            v-if="surveyInfo.status === 0 || surveyInfo.status === 2"
+            type="success"
+            :disabled="inRecycleBin || saving || !canEditSurvey || !canPublishSurvey || (surveyInfo.status === 2 && !endExtended)"
+            @click="publishSurvey"
+          >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
+          <el-tag v-else-if="surveyInfo.status === 1" type="success" effect="light" round>已发布（可继续修改）</el-tag>
+          <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
+          <el-button :disabled="inRecycleBin || !canEditSurvey" @click="settingsVisible = true">设置</el-button>
+        </template>
         <!-- 预览：按填写者视角看当前编辑态（不保存、不产生答卷） -->
         <el-button :disabled="questions.length === 0" @click="openPreview">预览</el-button>
         <!-- 历史版本：回收站里禁用（回滚走的是"全量覆盖式保存"，在回收站问卷上执行会让历史答卷的 question_id 悬空） -->
@@ -132,11 +192,14 @@
       </el-form>
     </el-card>
 
-    <!-- 题目列表 -->
+    <!-- 题目列表（右侧主区） -->
+    <div class="editor-body">
+
+    <div class="editor-questions">
     <div v-if="questions.length === 0" class="empty-questions">
       <div class="empty-emoji">🧩</div>
       <div class="empty-title">还没有题目</div>
-      <div class="empty-desc">从下方选择题型，添加第一道题</div>
+      <div class="empty-desc">从左侧选择题型，添加第一道题</div>
     </div>
 
     <el-card
@@ -216,40 +279,9 @@
       </div>
     </el-card>
 
-    <!-- 底部添加题目 -->
-    <div class="add-bar">
-      <div class="add-bar-title">添加题目</div>
-      <div class="add-actions">
-        <button type="button" class="add-tile add-single" @click="addQuestion(1)">
-          <span class="add-ico"><el-icon><CircleCheck /></el-icon></span>
-          <span class="add-text"><b>单选题</b><i>只能选一个</i></span>
-        </button>
-        <button type="button" class="add-tile add-multi" @click="addQuestion(2)">
-          <span class="add-ico"><el-icon><Select /></el-icon></span>
-          <span class="add-text"><b>多选题</b><i>可选多个</i></span>
-        </button>
-        <button type="button" class="add-tile add-select" @click="addQuestion(5)">
-          <span class="add-ico"><el-icon><ArrowDown /></el-icon></span>
-          <span class="add-text"><b>下拉选择</b><i>选项多时更清爽</i></span>
-        </button>
-        <button type="button" class="add-tile add-text-tile" @click="addQuestion(3)">
-          <span class="add-ico"><el-icon><EditPen /></el-icon></span>
-          <span class="add-text"><b>单行文本</b><i>一句话回答</i></span>
-        </button>
-        <button type="button" class="add-tile add-textarea" @click="addQuestion(4)">
-          <span class="add-ico"><el-icon><Memo /></el-icon></span>
-          <span class="add-text"><b>多行文本</b><i>建议与意见</i></span>
-        </button>
-        <button type="button" class="add-tile add-rating" @click="addQuestion(6)">
-          <span class="add-ico"><el-icon><Star /></el-icon></span>
-          <span class="add-text"><b>评分题</b><i>1~5 星打分</i></span>
-        </button>
-        <button type="button" class="add-tile add-date" @click="addQuestion(7)">
-          <span class="add-ico"><el-icon><Calendar /></el-icon></span>
-          <span class="add-text"><b>日期</b><i>选择年月日</i></span>
-        </button>
-      </div>
-    </div>
+    </div><!-- /editor-questions -->
+
+    </div><!-- /editor-body -->
 
     <!-- ===== 历史版本对话框 ===== -->
     <el-dialog v-model="versionVisible" title="历史版本" width="820px">
@@ -318,6 +350,13 @@
 
     <!-- ===== 问卷设置（答题密码 / 限收份数 / 提交后展示 / 公开结果） ===== -->
     <el-dialog v-model="settingsVisible" title="问卷设置" width="560px">
+      <el-alert
+        class="mb-16"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="答题密码 / 限收份数 / 公开结果 / IP 限制 属「高级设置包」：首次启用扣 1 点，之后开关不再扣费。"
+      />
       <el-form label-width="110px" class="settings-form">
         <el-form-item label="答题密码">
           <el-input
@@ -375,8 +414,19 @@
             >预览公开结果页 →</el-button>
           </div>
           <div class="setting-hint">
-            开启后，任何拿到分享链接的人都能查看汇总图表（**不含**填空原文）。
+            开启后，任何拿到分享链接的人都能查看汇总图表（不含填空原文）。
             需要先点「保存」再预览。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="IP 限制">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.ipLimit" :active-value="1" :inactive-value="0" />
+            <el-tag v-if="surveyInfo.ipLimit === 1" type="warning" size="small">同一 IP 只能提交一次</el-tag>
+          </div>
+          <div class="setting-hint">
+            防刷用：开启后同一网络出口只能提交一份答卷。
+            ★ 同一公司/校园网/NAT 后的多个真实用户会被当成同一个人，请确认场景后再开启。
           </div>
         </el-form-item>
       </el-form>
@@ -519,6 +569,8 @@
         <el-button type="primary" @click="openSharePage">打开填写页</el-button>
       </template>
     </el-dialog>
+      </div><!-- /editor-main -->
+    </div><!-- /editor-shell -->
   </div>
 </template>
 
@@ -694,6 +746,15 @@ export default {
       return this.surveyInfo.lifecycle === 'SUSPENDED'
     },
     /**
+     * 是否「模板编辑模式」。
+     * ★ 从 /admin/templates 进入（路由 meta.fromTemplate）：
+     *   · 不显示「立即发布」「设置」——模板不发布，这些设置也不会被复制到副本；
+     *   · 返回按钮回模板管理，而不是跳进用户侧的「我的问卷」（管理员在那里是 0 份空态）。
+     */
+    isTemplateMode() {
+      return this.$route.meta.fromTemplate === true
+    },
+    /**
      * 「已结束」的问卷是否已经把截止时间改到了未来（或清空）。
      * ★ 与后端 SurveyService.publish 的判定保持一致：endTime 为 null 或晚于当前时间 → 允许重新发布。
      */
@@ -791,6 +852,8 @@ export default {
           thankText: data.thankText || '',
           redirectUrl: data.redirectUrl || '',
           publicResult: data.publicResult === 1 ? 1 : 0,
+          // ★ IP 限制（高级设置包）：默认 0，老后端不返回该字段时也不会误开
+          ipLimit: data.ipLimit === 1 ? 1 : 0,
           // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
@@ -1503,7 +1566,9 @@ export default {
     },
 
     goBack() {
-      this.$router.push('/my/surveys')
+      // ★ 模板编辑模式回模板管理：不要跳进用户侧的「我的问卷」——
+      //   管理员在那里只会看到 0 份问卷的空态，也把"模板维护"和"用户问卷"两条边界混在一起。
+      this.$router.push(this.isTemplateMode ? '/admin/templates' : '/my/surveys')
     },
 
     /** ★ 回收站提示里的"去回收站"入口（管理员与普通用户看到的都是自己的回收站页） */
@@ -1516,8 +1581,23 @@ export default {
 
 <style scoped>
 .edit-page {
-  max-width: 960px;
+  /* ★ 编辑器是**独立全屏页面**（不套 AdminLayout）：题型面板要占整个页面最左，
+     像问卷星那样左边工具、右边画布。页面自己负责背景与内边距。 */
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 18px 22px 32px;
+  background: #f5f7fb;
+}
+.editor-shell {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  max-width: 1520px;
   margin: 0 auto;
+}
+.editor-main {
+  flex: 1;
+  min-width: 0;
 }
 .page-subtitle {
   margin: 6px 0 0 15px;
@@ -1679,14 +1759,23 @@ export default {
   margin: 12px 0 0 36px;
 }
 
-/* ==================== 底部添加题目 ==================== */
-.add-bar {
+/* ==================== 右侧题型面板 ==================== */
+/* 布局：左侧 sticky 题型栏（固定宽）+ 右侧题目列表（可伸缩）；窄屏时题型栏落到底部并横向排列 */
+.editor-body {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
-  margin-top: 20px;
-  padding: 18px 20px;
+  gap: 16px;
+  align-items: flex-start;
+}
+.editor-questions {
+  flex: 1;
+  min-width: 0;
+}
+.add-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 16px;
+  padding: 14px;
   background: #fff;
   border: 1px solid var(--stroke);
   border-radius: var(--r-lg);
@@ -1697,11 +1786,44 @@ export default {
   font-weight: 600;
   color: var(--ink-2);
 }
-/* 7 种题型：网格自动换行，不再挤成一行小方块 */
+.add-group {
+  margin-top: 12px;
+}
+.add-group-title {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
 .add-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.add-sidebar-tip {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+@media (max-width: 1150px) {
+  /* 窄屏：题目在前、题型面板在后（手机端先看内容，再往下加题） */
+  .editor-shell {
+    flex-direction: column;
+  }
+  .editor-main {
+    order: 1;
+    width: 100%;
+  }
+  .add-sidebar {
+    order: 2;
+    width: 100%;
+    position: static;
+    margin-top: 16px;
+  }
+  .add-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
 }
 .add-tile {
   display: flex;

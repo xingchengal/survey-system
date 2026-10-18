@@ -13,6 +13,7 @@ import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyCollaboratorService;
 import com.survey.service.SurveyService;
 import com.survey.service.UserService;
+import com.survey.service.WalletService;
 import com.survey.common.OwnershipGuard;
 import com.survey.common.Role;
 import io.swagger.v3.oas.annotations.Operation;
@@ -75,6 +76,10 @@ public class SurveyController {
     @Autowired
     private UserService userService;
 
+    /** H5：首次启用高级设置包时扣费（见 update 方法）。 */
+    @Autowired
+    private WalletService walletService;
+
     /** 公开结果页要复用统计（只读），直接调 AnswerService */
     @Autowired
     private AnswerService answerService;
@@ -126,6 +131,16 @@ public class SurveyController {
         //   移入回收站的问卷照样能改标题/时间，与发布、按 id 读、提交答卷那三处的口径不一致
         //   （那三处都挡了），所以这里必须过 requireNotInRecycleBin。
         OwnershipGuard.requireNotInRecycleBin(old, "编辑");
+
+        // ★ H5：**首次**启用「高级设置包」（答题密码 / 限收份数 / 公开结果）扣 1 点。
+        //   · 只判断 old→new 的"从无到有"，之后改来改去不再扣（幂等键 advanced:{id} 兜底）；
+        //   · 管理员不扣（管理动作不该消耗用户/自己的额度）；
+        //   · 余额不足时这次保存整体失败 —— 不会出现"设置开了、钱没扣"。
+        boolean advancedNow = hasAdvancedSettings(survey);
+        boolean advancedBefore = hasAdvancedSettings(old);
+        if (!Role.isAdmin(role) && advancedNow && !advancedBefore) {
+            walletService.chargeAdvancedSettings(old.getId(), old.getUserId());
+        }
 
         // ★ 关键不变量由 SQL 承担，不靠这里的回填：SurveyMapper.update 的 SET 列表里
         //   **根本没有** user_id / status / share_code —— 即使忘了回填，这次更新也不可能碰到它们。
@@ -489,5 +504,22 @@ public class SurveyController {
         int r = surveyService.setTemplate(id, isTemplate, category);
         if (r <= 0) throw new BizException("操作失败");
         return "操作成功";
+    }
+
+    /**
+     * 是否启用了任一「高级设置包」项：答题密码 / 限收份数 / 公开结果 / IP 限制。
+     * ★ 判断口径必须与 WalletFeature.ADVANCED_SETTINGS 的说明一致；
+     *   以后若把新的设置项纳入这个包，**两处一起改**（这里是唯一判定处，钱包文档里也写了）。
+     */
+    private static boolean hasAdvancedSettings(Survey survey) {
+        if (survey == null) {
+            return false;
+        }
+        boolean hasPassword = survey.getAccessPassword() != null
+                && !survey.getAccessPassword().isBlank();
+        boolean hasLimit = survey.getMaxResponses() != null && survey.getMaxResponses() > 0;
+        boolean publicResult = survey.getPublicResult() != null && survey.getPublicResult() == 1;
+        boolean ipLimit = survey.getIpLimit() != null && survey.getIpLimit() == 1;
+        return hasPassword || hasLimit || publicResult || ipLimit;
     }
 }

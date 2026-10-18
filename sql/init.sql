@@ -233,6 +233,7 @@ CREATE TABLE `t_survey` (
   `thank_text` varchar(500) DEFAULT NULL COMMENT '提交后的感谢语：NULL=默认「提交成功，感谢您的参与」',
   `redirect_url` varchar(500) DEFAULT NULL COMMENT '提交后跳转链接：NULL=不跳转；只允许 http/https',
   `public_result` tinyint NOT NULL DEFAULT '0' COMMENT '是否公开结果页：0=不公开，1=开启（匿名可访问 /r/{shareCode}）',
+  `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',
   PRIMARY KEY (`id`),
@@ -382,5 +383,59 @@ CREATE TABLE `t_survey_review` (
   KEY `idx_survey` (`survey_id`),
   KEY `idx_reporter` (`reporter_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷举报表';
+
+-- ==================== IP 限制（高级设置包） ====================
+-- ★ 唯一键(survey_id, ip) 才是并发防线；记录与答卷同事务写入。
+CREATE TABLE `t_survey_ip` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `survey_id` int NOT NULL COMMENT '问卷 id',
+  `ip` varchar(64) NOT NULL COMMENT '提交方连接 IP（不看 X-Forwarded-For，防伪造绕过）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_survey_ip` (`survey_id`, `ip`),
+  KEY `idx_survey_ip_survey` (`survey_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷提交 IP（IP 限制用）';
+
+-- ==================== H5 额度钱包（模拟付费） ====================
+-- ★ amount 有符号（入账正 / 出账负），对账口径：SUM(amount) = balance。
+-- ★ idempotency_key 全表唯一，扣款/退款/充值/赠送都靠它去重。
+CREATE TABLE `t_wallet` (
+  `user_id` int NOT NULL COMMENT '用户 id（一人一包）',
+  `balance` int NOT NULL DEFAULT 0 COMMENT '可用额度（点）',
+  `frozen` int NOT NULL DEFAULT 0 COMMENT '冻结额度（预留；当前业务未使用）',
+  `version` int NOT NULL DEFAULT 0 COMMENT '版本号（辅助排查，不参与扣减判定）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='额度钱包';
+
+CREATE TABLE `t_wallet_transaction` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL,
+  `type` varchar(32) NOT NULL COMMENT 'SIGNUP_BONUS / RECHARGE / PUBLISH / REFUND / ADMIN_ADJUST',
+  `amount` int NOT NULL COMMENT '有符号：入账为正、出账为负',
+  `balance_after` int NOT NULL DEFAULT 0 COMMENT '本笔之后的余额快照',
+  `biz_id` varchar(64) DEFAULT NULL COMMENT '关联业务（如 surveyId）',
+  `idempotency_key` varchar(128) NOT NULL COMMENT '幂等键（全表唯一）',
+  `remark` varchar(200) DEFAULT NULL,
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_wallet_tx_idem` (`idempotency_key`),
+  KEY `idx_wallet_tx_user` (`user_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='额度流水';
+
+-- 现有用户初始化钱包并赠送 10 点（新机器建库时同样生效；幂等）
+INSERT IGNORE INTO `t_wallet` (`user_id`, `balance`, `version`)
+SELECT `id`, 10, 1 FROM `t_user` WHERE `deleted_at` IS NULL;
+
+INSERT IGNORE INTO `t_wallet_transaction`
+  (`user_id`, `type`, `amount`, `balance_after`, `biz_id`, `idempotency_key`, `remark`)
+SELECT w.`user_id`, 'SIGNUP_BONUS', 10, w.`balance`, NULL, CONCAT('signup:', w.`user_id`),
+       '初始化：赠送 10 点'
+FROM `t_wallet` w
+WHERE w.`balance` = 10 AND w.`version` = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM `t_wallet_transaction` x WHERE x.`idempotency_key` = CONCAT('signup:', w.`user_id`)
+  );
 
 SET FOREIGN_KEY_CHECKS = 1;

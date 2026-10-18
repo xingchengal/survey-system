@@ -33,6 +33,23 @@ const routes = [
     meta: { title: '公开结果', public: true }
   },
 
+  // ===== 编辑器：独立全屏布局（不套 AdminLayout）=====
+  // ★ 需求：题型面板要占**整个网页最左**（像问卷星），所以编辑器不能再放进
+  //   AdminLayout 的 el-main 里（那样最左永远是系统导航栏）。
+  //   这两个路由放在顶层、不带父布局，由 SurveyEdit 自己渲染「左侧题型面板 + 右侧编辑区」。
+  {
+    path: '/my/surveys/:id/edit',
+    name: 'SurveyEdit',
+    component: () => import('../views/SurveyEdit.vue'),
+    meta: { title: '编辑问卷', roles: ['user', 'admin'] }
+  },
+  {
+    path: '/admin/templates/:id/edit',
+    name: 'TemplateEdit',
+    component: () => import('../views/SurveyEdit.vue'),
+    meta: { title: '编辑模板', roles: ['admin'], fromTemplate: true }
+  },
+
   // ===== 后台页面 =====
   {
     path: '/',
@@ -72,6 +89,13 @@ const routes = [
         meta: { title: '全部问卷', roles: ['admin'] }
       },
       {
+        // 模板管理：集中维护 is_template = 1 的问卷（改分类 / 编辑内容 / 取消模板 / 删除）
+        path: 'admin/templates',
+        name: 'TemplateManage',
+        component: () => import('../views/TemplateManage.vue'),
+        meta: { title: '模板管理', roles: ['admin'] }
+      },
+      {
         path: 'statistics',
         name: 'SystemStatistics',
         component: () => import('../views/SystemStatistics.vue'),
@@ -94,6 +118,13 @@ const routes = [
         name: 'ReviewManage',
         component: () => import('../views/ReviewManage.vue'),
         meta: { title: '举报审核', roles: ['admin'] }
+      },
+      {
+        // 钱包管理：用户余额、手动调整、对账（H5）
+        path: 'admin/wallets',
+        name: 'WalletManage',
+        component: () => import('../views/WalletManage.vue'),
+        meta: { title: '钱包管理', roles: ['admin'] }
       },
       {
         path: 'admin/demo',
@@ -128,12 +159,6 @@ const routes = [
         meta: { title: '我的问卷', roles: ['user', 'admin'] }
       },
       {
-        path: 'my/surveys/:id/edit',
-        name: 'SurveyEdit',
-        component: () => import('../views/SurveyEdit.vue'),
-        meta: { title: '编辑问卷', roles: ['user', 'admin'] }
-      },
-      {
         path: 'my/surveys/:id/statistics',
         name: 'SurveyStatistics',
         component: () => import('../views/SurveyStatistics.vue'),
@@ -144,6 +169,13 @@ const routes = [
         name: 'MyRecycle',
         component: () => import('../views/Recycle.vue'),
         meta: { title: '回收站', roles: ['user', 'admin'] }
+      },
+      {
+        // 我的钱包（H5）：普通用户看余额/流水/模拟充值；管理员也可查看自己的钱包
+        path: 'my/wallet',
+        name: 'MyWallet',
+        component: () => import('../views/MyWallet.vue'),
+        meta: { title: '我的钱包', roles: ['user', 'admin'] }
       }
     ]
   }

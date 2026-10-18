@@ -13,12 +13,15 @@ import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
+import com.survey.service.WalletService;
 import com.survey.service.SurveyAccessService;
 import com.survey.service.QuestionService;
 import com.survey.service.SurveyService;
+import com.survey.util.WebUtils;
 import com.survey.common.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -116,6 +119,14 @@ public class AnswerController {
     private AnswerQualityService answerQualityService;
 
     /**
+     * H5 额度钱包：导出是进阶功能，每次扣 1 点（管理员免费）。
+     * ★ 扣费放在"归属校验 + 上限预检"之后、真正读数据之前：
+     *   越权/超限的请求不该扣钱，扣了钱却没导出更不该发生。
+     */
+    @Autowired
+    private WalletService walletService;
+
+    /**
      * ★ 归属校验：确认当前登录用户就是这份问卷的作者（管理员放行）。
      * 这 6 个“查看答卷数据”的接口若只验“是否登录”、不验“这份问卷是不是你的”，
      * 任何登录用户只要改一下 URL 里的 id，就能看别人的答卷数量、选项分布、
@@ -168,7 +179,8 @@ public class AnswerController {
                          @RequestBody List<AnswerDetail> details,
                          @RequestHeader(value = "X-User-Id", required = false) Integer userId,
                          @RequestHeader(value = "X-Survey-Password", required = false) String password,
-                         @RequestParam(value = "durationMs", required = false) Long durationMs) {
+                         @RequestParam(value = "durationMs", required = false) Long durationMs,
+                         HttpServletRequest request) {
         // ★ 与下面 submitByShareCode 保持一致：只有【已发布】(status=1) 的问卷才收答卷。
         //   （"回收站里的问卷不能收答卷"由 AnswerService.submit 的四道校验兜住 —— 不变量收口在 Service，
         //     这里的判断只是为了给出更早、更明确的 400 文案。）
@@ -177,7 +189,9 @@ public class AnswerController {
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
         // ★ 答题密码：提交同样要校验（不能只拦"加载题目"，否则直接 POST 就能塞答卷）
         surveyService.requireAccessPassword(survey, password);
-        answerService.submit(surveyId, userId, details, clampDuration(durationMs));
+        // ★ IP 限制用**连接 IP**（不看 X-Forwarded-For，防止换个请求头绕过）
+        answerService.submit(surveyId, userId, details, clampDuration(durationMs),
+                WebUtils.getConnectionIp(request));
         return "提交成功";
     }
 
@@ -186,12 +200,14 @@ public class AnswerController {
     public String submitByShareCode(@PathVariable String shareCode,
                                     @RequestBody List<AnswerDetail> details,
                                     @RequestHeader(value = "X-Survey-Password", required = false) String password,
-                                    @RequestParam(value = "durationMs", required = false) Long durationMs) {
+                                    @RequestParam(value = "durationMs", required = false) Long durationMs,
+                                    HttpServletRequest request) {
         Survey survey = surveyService.getByShareCode(shareCode);
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
         surveyService.requireAccessPassword(survey, password);
-        answerService.submit(survey.getId(), null, details, clampDuration(durationMs));
+        answerService.submit(survey.getId(), null, details, clampDuration(durationMs),
+                WebUtils.getConnectionIp(request));
         return "提交成功";
     }
 
@@ -336,6 +352,12 @@ public class AnswerController {
         if (detailCount > MAX_EXPORT_DETAILS) {
             throw new BizException("该问卷的答卷明细共 " + detailCount + " 行，单次最多导出 "
                     + MAX_EXPORT_DETAILS + " 行。建议分批导出（或直接在数据库侧导出）");
+        }
+
+        // ★ H5：导出是进阶功能，每次 1 点。放在所有"拒绝条件"之后，保证被拒的请求不扣钱。
+        //   管理员免费（管理动作不该消耗自己的额度）。
+        if (!Role.isAdmin(role)) {
+            walletService.chargeForExport(surveyId, userId);
         }
 
         List<Question> questions = questionService.getQuestionsBySurveyId(surveyId);

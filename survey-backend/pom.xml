@@ -165,6 +165,10 @@
                                ./mvnw -o "-Dtest=SurveyFlowIntegrationTest" test
                              CI 由 .github/workflows/ci.yml 的 backend-integration 作业提供 MySQL。 -->
                         <exclude>**/SurveyFlowIntegrationTest.java</exclude>
+                        <!-- ★ H5 真库并发测试（50 并发扣费不超扣 / 同幂等键只扣一次 / 对账一致）。
+                             同样需要独立的 survey_db_test 与 TEST_DB_PASSWORD：
+                               ./mvnw -o "-Dtest=WalletConcurrencyTest" test -->
+                        <exclude>**/WalletConcurrencyTest.java</exclude>
                     </excludes>
                 </configuration>
             </plugin>

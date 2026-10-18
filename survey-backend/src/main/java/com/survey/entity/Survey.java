@@ -204,6 +204,15 @@ public class Survey {
     public Integer getPublicResult() { return publicResult; }
     public void setPublicResult(Integer publicResult) { this.publicResult = publicResult; }
 
+    /**
+     * IP 限制：0=关闭，1=同一 IP 只能提交一次（属于「高级设置包」）。
+     * ★ 默认 null 按 0 处理（老数据/老客户端不传时不会意外开启限制）。
+     */
+    private Integer ipLimit;
+
+    public Integer getIpLimit() { return ipLimit; }
+    public void setIpLimit(Integer ipLimit) { this.ipLimit = ipLimit; }
+
     private Integer isTemplate;       // 0=普通问卷，1=模板
     private String templateCategory;  // 模板分类
 

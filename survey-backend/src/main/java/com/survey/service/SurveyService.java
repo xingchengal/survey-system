@@ -78,6 +78,14 @@ public class SurveyService {
     private StatsCacheService statsCacheService;
 
     /**
+     * H5 额度钱包：发布扣费 / 移入回收站退款。
+     * ★ 只在 publish() 与 moveToRecycle() 两处调用：
+     *   前者在同一事务里"先扣费、后改状态"，余额不足会连同状态一起回滚。
+     */
+    @Autowired
+    private WalletService walletService;
+
+    /**
      * 恢复上架申请的收件人来源（所有有效管理员）。
      * ★ 只用 findAdminIds()，不要在这里再写一条 `SELECT ... role='admin'` ——
      *   已注销管理员必须被排除，那个过滤条件只应有一份。
@@ -489,7 +497,13 @@ public class SurveyService {
      *
      * @param surveyId 问卷 id
      * @return 发布后的问卷（含分享码）；★ 问卷不存在时**抛 BizException**（不是返回 null）
+     *
+     * ★ H5：发布要扣 1 点额度（幂等键 publish:{surveyId}，一份问卷只扣一次）。
+     *   扣费与改状态在**同一事务**里：余额不足时状态不会变成"已发布"，
+     *   前端拿到的是一句"额度不足…请到我的钱包充值"，而不是"发布成功了一半"。
+     *   ★ 重新发布（已结束再开）不会重复扣：幂等键已存在，charge 直接返回原流水。
      */
+    @Transactional
     public Survey publish(Integer surveyId) {
         Survey survey = surveyMapper.findById(surveyId);
         // ★ 目标不存在时**抛异常**而不是 return null：返回 null 会让调用方拿到一个"看起来正常"的
@@ -530,6 +544,9 @@ public class SurveyService {
         }
         // ★ 只改 status + share_code —— update() 的 SQL 已不含这两个字段
         //   （把"谁能改状态"收敛到这一个专用方法，见 SurveyMapper 的注释）
+        // ★ H5：先扣费再改状态。同一事务内，扣费失败（余额不足）会整体回滚，
+        //   不会出现"扣了钱没发布"或"发布了没扣钱"。
+        walletService.chargeForPublish(survey.getId(), survey.getUserId());
         survey.setStatus(SurveyStatus.PUBLISHED.code());
         surveyMapper.updateStatusAndShareCode(survey.getId(), SurveyStatus.PUBLISHED.code(), survey.getShareCode());
         return survey;
@@ -540,9 +557,19 @@ public class SurveyService {
     /**
      * 移入回收站（逻辑删除，deleted=1）。
      * ★ 同时记下 deletedBy / deletedByName，回收站页面才能显示"谁删的"。
+     *
+     * ★ H5：删除给作者退 1 点（只有"确实扣过发布费"的问卷才退；幂等键 refund:{surveyId}）。
+     *   恢复回收站后再删除不会二次退款 —— 一次收费终身有效。
+     *   退款与删除同事务：删除成功才退，退失败则删除回滚（不会出现"退了钱没删"）。
      */
+    @Transactional
     public int moveToRecycle(Integer id, Integer userId) {
-        return surveyMapper.moveToRecycle(id, userId);
+        Survey survey = surveyMapper.findById(id);
+        int rows = surveyMapper.moveToRecycle(id, userId);
+        if (rows > 0 && survey != null) {
+            walletService.refundForSurvey(id, survey.getUserId());
+        }
+        return rows;
     }
 
     /** 从回收站恢复（deleted=0，并清空 deletedBy 信息）。 */
@@ -1009,6 +1036,11 @@ public class SurveyService {
                 if (existingCode == null || existingCode.isBlank()) {
                     s.setShareCode(generateShareCode());
                 }
+                // ★ H5：定时自动发布同样要扣额度（否则"定时发布"就成了免费通道）。
+                //   先扣费再改状态；余额不足会抛异常 → 本条跳过，下一分钟重试（不会扣两次，
+                //   幂等键 publish:{id} 保证扣过就不再扣）。作者会在「我的钱包」看到余额，
+                //   也能从日志/发布失败提示里知道原因。
+                walletService.chargeForPublish(s.getId(), s.getUserId());
                 s.setStatus(SurveyStatus.PUBLISHED.code());
                 surveyMapper.updateStatusAndShareCode(s.getId(), SurveyStatus.PUBLISHED.code(), s.getShareCode());
                 LOG.info("⏰ 自动发布问卷：{} (id={})", s.getTitle(), s.getId());

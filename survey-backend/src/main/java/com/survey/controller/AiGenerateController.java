@@ -2,9 +2,12 @@ package com.survey.controller;
 
 import com.survey.common.BizException;
 import com.survey.service.AiGenerateService;
+import com.survey.service.WalletService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -44,8 +47,18 @@ import java.util.Map;
 @RequestMapping("/api/ai")
 public class AiGenerateController {
 
+    private static final Logger LOG = LoggerFactory.getLogger(AiGenerateController.class);
+
     @Autowired
     private AiGenerateService aiGenerateService;
+
+    /**
+     * H5 额度钱包：AI 生成是进阶功能（3 点）。
+     * ★ 预扣 + 失败退回：扣费在调模型**之前**，模型/落库失败时原路退回。
+     *   这样"余额不足"不会白白消耗一次 AI 调用，也不会出现"生成成功却扣不到钱"。
+     */
+    @Autowired
+    private WalletService walletService;
 
     /**
      * 注入请求对象只为取 uri / method / 真实连接 IP 传给 Service。
@@ -65,9 +78,24 @@ public class AiGenerateController {
             throw new BizException("请输入问卷主题");
         }
 
-        int surveyId = aiGenerateService.generateAndSave(
-                userId, topic, extra,
-                httpRequest.getRequestURI(), httpRequest.getMethod(), httpRequest.getRemoteAddr());
+        // ★ H5：先预扣 3 点（余额不足在这里就 400，不会去调模型）。
+        String chargeKey = walletService.chargeForAi(userId);
+        int surveyId;
+        try {
+            surveyId = aiGenerateService.generateAndSave(
+                    userId, topic, extra,
+                    httpRequest.getRequestURI(), httpRequest.getMethod(), httpRequest.getRemoteAddr());
+        } catch (RuntimeException e) {
+            // ★ 生成失败（上游超时/429/落库异常）→ 原路退回，用户不白付。
+            //   退款本身失败只记日志，不掩盖原始异常。
+            try {
+                walletService.refundAi(userId, chargeKey);
+            } catch (Exception refundError) {
+                LOG.error("AI 生成失败后退款也失败：userId={} chargeKey={} —— {}",
+                        userId, chargeKey, refundError.getMessage(), refundError);
+            }
+            throw e;
+        }
 
         Map<String, Object> result = new HashMap<>();
         result.put("success", true);

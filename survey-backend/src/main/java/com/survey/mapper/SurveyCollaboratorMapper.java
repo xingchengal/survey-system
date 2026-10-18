@@ -65,6 +65,14 @@ public interface SurveyCollaboratorMapper {
             + "GROUP BY survey_id</script>")
     List<Map<String, Object>> countBySurveyIds(@Param("ids") List<Integer> ids);
 
+    /**
+     * 某份问卷当前有几个协作者（邀请前判断是否已超过免费名额）。
+     * ★ 只用于"名额收费"的判定；并发下两个邀请可能都读到 2，属于可接受的轻微超发
+     *   （最多多一个免费名额），不影响扣费幂等。
+     */
+    @Select("SELECT COUNT(*) FROM t_survey_collaborator WHERE survey_id = #{surveyId}")
+    int countBySurvey(@Param("surveyId") Integer surveyId);
+
     @Insert("INSERT INTO t_survey_collaborator (survey_id, user_id, collaborator_role, created_by) "
             + "VALUES (#{surveyId}, #{userId}, #{collaboratorRole}, #{createdBy})")
     int insert(@Param("surveyId") Integer surveyId, @Param("userId") Integer userId,

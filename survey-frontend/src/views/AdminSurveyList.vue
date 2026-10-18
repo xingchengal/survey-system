@@ -108,6 +108,9 @@
         <p class="text-secondary">
           「{{ templateForm.title }}」将出现在<strong>所有登录用户</strong>都能看到的模板广场，并可被任何人「从模板创建」。
         </p>
+        <p class="text-secondary" style="margin-top: 6px;">
+          设为模板后可到「模板管理」里改分类、编辑内容或取消模板。
+        </p>
         <el-form label-width="90px" class="mt-12">
           <el-form-item label="模板分类">
             <el-select v-model="templateForm.category" placeholder="请选择或输入分类" allow-create filterable class="w-full">

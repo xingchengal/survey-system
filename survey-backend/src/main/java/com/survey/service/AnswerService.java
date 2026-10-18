@@ -16,6 +16,7 @@ import com.survey.mapper.AnswerDetailMapper;
 import com.survey.mapper.AnswerMapper;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
+import com.survey.mapper.SurveyIpMapper;
 import com.survey.mapper.SurveyMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
@@ -132,6 +133,10 @@ public class AnswerService {
     @Autowired
     private AnswerQualityService answerQualityService;
 
+    /** IP 限制：记录"哪个 IP 已经提交过某份问卷"（唯一键兜底并发）。 */
+    @Autowired
+    private SurveyIpMapper surveyIpMapper;
+
     /**
      * 提交一份答卷。
      *
@@ -154,7 +159,7 @@ public class AnswerService {
      */
     @Transactional
     public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details) {
-        doSubmit(surveyId, userId, details, null);
+        doSubmit(surveyId, userId, details, null, null);
     }
 
     /**
@@ -168,10 +173,23 @@ public class AnswerService {
      */
     @Transactional
     public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
-        doSubmit(surveyId, userId, details, durationMs);
+        doSubmit(surveyId, userId, details, durationMs, null);
     }
 
-    private void doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
+    /**
+     * 提交答卷（带耗时 + 客户端 IP）—— 两个 HTTP 入口用这个重载。
+     *
+     * @param clientIp 连接 IP（{@code WebUtils.getConnectionIp}，**不看 X-Forwarded-For**）。
+     *                 只有问卷开启「IP 限制」时才会用到；为 null 时若问卷要求 IP 限制会 400。
+     */
+    @Transactional
+    public void submit(Integer surveyId, Integer userId, List<AnswerDetail> details,
+                       Integer durationMs, String clientIp) {
+        doSubmit(surveyId, userId, details, durationMs, clientIp);
+    }
+
+    private void doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details,
+                          Integer durationMs, String clientIp) {
         if (details == null || details.isEmpty()) {
             throw new BizException("答卷内容不能为空");
         }
@@ -289,6 +307,19 @@ public class AnswerService {
             // ★ 新题型的取值校验：评分 / 日期。不校验的话，客户端可以往评分题里塞任意字符串，
             //   统计图（按 content 分组）就会出现 "abc"、"6" 这种分数。
             validateContentByType(questionById.get(d.getQuestionId()), d.getContent());
+        }
+
+        // ★ IP 限制（高级设置包）：开启后同一 IP 只能提交一次。
+        //   · 记录与答卷在**同一事务**里写：后面任何一步失败都会一起回滚，不会白占 IP；
+        //   · 唯一键 (survey_id, ip) 是并发防线：两个请求同时提交也只有一个能过；
+        //   · 用连接 IP（不看 X-Forwarded-For），避免换个请求头就绕过限制。
+        if (survey.getIpLimit() != null && survey.getIpLimit() == 1) {
+            if (clientIp == null || clientIp.isBlank()) {
+                throw new BizException("无法识别提交来源 IP，暂时无法提交（该问卷开启了 IP 限制）");
+            }
+            if (surveyIpMapper.insertIgnore(surveyId, clientIp) == 0) {
+                throw new BizException("该问卷开启了 IP 限制：同一网络只能提交一次");
+            }
         }
 
         Answer answer = new Answer();
