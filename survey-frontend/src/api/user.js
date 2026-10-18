@@ -51,10 +51,18 @@ export default {
 
   /** 退出登录（后端会顺便清掉接口文档的 doc_token Cookie）。
    *  ★ silent：退出本来就是离开本页，没必要为失败再弹一条红字。
-   *  ★ **必须带 refreshToken**：不带的话"退出登录"只是前端删了本地存储，
-   *    那枚 7 天的凭证在服务端仍然有效（后端按它精确吊销）。 */
+   *  ★ **必须带 refreshToken**：不带的话"退出登录"只是前端删了本地存储（后端按它精确吊销）。
+   *
+   *  ★★ 没有 refreshToken 时**传 `{}` 而不是 null**（2026-10-18 修）。
+   *   原因：后端 `@RequestBody(required = false) RefreshRequest req` 遇到**完全没有 body** 的
+   *   POST 会抛 `HttpMessageNotReadableException` → **400**，于是那段
+   *   `else if (userId != null) refreshTokenService.revokeAllByUser(userId)` 根本执行不到 ——
+   *   "退出登录"看起来成功了（前端 catch 掉错误照常清本地态），但**服务端凭证一枚都没吊销**。
+   *   传 `{}` 能让 req 非 null、refreshToken 为 null，于是走到"吊销该用户全部"的分支 → 200。
+   *   （实测对照：无 body → 400；body `{}` → 200「已退出」。）
+   */
   logout: (refreshToken) =>
-    http.post('/api/user/logout', refreshToken ? { refreshToken } : null, { silent: true }),
+    http.post('/api/user/logout', refreshToken ? { refreshToken } : {}, { silent: true }),
 
   /** 当前登录用户信息 */
   profile: () => http.get('/api/user/profile'),

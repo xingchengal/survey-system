@@ -262,7 +262,7 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 // ★ 登录态统一从 utils/auth 读：避免裸 JSON.parse 遇到脏数据时抛异常，
 //   把整个后台布局（含侧边栏和顶栏）都渲染崩掉。
-import { getUser, clearAuth, homePathFor } from '../utils/auth'
+import { getUser, clearAuth, homePathFor, getRefreshToken } from '../utils/auth'
 import { toggleTheme } from '../utils/theme'
 // 品牌标识（替换原来的 emoji，与登录/注册页、favicon 同一图形）
 import BrandLogo from '../components/BrandLogo.vue'
@@ -356,11 +356,16 @@ export default {
     async handleCommand(command) {
       if (command === 'logout') {
         // ★ 先调后端接口，清 Cookie。
-        //   api.user.logout() 内部是 http.post(..., { silent: true })：
+        //   api.user.logout(refreshToken) 内部是 http.post(..., { silent: true })：
         //   silent 表示「不自动弹错误提示、不自动跳登录」，因为退出登录本身就是离开本页，
         //   而且未登录时调它会 401，绝不能触发「登录已过期 → 跳 /login」那一套。
+        //
+        // ★ **必须把 refreshToken 传进去**：后端按它精确吊销"这一枚"。
+        //   不传的话后端只能走 revokeAllByUser（吊销该用户全部 refresh token）——
+        //   结果不算坏，但签名与调用不一致，且将来改成"只吊销本设备"时会变成静默的越权吊销。
+        //   （这处原来就是漏传的，B5 已修。）
         try {
-          await api.user.logout()
+          await api.user.logout(getRefreshToken())
         } catch {
           // 忽略错误：退出接口失败也必须让用户走掉，下面照常清本地登录态
         }

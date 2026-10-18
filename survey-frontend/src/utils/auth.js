@@ -59,6 +59,27 @@ export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
+/**
+ * 取 refresh token（只有勾了"记住我"才有；没有则返回 null）。
+ *
+ * ★ 为什么需要它：登出时要把它交给后端**精确吊销这一枚**。
+ *   不带它的话，`POST /user/logout` 会走"没带 token"的分支 ——
+ *   后端只能 `revokeAllByUser`（吊销该用户**全部** refresh token）。
+ *   结果不算坏（甚至更彻底），但：
+ *     ① 与 `api.user.logout(refreshToken)` 的签名不一致，看代码的人会以为"这里漏了"；
+ *     ② 将来若改成"只吊销本设备"，这里就会变成一个静默的越权吊销。
+ * ★ 不要在页面里直接 `localStorage.getItem('refreshToken')` —— key 名只有本文件知道，
+ *   散出去就会出现"改了 key 名之后有一处没跟着改"的经典问题。
+ *
+ * ⚠️ 已知的一处重复：`api/http.js` 内部**也**有一份 `REFRESH_KEY = 'refreshToken'`
+ *   （它在 401 静默续期里自己读写，且为了不让底层模块反向依赖 utils，刻意没 import 本文件）。
+ *   ⇒ **改这个 key 名时两处都要改**。两份都用同一个字符串，所以现在行为一致；
+ *   真要合并，得把 http.js 改成 import 本文件，属于"动核心 401 链路"，另开一轮再做。
+ */
+export function getRefreshToken() {
+  return localStorage.getItem(REFRESH_KEY)
+}
+
 /** 取当前用户对象（解析失败或格式不对返回 null） */
 export function getUser() {
   return safeParse(localStorage.getItem(USER_KEY), USER_KEY)
@@ -167,6 +188,7 @@ export function homePathFor(role) {
 
 export default {
   getToken,
+  getRefreshToken,
   getUser,
   getRole,
   getPermissions,
