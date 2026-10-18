@@ -63,6 +63,13 @@
         <h2 style="margin: 0 0 10px 0;">{{ survey.title }}</h2>
         <p style="color: #666; margin: 0;">{{ survey.description }}</p>
 
+        <!-- G7：给填写人一个体量预期（题目数 + 估算时长）；密码门未过/题目未加载时不显示 -->
+        <div v-if="passwordVerified && questions.length" class="fill-meta">
+          <span>共 {{ questions.length }} 题</span>
+          <span class="fill-meta-dot">·</span>
+          <span>预计 {{ estimatedMinutes }} 分钟</span>
+        </div>
+
         <div v-if="survey.endTime" style="margin-top: 12px;">
           <el-tag v-if="isExpired" type="danger" size="large">
             ⚠️ 该问卷已于 {{ survey.endTime }} 截止
@@ -400,6 +407,10 @@ export default {
     },
     totalSteps() {
       return this.computeTotalSteps()
+    },
+    /** G7：估算填写时长（每题按 20 秒，向上取整到分钟，至少 1 分钟） */
+    estimatedMinutes() {
+      return Math.max(1, Math.ceil((this.questions.length * 20) / 60))
     },
     /** 当前题是不是"有选项"的题型（单选 / 多选 / 下拉） */
     currentHasOptions() {
@@ -1104,6 +1115,19 @@ export default {
 </script>
 
 <style scoped>
+/* G7：题量 / 预计时长 */
+.fill-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.fill-meta-dot {
+  color: #c0c4cc;
+}
+
 /* ==================== 答题密码门 ==================== */
 .password-title {
   margin-bottom: 6px;
