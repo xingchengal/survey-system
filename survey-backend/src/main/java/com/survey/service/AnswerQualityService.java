@@ -182,7 +182,9 @@ public class AnswerQualityService {
         int optionQuestionsConsidered = 0;
 
         for (Question q : questions) {
-            if (!QuestionType.hasOptions(q.getType())) {
+            // ★ 排序题不参与"直线作答"：它的答案本来就是"全部选项各占一个名次"，
+            //   位次集合恒定包含 0..N-1，参与判定只会稀释这条规则（让真正摆烂的答卷更难被抓到）。
+            if (!QuestionType.hasOptions(q.getType()) || QuestionType.isRanking(q.getType())) {
                 continue;
             }
             List<String> answers = answersByQuestion.get(q.getId());

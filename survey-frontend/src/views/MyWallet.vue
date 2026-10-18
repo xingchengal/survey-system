@@ -115,6 +115,9 @@ const TYPE_LABELS = {
   PUBLISH: '发布扣费',
   AI_GENERATE: 'AI 创建',
   EXPORT: '导出答卷',
+  ADVANCED_SETTINGS: '高级设置包',
+  COLLABORATOR: '协作者名额',
+  ADVANCED_TYPES: '进阶题型包',
   REFUND: '退回',
   ADMIN_ADJUST: '管理员调整'
 }
@@ -125,6 +128,9 @@ const TYPE_TAGS = {
   PUBLISH: 'warning',
   AI_GENERATE: 'danger',
   EXPORT: 'warning',
+  ADVANCED_SETTINGS: 'warning',
+  COLLABORATOR: 'warning',
+  ADVANCED_TYPES: 'danger',
   REFUND: 'success',
   ADMIN_ADJUST: 'info'
 }

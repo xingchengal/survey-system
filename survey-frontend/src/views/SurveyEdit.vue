@@ -50,7 +50,34 @@
           </div>
         </div>
 
-        <p class="add-sidebar-tip">更多题型（矩阵、排序、NPS）后续开放</p>
+        <div class="add-group">
+          <div class="add-group-title">
+            进阶题型
+            <!-- ★ 价格不写死：从 GET /api/wallet/pricing 的动态目录取（后端 WalletFeature 是唯一出处） -->
+            <span class="add-group-badge">
+              {{ advancedTypeCost == null ? '按份计费' : `${advancedTypeCost} 点 / 份` }}
+            </span>
+          </div>
+          <div class="add-actions">
+            <button type="button" class="add-tile add-matrix" @click="addQuestion(8)">
+              <span class="add-ico"><el-icon><Grid /></el-icon></span>
+              <span class="add-text"><b>矩阵题</b><i>行 × 列打分</i></span>
+            </button>
+            <button type="button" class="add-tile add-ranking" @click="addQuestion(9)">
+              <span class="add-ico"><el-icon><Sort /></el-icon></span>
+              <span class="add-text"><b>排序题</b><i>拖成 1~N 名</i></span>
+            </button>
+            <button type="button" class="add-tile add-nps" @click="addQuestion(10)">
+              <span class="add-ico"><el-icon><DataLine /></el-icon></span>
+              <span class="add-text"><b>NPS</b><i>0~10 推荐分</i></span>
+            </button>
+          </div>
+        </div>
+
+        <p class="add-sidebar-tip">
+          进阶题型按「进阶题型包」计费：每份问卷首次保存矩阵 / 排序 / NPS 时扣一次，之后加题不再扣。
+          具体价格见「我的钱包 → 计费规则」。
+        </p>
       </aside>
 
       <div class="editor-main">
@@ -227,8 +254,73 @@
 
       <el-input v-model="q.title" class="q-title-input" placeholder="请输入题目内容" maxlength="500" show-word-limit />
 
-      <!-- 选项区域：单选 / 多选 / 下拉 -->
-      <div v-if="qHasOptions(q.type)" class="q-options">
+      <!-- 矩阵题：行标题 × 列标题（两维都存 JSON 数组文本，见 utils/questionTypes.parseMatrixAxis） -->
+      <div v-if="qIsMatrix(q.type)" class="q-options matrix-editor">
+        <div class="matrix-axis">
+          <div class="matrix-axis-head">
+            <span>行标题（被评价的对象）</span>
+            <span class="matrix-axis-count">{{ (q.matrixRows || []).length }} / 20</span>
+          </div>
+          <div v-for="(row, rIndex) in q.matrixRows" :key="'mr' + rIndex" class="axis-row">
+            <el-input
+              v-model="q.matrixRows[rIndex]"
+              maxlength="50"
+              placeholder="如：服务态度"
+              @input="markDirty"
+            />
+            <el-button
+              type="danger"
+              link
+              size="small"
+              :disabled="(q.matrixRows || []).length <= 1"
+              @click="removeMatrixAxis(qIndex, 'rows', rIndex)"
+            >删除</el-button>
+          </div>
+          <el-button
+            class="add-option"
+            type="primary"
+            plain
+            size="small"
+            :disabled="(q.matrixRows || []).length >= 20"
+            @click="addMatrixAxis(qIndex, 'rows')"
+          >＋ 添加行</el-button>
+        </div>
+
+        <div class="matrix-axis">
+          <div class="matrix-axis-head">
+            <span>列标题（每一行的评分/选项）</span>
+            <span class="matrix-axis-count">{{ (q.matrixCols || []).length }} / 10</span>
+          </div>
+          <div v-for="(col, cIndex) in q.matrixCols" :key="'mc' + cIndex" class="axis-row">
+            <el-input
+              v-model="q.matrixCols[cIndex]"
+              maxlength="50"
+              placeholder="如：很满意"
+              @input="markDirty"
+            />
+            <el-button
+              type="danger"
+              link
+              size="small"
+              :disabled="(q.matrixCols || []).length <= 2"
+              @click="removeMatrixAxis(qIndex, 'cols', cIndex)"
+            >删除</el-button>
+          </div>
+          <el-button
+            class="add-option"
+            type="primary"
+            plain
+            size="small"
+            :disabled="(q.matrixCols || []).length >= 10"
+            @click="addMatrixAxis(qIndex, 'cols')"
+          >＋ 添加列</el-button>
+        </div>
+
+        <div class="option-hint">💡 填写者会看到一张「行 × 列」的表，每行选一个列。行列标题不能为空、不能重复。</div>
+      </div>
+
+      <!-- 选项区域：单选 / 多选 / 下拉 / 排序 -->
+      <div v-else-if="qHasOptions(q.type)" class="q-options">
         <div v-for="(opt, oIndex) in q.options" :key="oIndex"
              class="option-row"
              :class="{ 'is-dragging': isDraggingOption(qIndex, oIndex), 'is-drag-over': dragOverOption === qIndex + '-' + oIndex }"
@@ -251,6 +343,7 @@
                ★ 只允许往后跳（ti <= qIndex 的禁用）：反向跳会破坏答题页的"路径推进"模型
                  （那里靠"目标必须在当前题之后"来防环）。 -->
           <el-select
+            v-if="!qIsRanking(q.type)"
             v-model="opt.nextQuestionId"
             class="option-jump"
             placeholder="跳转：下一题"
@@ -274,8 +367,18 @@
         <div v-if="qIsMulti(q.type)" class="option-hint">
           💡 多选跳转规则：勾选的多个选项中，按选项顺序取第一个命中的跳转
         </div>
+        <!-- 排序题：没有跳转（一张问卷里排序题通常是"整段评价"的一部分，逐项跳转没有意义） -->
+        <div v-if="qIsRanking(q.type)" class="option-hint">
+          💡 填写者会把全部选项拖成 1~N 名；统计页按**平均名次**排序（越小越靠前）。
+        </div>
 
         <el-button class="add-option" type="primary" plain size="small" @click="addOption(qIndex)">＋ 添加选项</el-button>
+      </div>
+
+      <!-- NPS：0~10 分，没有选项可配 -->
+      <div v-else-if="qIsNps(q.type)" class="q-nps-hint">
+        <span class="q-nps-scale">0 ───────── 10</span>
+        <p>填写者在 0~10 分里选一个。统计页自动计算 NPS（推荐者 9~10 减贬损者 0~6 的占比差），并展示分值分布。</p>
       </div>
     </el-card>
 
@@ -537,6 +640,55 @@
             maxlength="1000"
           />
 
+          <!-- 矩阵：行 × 列的表，每行单选一个列 -->
+          <div v-else-if="q.type === 8" class="pv-matrix-wrap">
+            <table class="pv-matrix">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th v-for="(col, ci) in q.matrixCols" :key="'pc' + ci">{{ col || '（列）' }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, ri) in q.matrixRows" :key="'pr' + ri">
+                  <th>{{ row || '（行）' }}</th>
+                  <td v-for="(col, ci) in q.matrixCols" :key="'pd' + ci">
+                    <input
+                      v-model="previewAnswers[q.id][row]"
+                      type="radio"
+                      :name="'pv-m-' + i + '-' + ri"
+                      :value="col"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 排序：上下移动调整名次 -->
+          <div v-else-if="q.type === 9" class="pv-ranking">
+            <div v-for="(item, ri) in previewAnswers[q.id]" :key="'rk' + ri" class="pv-rank-row">
+              <span class="pv-rank-no">{{ ri + 1 }}</span>
+              <span class="pv-rank-text">{{ item || '（选项 ' + (ri + 1) + '）' }}</span>
+              <button type="button" class="pv-rank-btn" :disabled="ri === 0"
+                      @click="movePreviewRank(q.id, ri, -1)">↑</button>
+              <button type="button" class="pv-rank-btn" :disabled="ri === previewAnswers[q.id].length - 1"
+                      @click="movePreviewRank(q.id, ri, 1)">↓</button>
+            </div>
+          </div>
+
+          <!-- NPS：0~10 -->
+          <div v-else-if="q.type === 10" class="pv-nps">
+            <button
+              v-for="score in npsScores"
+              :key="'nps' + score"
+              type="button"
+              class="pv-nps-btn"
+              :class="{ on: previewAnswers[q.id] === score }"
+              @click="previewAnswers[q.id] = score"
+            >{{ score }}</button>
+          </div>
+
           <!-- 单行文本 -->
           <el-input
             v-else
@@ -582,11 +734,14 @@ import QRCode from 'qrcode'
 //   接口路径、Authorization、成败判断、错误提示都收敛在 src/api/http.js，
 //   页面只关心"调哪个接口、拿到什么数据"。
 import api from '../api'
+// ★ 计费目录：价格唯一出处是后端 WalletFeature，编辑器只读不写死
+import walletApi from '../api/wallet'
 // ★ 判断角色/读用户统一走 utils/auth（不要裸 JSON.parse localStorage）
 import { getUser } from '../utils/auth'
 // 题型元数据：数字必须与后端 common/QuestionType 一致（只追加、不复用）
 import {
-  RATING_LABELS, typeLabel, typeMeta, hasOptions, isMulti, isSingle
+  NPS_SCORES, RATING_LABELS, typeLabel, typeMeta, hasOptions, isMulti, isSingle,
+  parseMatrixAxis, stringifyMatrixAxis, isMatrix, isRanking, isNps
 } from '../utils/questionTypes'
 
 /** 自动草稿在 localStorage 里的键前缀（键 = 前缀 + 问卷 id） */
@@ -637,6 +792,10 @@ export default {
       settingsVisible: false,
       /** 评分题的 5 档文案，模板里做「N 分 · 满意」的提示 */
       ratingLabels: RATING_LABELS,
+      /** NPS 的 0~10 分（预览与填写页共用同一份常量） */
+      npsScores: NPS_SCORES,
+      /** 「进阶题型包」的价格（来自 /api/wallet/pricing；null = 还没取到，不显示数字） */
+      advancedTypeCost: null,
 
       // ===== 未保存提示 / 保存状态 =====
       /** 是否有未保存修改（标题、描述、题目、选项任意变化都会置 true，保存成功后清 false） */
@@ -804,6 +963,7 @@ export default {
     this.nowTimer = setInterval(() => {
       this.nowTick = Date.now()
     }, 30000)
+    this.loadAdvancedTypeCost()
     if (this.surveyId) {
       this.init()
     }
@@ -814,6 +974,20 @@ export default {
     if (this.draftTimer) clearTimeout(this.draftTimer)
   },
   methods: {
+    /**
+     * 取「进阶题型包」的价格（用于左侧面板的角标）。
+     * ★ 失败就静默：价格只是提示，取不到不影响编辑/保存。
+     */
+    async loadAdvancedTypeCost() {
+      try {
+        const list = await walletApi.pricing()
+        const item = (list || []).find(x => x.code === 'advanced-types')
+        this.advancedTypeCost = item ? item.cost : null
+      } catch {
+        this.advancedTypeCost = null
+      }
+    },
+
     /** 首次进入：并行拉问卷信息与题目 → 再问"要不要恢复草稿" */
     async init() {
       this.hydrating = true
@@ -904,18 +1078,50 @@ export default {
       return (data || []).map(q => ({
         ...q,
         required: q.required || 0,
-        options: q.options || []
+        options: q.options || [],
+        // ★ 后端给的是 JSON 文本；编辑器内部统一用数组（新增/删除行更直观）。
+        //   保存前再由 toSavePayload 转回 JSON 文本（见 stringifyMatrixAxis）。
+        matrixRows: isMatrix(q.type) ? parseMatrixAxis(q.matrixRows) : [],
+        matrixCols: isMatrix(q.type) ? parseMatrixAxis(q.matrixCols) : []
       }))
     },
 
     addQuestion(type) {
       // ★ 草稿阶段的题没有数据库 id，先发一个临时 id（负数），否则"跳转目标"下拉框无值可用。
       const newQ = { id: this.tempQuestionId--, type, title: '', required: 0, options: [] }
-      // 单选 / 多选 / 下拉：都给两个空选项起步；评分 / 日期 / 文本类不需要选项
+      // 单选 / 多选 / 下拉 / 排序：都给两个空选项起步；评分 / 日期 / 文本类不需要选项
       if (hasOptions(type)) {
         newQ.options = [{ content: '' }, { content: '' }]
       }
+      // 矩阵：2 行 × 3 列起步（最少 1 行 2 列，留一点余量让作者一进页面就能改）
+      if (isMatrix(type)) {
+        newQ.matrixRows = ['', '']
+        newQ.matrixCols = ['', '', '']
+      }
       this.questions.push(newQ)
+      this.markDirty()
+    },
+
+    /** 矩阵题：加/删一行或一列（限制与后端 MatrixConfig 一致：行 ≤20、列 ≤10、至少 1 行 2 列） */
+    addMatrixAxis(qIndex, axis) {
+      const q = this.questions[qIndex]
+      if (!q) return
+      const list = axis === 'rows' ? q.matrixRows : q.matrixCols
+      if (!Array.isArray(list)) return
+      const max = axis === 'rows' ? 20 : 10
+      if (list.length >= max) return
+      list.push('')
+      this.markDirty()
+    },
+
+    removeMatrixAxis(qIndex, axis, index) {
+      const q = this.questions[qIndex]
+      if (!q) return
+      const list = axis === 'rows' ? q.matrixRows : q.matrixCols
+      if (!Array.isArray(list)) return
+      if (list.length <= (axis === 'rows' ? 1 : 2)) return
+      list.splice(index, 1)
+      this.markDirty()
     },
 
     removeQuestion(index) {
@@ -1190,6 +1396,30 @@ export default {
           return false
         }
       }
+      // ★ 矩阵题：行列标题必须非空、不重复、够数（与后端 MatrixConfig 同一口径，
+      //   前端先拦一次是为了把"哪一行错了"说清楚；后端 400 只有一句笼统的文案）。
+      for (let i = 0; i < this.questions.length; i++) {
+        const q = this.questions[i]
+        if (!isMatrix(q.type)) continue
+        const rows = (q.matrixRows || []).map(v => String(v == null ? '' : v).trim())
+        const cols = (q.matrixCols || []).map(v => String(v == null ? '' : v).trim())
+        if (rows.length < 1 || cols.length < 2) {
+          ElMessage.warning(`第 ${i + 1} 题（矩阵题）至少需要 1 行、2 列`)
+          return false
+        }
+        const rowError = this.matrixAxisError(rows, '行')
+        if (rowError) {
+          ElMessage.warning(`第 ${i + 1} 题：${rowError}`)
+          return false
+        }
+        const colError = this.matrixAxisError(cols, '列')
+        if (colError) {
+          ElMessage.warning(`第 ${i + 1} 题：${colError}`)
+          return false
+        }
+        q.matrixRows = rows
+        q.matrixCols = cols
+      }
       // ★★ "有选项"的题型（单选/多选/下拉）不允许保存空选项。
       //   为什么必须拦在这里：答题页拿 opt.content 当 el-radio / el-checkbox 的 value，
       //   多个空选项的 value 全是 "" —— 点其中一个，整组会**同时显示为选中**（"一点全点"）；
@@ -1201,6 +1431,10 @@ export default {
         const opts = q.options || []
         if (opts.length === 0) {
           ElMessage.warning(`第 ${i + 1} 题的选项不能为空，请至少添加一个选项`)
+          return false
+        }
+        if (isRanking(q.type) && opts.length < 2) {
+          ElMessage.warning(`第 ${i + 1} 题（排序题）至少需要 2 个选项才能排序`)
           return false
         }
         for (let j = 0; j < opts.length; j++) {
@@ -1319,6 +1553,42 @@ export default {
     },
 
     /**
+     * 矩阵题行/列标题的本地校验：非空、不重复、不超长。
+     * @returns {string} 空串 = 合法；否则是给用户看的错误文案（不含题号，由调用方补）
+     */
+    matrixAxisError(list, label) {
+      const seen = new Set()
+      for (let i = 0; i < list.length; i++) {
+        const text = String(list[i] == null ? '' : list[i]).trim()
+        if (!text) return `${label}标题第 ${i + 1} 项不能为空`
+        if (text.length > 50) return `${label}标题「${text}」不能超过 50 个字符`
+        if (seen.has(text)) return `${label}标题不能重复：「${text}」出现了两次`
+        seen.add(text)
+      }
+      return ''
+    },
+
+    /**
+     * 生成给后端的题目数组。
+     *
+     * ★ 矩阵题在编辑器里用数组（`matrixRows: ['行1','行2']`），后端要的是 JSON 文本
+     *   （`t_question.matrix_rows` 是 varchar）。不转换的话 Jackson 会把数组绑到 String 字段上，
+     *   直接 400（而且错误文案与矩阵无关，很难查）。
+     * ★ 其它题型的这两列必须显式给 null：后端保存时会清空，但显式传更不容易被误读成"没传就别动"。
+     */
+    toSavePayload(list) {
+      return (list || []).map(q => ({
+        ...q,
+        matrixRows: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixRows) : null,
+        matrixCols: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixCols) : null,
+        options: (q.options || []).map(opt => ({
+          content: opt.content,
+          nextQuestionId: opt.nextQuestionId
+        }))
+      }))
+    },
+
+    /**
      * 提交题目，失败时**有限重发**（最多 2 次，间隔 400ms）。
      *
      * ★ 只重发**可恢复的失败**：网络中断 / 超时 / 5xx。
@@ -1331,7 +1601,7 @@ export default {
       let lastError = null
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
-          return await api.question.save(this.surveyId, this.questions)
+          return await api.question.save(this.surveyId, this.toSavePayload(this.questions))
         } catch (e) {
           lastError = e
           // 有状态码且小于 500 → 业务拒绝，不重发
@@ -1360,11 +1630,14 @@ export default {
         return true   // 常见路径：题目都已在库里，一次提交即可
       }
       // ① 完整数组 + 去掉"指向临时题"的跳转（完整是硬要求，见方法注释）
-      const payload = this.questions.map(q => ({
+      //   ★ 走 toSavePayload：矩阵题的行列数组必须先转成 JSON 文本再提交
+      const payload = this.toSavePayload(this.questions).map(q => ({
         id: this.isRealId(q.id) ? q.id : undefined,   // 已有题带上真 id，避免被当成新题重建
         type: q.type,
         title: q.title,
         required: q.required,
+        matrixRows: q.matrixRows,
+        matrixCols: q.matrixCols,
         options: (q.options || []).map(o => ({
           content: o.content,
           nextQuestionId: this.isRealId(o.nextQuestionId) || o.nextQuestionId === -1
@@ -1430,13 +1703,25 @@ export default {
       const answers = {}
       const texts = {}
       this.questions.forEach(q => {
-        if (q.type === 2) answers[q.id] = []
-        else if (q.type === 1 || q.type === 5 || q.type === 6 || q.type === 7) answers[q.id] = ''
+        if (isMatrix(q.type)) answers[q.id] = {}
+        else if (isRanking(q.type)) answers[q.id] = (q.options || []).map(o => o.content)
+        else if (q.type === 2) answers[q.id] = []
+        else if ([1, 5, 6, 7, 10].includes(q.type)) answers[q.id] = ''
         else texts[q.id] = ''
       })
       this.previewAnswers = answers
       this.previewTexts = texts
       this.previewVisible = true
+    },
+
+    /** 预览里的排序：上移/下移一位（正式填写页用的是同一套"数组顺序 = 名次"模型） */
+    movePreviewRank(questionId, index, delta) {
+      const list = this.previewAnswers[questionId]
+      if (!Array.isArray(list)) return
+      const target = index + delta
+      if (target < 0 || target >= list.length) return
+      const [item] = list.splice(index, 1)
+      list.splice(target, 0, item)
     },
 
     // ===== 题型展示（模板里不写 type === 1 这类魔数）=====
@@ -1446,14 +1731,24 @@ export default {
     qTypeTag(type) {
       return typeMeta(type).tag
     },
-    /** 选项行左侧的小图标：单选✓、多选▣、下拉⌄ */
+    /** 选项行左侧的小图标：单选✓、多选▣、下拉⌄、排序↕ */
     qOptionIcon(type) {
       if (type === 2) return 'Select'
       if (type === 5) return 'ArrowDown'
+      if (type === 9) return 'Sort'
       return 'CircleCheck'
     },
     qHasOptions(type) {
       return hasOptions(type)
+    },
+    qIsMatrix(type) {
+      return isMatrix(type)
+    },
+    qIsRanking(type) {
+      return isRanking(type)
+    },
+    qIsNps(type) {
+      return isNps(type)
     },
     qIsMulti(type) {
       return isMulti(type)
@@ -1759,6 +2054,57 @@ export default {
   margin: 12px 0 0 36px;
 }
 
+/* ==================== 矩阵题编辑器 ==================== */
+.matrix-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.matrix-axis {
+  flex: 1 1 260px;
+  min-width: 240px;
+}
+.matrix-axis-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.matrix-axis-count {
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+.axis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.axis-row .el-input {
+  flex: 1;
+}
+
+/* NPS：没有选项可配，给一句说明 */
+.q-nps-hint {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--sky-50);
+  font-size: 13px;
+}
+.q-nps-scale {
+  letter-spacing: 2px;
+  font-weight: 600;
+  color: var(--sky-600);
+}
+.q-nps-hint p {
+  margin: 8px 0 0;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
 /* ==================== 右侧题型面板 ==================== */
 /* 布局：左侧 sticky 题型栏（固定宽）+ 右侧题目列表（可伸缩）；窄屏时题型栏落到底部并横向排列 */
 .editor-body {
@@ -1790,9 +2136,20 @@ export default {
   margin-top: 12px;
 }
 .add-group-title {
+  display: flex;
+  align-items: center;
   font-size: 12px;
   color: var(--ink-3);
   margin-bottom: 6px;
+}
+.add-group-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 10px;
+  line-height: 1.5;
 }
 .add-actions {
   display: flex;
@@ -1880,6 +2237,22 @@ export default {
   background: #e7fbff;
   border-color: #cdf0fa;
   color: #0e7490;
+}
+/* 进阶题型：统一用更"重"的色系，和基础题型区分开 */
+.add-matrix {
+  background: #fdeef0;
+  border-color: #f8d4da;
+  color: #b91c1c;
+}
+.add-ranking {
+  background: #fff6e8;
+  border-color: #ffe6bf;
+  color: #b45309;
+}
+.add-nps {
+  background: #eef2ff;
+  border-color: #dbe3ff;
+  color: #4338ca;
 }
 .add-ico {
   width: 34px;
@@ -2171,6 +2544,102 @@ html[data-theme="dark"] .option-row.is-drag-over {
   font-size: 13px;
   color: var(--ink-3);
 }
+
+/* ==================== 预览：矩阵 / 排序 / NPS ==================== */
+.pv-matrix-wrap {
+  overflow-x: auto;
+}
+.pv-matrix {
+  min-width: 100%;
+  border-collapse: collapse;
+}
+.pv-matrix th,
+.pv-matrix td {
+  padding: 8px 10px;
+  border: 1px solid var(--stroke);
+  font-size: 13px;
+  text-align: center;
+}
+.pv-matrix thead th {
+  background: #f5f9ff;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.pv-matrix tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.pv-matrix input {
+  accent-color: var(--sky-500);
+  cursor: pointer;
+}
+.pv-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pv-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+}
+.pv-rank-no {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--sky-50);
+  color: var(--sky-600);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pv-rank-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.pv-rank-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.pv-rank-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.pv-nps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pv-nps-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 14px;
+  cursor: pointer;
+}
+.pv-nps-btn.on {
+  background: var(--sky-500);
+  border-color: var(--sky-500);
+  color: #fff;
+  font-weight: 600;
+}
 .pv-footer-tip {
   margin: 6px 0 0;
   font-size: 12px;
@@ -2183,6 +2652,16 @@ html[data-theme="dark"] .pv-question {
 }
 html[data-theme="dark"] .pv-option:hover {
   background: #16263f;
+}
+html[data-theme="dark"] .pv-matrix thead th,
+html[data-theme="dark"] .q-nps-hint {
+  background: #16263f;
+}
+html[data-theme="dark"] .pv-rank-btn,
+html[data-theme="dark"] .pv-nps-btn {
+  background: #0e1b2e;
+  border-color: #1d2c44;
+  color: #cbd5e1;
 }
 
 @media (max-width: 900px) {

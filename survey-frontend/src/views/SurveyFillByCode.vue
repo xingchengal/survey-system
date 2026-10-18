@@ -130,6 +130,11 @@
           ⚠️ 该题的选项未配置完整（内容为空），暂时无法作答。请联系问卷发布者补充选项后再填。
         </div>
 
+        <!-- 矩阵题行列缺失：同样不能渲染成一张空表（必填时会永远卡住） -->
+        <div v-if="matrixBroken" class="option-broken">
+          ⚠️ 该矩阵题的行列未配置完整，暂时无法作答。请联系问卷发布者补充行列后再填。
+        </div>
+
         <!-- 单选题 -->
         <el-radio-group
           v-if="currentQuestion.type === 1 && usableOptions.length"
@@ -202,6 +207,55 @@
           size="large"
           style="width: 220px;"
         />
+
+        <!-- 矩阵题：行 × 列，每行选一个列 -->
+        <div v-else-if="currentQuestion.type === 8 && !matrixBroken" class="fill-matrix-wrap">
+          <table class="fill-matrix">
+            <thead>
+              <tr>
+                <th></th>
+                <th v-for="(col, ci) in matrixCols" :key="'mc' + ci">{{ col }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, ri) in matrixRows" :key="'mr' + ri">
+                <th>{{ row }}</th>
+                <td v-for="(col, ci) in matrixCols" :key="'md' + ci">
+                  <input
+                    type="radio"
+                    :name="'fm-' + currentQuestion.id + '-' + ri"
+                    :checked="matrixPick(row) === col"
+                    @change="pickMatrix(row, col)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 排序题：数组顺序就是名次，上下移动调整 -->
+        <div v-else-if="currentQuestion.type === 9 && usableOptions.length" class="fill-ranking">
+          <div v-for="(item, ri) in rankingAnswers" :key="'rk' + ri" class="fill-rank-row">
+            <span class="fill-rank-no">{{ ri + 1 }}</span>
+            <span class="fill-rank-text">{{ item }}</span>
+            <el-button size="small" :disabled="ri === 0" @click="moveRank(ri, -1)">上移</el-button>
+            <el-button size="small" :disabled="ri === rankingAnswers.length - 1" @click="moveRank(ri, 1)">下移</el-button>
+          </div>
+          <p class="fill-rank-tip">第 1 名在最上面；全部选项都要排名后才能进入下一题。</p>
+        </div>
+
+        <!-- NPS：0~10 -->
+        <div v-else-if="currentQuestion.type === 10" class="fill-nps">
+          <button
+            v-for="score in npsScores"
+            :key="'nps' + score"
+            type="button"
+            class="fill-nps-btn"
+            :class="{ on: answers[currentQuestion.id] === score }"
+            @click="answers[currentQuestion.id] = score"
+          >{{ score }}</button>
+          <p class="fill-nps-tip">0 = 完全不会推荐，10 = 非常愿意推荐</p>
+        </div>
 
         <!-- 多行文本 -->
         <el-input
@@ -285,7 +339,10 @@ import { CircleCheckFilled, Warning } from '@element-plus/icons-vue'
 //     所以去掉 silent 也不会触发跳转。
 import api from '../api'
 import { isLoggedIn } from '../utils/auth'
-import { RATING_LABELS, hasOptions as hasOptionType } from '../utils/questionTypes'
+import {
+  NPS_SCORES, RATING_LABELS, hasOptions as hasOptionType,
+  parseMatrixAxis, isMatrix, isRanking, isNps
+} from '../utils/questionTypes'
 
 export default {
   components: { CircleCheckFilled, Warning },
@@ -322,6 +379,8 @@ export default {
       redirectTimer: null,
       /** 评分题的 5 档文案（与后端 1~5 分对应） */
       ratingLabels: RATING_LABELS,
+      /** NPS 的 0~10 分 */
+      npsScores: NPS_SCORES,
       /**
        * 打开答题页的时间戳（毫秒）。
        * ★ 唯一用途：提交时上报"答题耗时"，给后端的"答题过快"质控判定。
@@ -357,6 +416,30 @@ export default {
     /** 选项题却一个可用选项都没有：页面提示"配置不完整"，且不拦"下一题"（否则必填会卡死） */
     optionsBroken() {
       return this.currentHasOptions && this.usableOptions.length === 0
+    },
+    /** 矩阵题的行/列标题（后端给 JSON 文本，这里解析成数组） */
+    matrixRows() {
+      return parseMatrixAxis(this.currentQuestion && this.currentQuestion.matrixRows)
+    },
+    matrixCols() {
+      return parseMatrixAxis(this.currentQuestion && this.currentQuestion.matrixCols)
+    },
+    /** 矩阵题行列配置不完整：与"空选项"同理，不能让访客卡死在一道渲染不出来的题上 */
+    matrixBroken() {
+      const q = this.currentQuestion
+      return !!q && isMatrix(q.type) && (this.matrixRows.length === 0 || this.matrixCols.length < 2)
+    },
+    /**
+     * 排序题的当前顺序（数组顺序即名次）。
+     * ★ 未作答时给"原始选项顺序"作为起点：排序题的正常交互就是"全部选项都在，用户拖动调整"，
+     *   不应该出现一个空列表让用户先点"开始排序"。
+     */
+    rankingAnswers() {
+      const q = this.currentQuestion
+      if (!q || !isRanking(q.type)) return []
+      const ans = this.answers[q.id]
+      if (Array.isArray(ans) && ans.length > 0) return ans
+      return this.usableOptions.map(o => o.content)
     },
     /**
      * 进度分子 = "当前答题路径上已经走过的题数"：
@@ -507,7 +590,30 @@ export default {
     async loadQuestions() {
       const list = await api.question.list(this.survey.id, this.requestOpts())
       this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
+      this.initAnswers()
       this.startCountdown()
+    },
+
+    /**
+     * 按题型初始化答案容器。
+     * ★ 多选 / 矩阵 / 排序都需要"非字符串"的容器（数组或对象），
+     *   不提前建好时 v-model 会往 undefined 上写，页面直接报错。
+     * ★ 排序题给"原始选项顺序"作为起点（正常交互就是全部选项都在、用户调整顺序）。
+     */
+    initAnswers() {
+      const next = { ...this.answers }
+      this.questions.forEach(q => {
+        if (isMatrix(q.type)) {
+          next[q.id] = {}
+        } else if (isRanking(q.type)) {
+          next[q.id] = (q.options || [])
+            .map(o => o.content)
+            .filter(c => typeof c === 'string' && c.trim() !== '')
+        } else if (q.type === 2) {
+          next[q.id] = []
+        }
+      })
+      this.answers = next
     },
 
     /** 需要密码时返回请求选项，否则 undefined（不影响原有调用） */
@@ -538,6 +644,7 @@ export default {
         this.password = pwd
         this.passwordVerified = true
         this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
+        this.initAnswers()
         this.startCountdown()
       } catch (e) {
         this.passwordError = (e && e.message) || '密码不正确，请重试'
@@ -735,9 +842,20 @@ export default {
       //   这种题按"跳过"处理并给出提示，让访客能继续往下填。
       if (this.optionsBroken) {
         ElMessage.warning('该题选项未配置，已跳过这道题')
+      } else if (this.matrixBroken) {
+        ElMessage.warning('该矩阵题行列未配置，已跳过这道题')
       } else if (q.required === 1) {
-        if (ans === undefined || ans === '' || (Array.isArray(ans) && ans.length === 0)) {
-          ElMessage.warning('此题必填')
+        if (!this.isAnswerComplete(q)) {
+          // ★ 矩阵/排序的"没答完"与"完全没答"要分开说：否则用户明明填了 2 行，
+          //   却被一句"此题必填"顶回来，根本不知道还差哪一行。
+          if (isMatrix(q.type) && this.hasAnswer(q.id)) {
+            ElMessage.warning('这道矩阵题还有行没有选择，请把每一行都选上')
+          } else if (isRanking(q.type) && Array.isArray(ans) && ans.length > 0 &&
+            ans.filter(item => !this.isBlankAnswer(item)).length !== this.usableOptions.length) {
+            ElMessage.warning('排序题需要给全部选项排名')
+          } else {
+            ElMessage.warning('此题必填')
+          }
           return
         }
       }
@@ -788,6 +906,60 @@ export default {
       return !this.isBlankAnswer(v)
     },
 
+    /** 矩阵题某一行当前选了哪个列（没选返回空串） */
+    matrixPick(row) {
+      const q = this.currentQuestion
+      const ans = q && this.answers[q.id]
+      if (!ans || typeof ans !== 'object') return ''
+      return ans[row] || ''
+    },
+
+    pickMatrix(row, col) {
+      const q = this.currentQuestion
+      if (!q) return
+      if (!this.answers[q.id] || typeof this.answers[q.id] !== 'object') {
+        this.answers[q.id] = {}
+      }
+      this.answers[q.id][row] = col
+    },
+
+    /** 排序题：上移/下移一位（数组顺序 = 名次） */
+    moveRank(index, delta) {
+      const q = this.currentQuestion
+      if (!q || !isRanking(q.type)) return
+      if (!Array.isArray(this.answers[q.id])) {
+        this.answers[q.id] = this.usableOptions.map(o => o.content)
+      }
+      const list = this.answers[q.id]
+      const target = index + delta
+      if (target < 0 || target >= list.length) return
+      const [item] = list.splice(index, 1)
+      list.splice(target, 0, item)
+    },
+
+    /**
+     * 必填题是否**完整**作答（比 hasAnswer 严格）。
+     * ★ 多选：只要勾了一个就算答过（既有口径）；
+     *   矩阵：**每一行**都要选（否则一张矩阵只填一行就过，统计的分母不一致）；
+     *   排序：必须给**全部选项**排名（与后端校验同口径）。
+     */
+    isAnswerComplete(q) {
+      const ans = this.answers[q.id]
+      if (isMatrix(q.type)) {
+        const rows = parseMatrixAxis(q.matrixRows)
+        if (!ans || typeof ans !== 'object' || rows.length === 0) return false
+        return rows.every(row => !this.isBlankAnswer(ans[row]))
+      }
+      if (isRanking(q.type)) {
+        const total = (q.options || [])
+          .filter(o => typeof o.content === 'string' && o.content.trim() !== '').length
+        return Array.isArray(ans) && total > 0 &&
+          ans.filter(item => !this.isBlankAnswer(item)).length === total
+      }
+      if (Array.isArray(ans)) return ans.some(item => !this.isBlankAnswer(item))
+      return !this.isBlankAnswer(ans)
+    },
+
     startCountdown() {
       if (!this.survey.endTime) return
       this.updateCountdown()
@@ -826,6 +998,43 @@ export default {
       for (const q of this.questions) {
         if (!onPath.has(q.id)) continue
         const ans = this.answers[q.id]
+
+        // ★ 矩阵：一行一条明细，row_key 带行标题、content 带列标题（后端统计按行分组）
+        if (isMatrix(q.type)) {
+          if (!ans || typeof ans !== 'object') continue
+          for (const row of parseMatrixAxis(q.matrixRows)) {
+            const col = ans[row]
+            if (this.isBlankAnswer(col)) continue
+            details.push({ questionId: q.id, content: col, rowKey: row })
+          }
+          continue
+        }
+
+        // ★ 排序：一名一条明细，rankNo 从 1 起（数组顺序即名次）
+        if (isRanking(q.type)) {
+          if (!Array.isArray(ans)) continue
+          const ranked = ans.filter(item => !this.isBlankAnswer(item))
+          if (ranked.length === 0) continue
+          // ★ 不能复用 usableOptions：那个 computed 只看"当前题"，
+          //   提交时要按**这道题自己的**选项数校验。
+          const optionCount = (q.options || []).filter(o => typeof o.content === 'string' && o.content.trim() !== '').length
+          if (ranked.length !== optionCount) {
+            ElMessage.warning('排序题需要给全部选项排名')
+            return
+          }
+          ranked.forEach((content, idx) => {
+            details.push({ questionId: q.id, content, rankNo: idx + 1 })
+          })
+          continue
+        }
+
+        // ★ NPS：0~10 的单值
+        if (isNps(q.type)) {
+          if (this.isBlankAnswer(ans)) continue
+          details.push({ questionId: q.id, content: String(ans) })
+          continue
+        }
+
         if (ans === undefined || ans === null || ans === '') continue
         if (Array.isArray(ans)) {
           if (ans.length === 0) continue
@@ -885,6 +1094,7 @@ export default {
       }
       this.submitted = false
       this.answers = {}
+      this.initAnswers()
       this.currentOrder = 1
       this.history = []
       this.allDone = false
@@ -982,6 +1192,110 @@ export default {
   background: #fffbeb;
   border: 1px solid #fde68a;
   border-radius: 8px;
+}
+
+/* ==================== 矩阵 / 排序 / NPS ==================== */
+.fill-matrix-wrap {
+  overflow-x: auto;
+}
+.fill-matrix {
+  min-width: 100%;
+  border-collapse: collapse;
+}
+.fill-matrix th,
+.fill-matrix td {
+  padding: 10px 12px;
+  border: 1px solid var(--stroke);
+  font-size: 14px;
+  text-align: center;
+}
+.fill-matrix thead th {
+  background: #f5f9ff;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.fill-matrix tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.fill-matrix input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--sky-500);
+  cursor: pointer;
+}
+.fill-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fill-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+}
+.fill-rank-no {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--sky-50);
+  color: var(--sky-600);
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.fill-rank-text {
+  flex: 1;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.fill-rank-tip,
+.fill-nps-tip {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.fill-nps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fill-nps-btn {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--stroke);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.fill-nps-btn:hover {
+  border-color: var(--sky-400);
+  color: var(--sky-600);
+}
+.fill-nps-btn.on {
+  background: var(--sky-500);
+  border-color: var(--sky-500);
+  color: #fff;
+  font-weight: 600;
+}
+html[data-theme="dark"] .fill-matrix thead th {
+  background: #16263f;
+}
+html[data-theme="dark"] .fill-nps-btn {
+  background: #0e1b2e;
+  border-color: #1d2c44;
+  color: #cbd5e1;
 }
 
 /* ==================== 举报悬浮按钮 ==================== */

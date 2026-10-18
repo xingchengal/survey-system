@@ -6,6 +6,7 @@ import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
+import com.survey.mapper.SurveyMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,6 +62,15 @@ class QuestionServiceTest {
      */
     @Mock
     private SurveyVersionService surveyVersionService;
+
+    /**
+     * ★ 进阶题型包（矩阵/排序/NPS）在保存时扣费，所以 QuestionService 多了两个依赖。
+     * 这里都给 mock：本类断言的是保存/校验逻辑，扣费本身由 WalletServiceTest 覆盖。
+     */
+    @Mock
+    private WalletService walletService;
+    @Mock
+    private SurveyMapper surveyMapper;
 
     @InjectMocks
     private QuestionService questionService;
@@ -237,6 +247,81 @@ class QuestionServiceTest {
         BizException ex = assertThrows(BizException.class,
                 () -> questionService.saveQuestions(SURVEY_ID, payload));
         assertTrue(ex.getMessage().contains("至少需要一个选项"), "实际文案：" + ex.getMessage());
+        verifyNoInteractions(questionMapper, optionMapper);
+    }
+
+    // ==================== 进阶题型（矩阵 / 排序）的保存校验 ====================
+
+    private static Question matrix(String rowsJson, String colsJson) {
+        Question q = new Question();
+        q.setType(8);
+        q.setTitle("矩阵题");
+        q.setRequired(0);
+        q.setMatrixRows(rowsJson);
+        q.setMatrixCols(colsJson);
+        return q;
+    }
+
+    @Test
+    @DisplayName("★ 矩阵题：行列标题保存前会被规范化（去空白、JSON 紧凑），非矩阵题清空两列")
+    void saveQuestions_shouldNormalizeMatrixAxes() {
+        stubAutoIncrement(900);
+        Question q = matrix("[\" 服务态度 \", \"响应速度\"]", "[\"满意\",\"不满意\"]");
+        questionService.saveQuestions(SURVEY_ID, new ArrayList<>(List.of(q)));
+
+        assertEquals("[\"服务态度\",\"响应速度\"]", q.getMatrixRows());
+        assertEquals("[\"满意\",\"不满意\"]", q.getMatrixCols());
+    }
+
+    @Test
+    @DisplayName("矩阵题行列标题重复 → 400（重复标题会让统计把两行合并）")
+    void saveQuestions_shouldRejectDuplicateMatrixRows() {
+        Question q = matrix("[\"服务态度\",\"服务态度\"]", "[\"满意\",\"不满意\"]");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, new ArrayList<>(List.of(q))));
+        assertTrue(ex.getMessage().contains("不能重复"), "实际文案：" + ex.getMessage());
+        verifyNoInteractions(questionMapper, optionMapper);
+    }
+
+    @Test
+    @DisplayName("矩阵题至少 1 行 2 列：只有一列无法构成矩阵 → 400")
+    void saveQuestions_shouldRejectMatrixWithOneColumn() {
+        Question q = matrix("[\"服务态度\"]", "[\"满意\"]");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, new ArrayList<>(List.of(q))));
+        assertTrue(ex.getMessage().contains("至少需要 2 项"), "实际文案：" + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("★ 非矩阵题即使带了行列标题，也必须被清空（防改型残留）")
+    void saveQuestions_shouldClearMatrixAxesForOtherTypes() {
+        stubAutoIncrement(901);
+        Question q = single(null, "普通单选题", null);
+        q.setMatrixRows("[\"脏行\"]");
+        q.setMatrixCols("[\"脏列\"]");
+
+        questionService.saveQuestions(SURVEY_ID, new ArrayList<>(List.of(q)));
+
+        assertNull(q.getMatrixRows());
+        assertNull(q.getMatrixCols());
+    }
+
+    @Test
+    @DisplayName("排序题只有 1 个选项 → 400（排不出来，平均名次恒为 1）")
+    void saveQuestions_shouldRejectRankingWithOneOption() {
+        Question q = new Question();
+        q.setType(9);
+        q.setTitle("排序题");
+        q.setRequired(0);
+        Option only = new Option();
+        only.setContent("唯一选项");
+        q.setOptions(new ArrayList<>(List.of(only)));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, new ArrayList<>(List.of(q))));
+        assertTrue(ex.getMessage().contains("至少需要 2 个选项"), "实际文案：" + ex.getMessage());
         verifyNoInteractions(questionMapper, optionMapper);
     }
 }

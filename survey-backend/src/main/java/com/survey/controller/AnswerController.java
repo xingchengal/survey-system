@@ -1,8 +1,10 @@
 package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
+import com.survey.common.MatrixConfig;
 import com.survey.common.PageParams;
 import com.survey.common.PageResult;
+import com.survey.common.QuestionType;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
 import com.survey.common.Permission;
@@ -232,7 +234,8 @@ public class AnswerController {
             throw new BizException("题目不存在");
         }
         requireSurveyOwnership(question.getSurveyId(), userId, role);
-        return answerService.countQuestion(questionId, excludeInvalid);
+        // ★ 传题目本体（不是 id）：排序题要走 AVG(rank_no) 那条 SQL，只看 id 无法分流题型
+        return answerService.countQuestion(question, excludeInvalid);
     }
 
     /**
@@ -363,10 +366,14 @@ public class AnswerController {
         List<Question> questions = questionService.getQuestionsBySurveyId(surveyId);
         List<AnswerDetail> allDetails = answerService.listDetailsBySurveyId(surveyId);
 
-        Map<Integer, Map<Integer, String>> answerMap = new LinkedHashMap<>();
+        // ★ 一道题可能有多行答案（多选/矩阵/排序），所以这里必须收成 List 而不是单个 String。
+        //   旧实现是 `Map<questionId, String>`，同一题后来的行会**覆盖**前面的 ——
+        //   多选题导出只留下最后一个勾选项，矩阵/排序更是只剩一行。这是本轮顺手修掉的既有缺陷。
+        Map<Integer, Map<Integer, List<AnswerDetail>>> answerMap = new LinkedHashMap<>();
         for (AnswerDetail d : allDetails) {
             answerMap.computeIfAbsent(d.getAnswerId(), k -> new HashMap<>())
-                    .put(d.getQuestionId(), d.getContent());
+                    .computeIfAbsent(d.getQuestionId(), k -> new ArrayList<>())
+                    .add(d);
         }
 
         List<List<String>> head = new ArrayList<>();
@@ -376,12 +383,12 @@ public class AnswerController {
         }
 
         List<List<Object>> rows = new ArrayList<>();
-        for (Map.Entry<Integer, Map<Integer, String>> entry : answerMap.entrySet()) {
+        for (Map.Entry<Integer, Map<Integer, List<AnswerDetail>>> entry : answerMap.entrySet()) {
             List<Object> row = new ArrayList<>();
             row.add(entry.getKey());
             for (Question q : questions) {
-                String content = entry.getValue().getOrDefault(q.getId(), "");
-                row.add(content);
+                List<AnswerDetail> details = entry.getValue().getOrDefault(q.getId(), List.of());
+                row.add(formatExportCell(q, details));
             }
             rows.add(row);
         }
@@ -408,5 +415,69 @@ public class AnswerController {
                 .head(head)
                 .sheet("答卷数据")
                 .doWrite(rows);
+    }
+
+    /**
+     * 把一道题的全部明细拼成一个 Excel 单元格。
+     *
+     * ── 为什么要按题型拼 ────────────────────────────────
+     *   多选是"一选项一行"、矩阵是"一行一条"、排序是"一名一条"——
+     *   直接取第一条会**静默丢数据**（旧实现用 Map 覆盖，连多选都只剩最后一项）。
+     *
+     * ── 各题型的单元格格式 ──────────────────────────────
+     *   多选      ：`A、B、C`（按存储顺序）
+     *   矩阵      ：`服务态度：满意；响应速度：一般`（按题目里配置的行顺序，脏行追加在后）
+     *   排序      ：`1. A；2. B；3. C`（按名次升序）
+     *   单选/填空 ：原文
+     *
+     * ★ 这里**不做任何转义/换行**：Excel 单元格本来就适合放长文本。
+     */
+    private static String formatExportCell(Question q, List<AnswerDetail> details) {
+        if (details == null || details.isEmpty()) {
+            return "";
+        }
+        if (QuestionType.isRanking(q.getType())) {
+            List<AnswerDetail> sorted = new ArrayList<>(details);
+            // null 名次放最后（历史脏数据），不参与排序断言的稳定性
+            sorted.sort((a, b) -> Integer.compare(
+                    a.getRankNo() == null ? Integer.MAX_VALUE : a.getRankNo(),
+                    b.getRankNo() == null ? Integer.MAX_VALUE : b.getRankNo()));
+            StringBuilder sb = new StringBuilder();
+            for (AnswerDetail d : sorted) {
+                if (sb.length() > 0) sb.append("；");
+                sb.append(d.getRankNo() == null ? "?" : d.getRankNo())
+                        .append(". ").append(d.getContent() == null ? "" : d.getContent());
+            }
+            return sb.toString();
+        }
+        if (QuestionType.isMatrix(q.getType())) {
+            Map<String, String> byRow = new LinkedHashMap<>();
+            for (AnswerDetail d : details) {
+                if (d.getRowKey() != null) {
+                    byRow.putIfAbsent(d.getRowKey(),
+                            d.getContent() == null ? "" : d.getContent());
+                }
+            }
+            List<String> configuredRows = MatrixConfig.parse(q.getMatrixRows(), "矩阵行标题");
+            StringBuilder sb = new StringBuilder();
+            for (String row : configuredRows) {
+                if (!byRow.containsKey(row)) continue;
+                if (sb.length() > 0) sb.append("；");
+                sb.append(row).append("：").append(byRow.get(row));
+            }
+            // ★ 不在配置里的行（历史脏数据/作者后来删了行）必须追加，不能静默丢掉
+            for (Map.Entry<String, String> e : byRow.entrySet()) {
+                if (configuredRows.contains(e.getKey())) continue;
+                if (sb.length() > 0) sb.append("；");
+                sb.append(e.getKey()).append("：").append(e.getValue());
+            }
+            return sb.toString();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (AnswerDetail d : details) {
+            if (sb.length() > 0) sb.append("、");
+            sb.append(d.getContent() == null ? "" : d.getContent());
+        }
+        return sb.toString();
     }
 }

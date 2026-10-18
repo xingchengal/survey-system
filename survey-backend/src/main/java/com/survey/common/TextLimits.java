@@ -32,6 +32,12 @@ public final class TextLimits {
     /** t_answer_detail.content —— varchar(1000) */
     public static final int ANSWER_CONTENT = 1000;
 
+    /** t_question.matrix_rows / matrix_cols —— varchar(2000)，存 JSON 数组文本 */
+    public static final int MATRIX_AXIS = 2000;
+
+    /** t_answer_detail.row_key —— varchar(500)（矩阵行标题原文，与选项同宽） */
+    public static final int MATRIX_ROW_KEY = 500;
+
     /** t_user.username / t_user.nickname —— varchar(50) */
     public static final int USER_NAME = 50;
 

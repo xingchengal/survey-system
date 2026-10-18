@@ -33,6 +33,9 @@ public final class WalletTxType {
     /** 协作者名额扣费（前 2 名免费；幂等键 collab:{surveyId}:{targetUserId}） */
     public static final String COLLABORATOR = "COLLABORATOR";
 
+    /** 进阶题型包扣费（矩阵/排序/NPS，每份问卷一次性；幂等键 advanced-types:{surveyId}） */
+    public static final String ADVANCED_TYPES = "ADVANCED_TYPES";
+
     /** 移入回收站退回（幂等键 refund:{surveyId}，一份问卷只退一次） */
     public static final String REFUND = "REFUND";
 
@@ -42,7 +45,7 @@ public final class WalletTxType {
     /** 全部类型（不可变；测试里用它钉住"没有漏登记的新类型"） */
     public static final Set<String> ALL = Set.of(
             SIGNUP_BONUS, RECHARGE, PUBLISH, AI_GENERATE, EXPORT,
-            ADVANCED_SETTINGS, COLLABORATOR, REFUND, ADMIN_ADJUST);
+            ADVANCED_SETTINGS, COLLABORATOR, ADVANCED_TYPES, REFUND, ADMIN_ADJUST);
 
     private WalletTxType() {
     }

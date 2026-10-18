@@ -304,6 +304,12 @@ public class SurveyVersionService {
         if (!optionsSignature(a).equals(optionsSignature(b))) {
             changes.add("选项变化");
         }
+        // ★ 矩阵题的行列标题也要参与差异判定：只改行列、不改题干时，
+        //   不比较这两列就会出现"保存了、版本没生成"以及对比页显示"无变化"。
+        if (!Objects.equals(a.getMatrixRows(), b.getMatrixRows())
+                || !Objects.equals(a.getMatrixCols(), b.getMatrixCols())) {
+            changes.add("矩阵行列变化");
+        }
         return changes;
     }
 

@@ -100,6 +100,8 @@ CREATE TABLE `t_answer_detail` (
   `answer_id` int NOT NULL COMMENT '所属答卷ID',
   `question_id` int NOT NULL COMMENT '题目ID',
   `content` varchar(1000) DEFAULT NULL COMMENT '回答内容',
+  `row_key` varchar(500) DEFAULT NULL COMMENT '矩阵题：该答案属于哪一行（行标题原文）；其它题型为 NULL',
+  `rank_no` smallint DEFAULT NULL COMMENT '排序题：名次（1 起）；其它题型为 NULL',
   PRIMARY KEY (`id`),
   KEY `idx_answer_id` (`answer_id`),
   KEY `idx_question_id` (`question_id`)
@@ -186,10 +188,12 @@ CREATE TABLE `t_option` (
 CREATE TABLE `t_question` (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '题目ID',
   `survey_id` int NOT NULL COMMENT '所属问卷ID',
-  `type` tinyint NOT NULL COMMENT '题型：1=单选，2=多选，3=单行输入',
+  `type` tinyint NOT NULL COMMENT '题型：1=单选，2=多选，3=单行输入，4=多行文本，5=下拉，6=评分，7=日期，8=矩阵，9=排序，10=NPS',
   `title` varchar(500) NOT NULL COMMENT '题目内容',
   `required` tinyint DEFAULT '0' COMMENT '是否必填：0=否，1=是',
   `sort_order` int DEFAULT '0' COMMENT '题目顺序',
+  `matrix_rows` varchar(2000) DEFAULT NULL COMMENT '矩阵题行标题：JSON 数组文本（仅 type=8），如 ["服务态度","响应速度"]',
+  `matrix_cols` varchar(2000) DEFAULT NULL COMMENT '矩阵题列标题：JSON 数组文本（仅 type=8），如 ["很满意","满意","一般"]',
   PRIMARY KEY (`id`),
   KEY `idx_survey_id` (`survey_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3186 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷题目表';

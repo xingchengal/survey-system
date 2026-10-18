@@ -4,6 +4,7 @@ import com.survey.common.BizException;
 import com.survey.common.QuestionType;
 import com.survey.common.SurveyStatus;
 import com.survey.entity.AnswerDetail;
+import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
@@ -401,5 +402,138 @@ class AnswerServiceGuardTest {
         BizException ex = assertThrows(BizException.class,
                 () -> answerService.submit(SURVEY_ID, USER_ID, tooLong));
         assertTrue(ex.getMessage().contains("不能超过 1000 个字符"), "实际文案：" + ex.getMessage());
+    }
+
+    // ==================== 四、进阶题型（矩阵 / 排序 / NPS） ====================
+
+    /** 矩阵题：2 行 × 2 列（行列标题是 JSON 数组文本，与库里的格式一致）。 */
+    private static Question matrixQuestion(Integer id) {
+        Question q = question(id, QuestionType.MATRIX.code());
+        q.setMatrixRows("[\"服务态度\",\"响应速度\"]");
+        q.setMatrixCols("[\"满意\",\"不满意\"]");
+        return q;
+    }
+
+    private static AnswerDetail detail(Integer questionId, String content, String rowKey, Integer rankNo) {
+        AnswerDetail d = new AnswerDetail();
+        d.setQuestionId(questionId);
+        d.setContent(content);
+        d.setRowKey(rowKey);
+        d.setRankNo(rankNo);
+        return d;
+    }
+
+    private static Option option(Integer questionId, String content) {
+        Option o = new Option();
+        o.setQuestionId(questionId);
+        o.setContent(content);
+        return o;
+    }
+
+    @Test
+    @DisplayName("★ 矩阵题天然多行：一行一个矩阵行，不能被'同题重复'守卫误杀")
+    void submit_shouldAcceptMatrixRows() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(matrixQuestion(1)));
+
+        List<AnswerDetail> details = List.of(
+                detail(1, "满意", "服务态度", null),
+                detail(1, "不满意", "响应速度", null));
+
+        assertDoesNotThrow(() -> answerService.submit(SURVEY_ID, USER_ID, details));
+    }
+
+    @Test
+    @DisplayName("矩阵题的答案行必须属于本题（防止客户端塞任意 row_key 污染统计）")
+    void submit_shouldRejectMatrixUnknownRow() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(matrixQuestion(1)));
+
+        List<AnswerDetail> details = List.of(detail(1, "满意", "不存在的行", null));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> answerService.submit(SURVEY_ID, USER_ID, details));
+        assertTrue(ex.getMessage().contains("答案行不属于"), "实际文案：" + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("矩阵题的同一行不能答两次（否则统计会把两个列都算进这一行）")
+    void submit_shouldRejectMatrixDuplicateRow() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(matrixQuestion(1)));
+
+        List<AnswerDetail> details = List.of(
+                detail(1, "满意", "服务态度", null),
+                detail(1, "不满意", "服务态度", null));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> answerService.submit(SURVEY_ID, USER_ID, details));
+        assertTrue(ex.getMessage().contains("同一行"), "实际文案：" + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("★ 排序题：每个选项一条 + rank_no 1..N，能提交成功")
+    void submit_shouldAcceptRanking() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID))
+                .thenReturn(List.of(question(1, QuestionType.RANKING.code())));
+        when(optionMapper.findByQuestionIds(any()))
+                .thenReturn(List.of(option(1, "甲"), option(1, "乙")));
+
+        List<AnswerDetail> details = List.of(
+                detail(1, "乙", null, 1),
+                detail(1, "甲", null, 2));
+
+        assertDoesNotThrow(() -> answerService.submit(SURVEY_ID, USER_ID, details));
+    }
+
+    @Test
+    @DisplayName("排序题必须给全部选项排名（少排会让平均名次不可比）")
+    void submit_shouldRejectPartialRanking() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID))
+                .thenReturn(List.of(question(1, QuestionType.RANKING.code())));
+        when(optionMapper.findByQuestionIds(any()))
+                .thenReturn(List.of(option(1, "甲"), option(1, "乙")));
+
+        List<AnswerDetail> onlyOne = List.of(detail(1, "甲", null, 1));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> answerService.submit(SURVEY_ID, USER_ID, onlyOne));
+        assertTrue(ex.getMessage().contains("全部"), "实际文案：" + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("排序题名次不能重复（两个第 1 名会让 AVG 失真）")
+    void submit_shouldRejectDuplicateRankingRank() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID))
+                .thenReturn(List.of(question(1, QuestionType.RANKING.code())));
+        when(optionMapper.findByQuestionIds(any()))
+                .thenReturn(List.of(option(1, "甲"), option(1, "乙")));
+
+        List<AnswerDetail> duplicated = List.of(
+                detail(1, "甲", null, 1),
+                detail(1, "乙", null, 1));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> answerService.submit(SURVEY_ID, USER_ID, duplicated));
+        assertTrue(ex.getMessage().contains("名次不能重复"), "实际文案：" + ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("NPS 只收 0~10 的整数，且 '07' 会被规范化成 '7'")
+    void submit_shouldValidateNpsScore() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(SurveyStatus.PUBLISHED.code(), 0));
+        when(questionMapper.findBySurveyId(SURVEY_ID))
+                .thenReturn(List.of(question(1, QuestionType.NPS.code())));
+
+        BizException tooBig = assertThrows(BizException.class,
+                () -> answerService.submit(SURVEY_ID, USER_ID, List.of(detail(1, "11", null, null))));
+        assertTrue(tooBig.getMessage().contains("0~10"), "实际文案：" + tooBig.getMessage());
+
+        AnswerDetail padded = detail(1, "07", null, null);
+        assertDoesNotThrow(() -> answerService.submit(SURVEY_ID, USER_ID, List.of(padded)));
+        assertEquals("7", padded.getContent(), "必须规范化，否则 7 分会在分布图里拆成两行");
     }
 }

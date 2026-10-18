@@ -50,8 +50,64 @@
             <el-tag size="small" effect="plain" round>{{ typeLabel(item.question.type) }}</el-tag>
           </div>
 
-          <!-- 选项 / 评分：横向条形 -->
-          <template v-if="hasChart(item.question.type)">
+          <!-- 矩阵：行 × 列分布 -->
+          <div v-if="isMatrix(item.question.type)">
+            <div v-if="item.chartData && item.chartData.length" class="matrix-wrap">
+              <table class="pub-matrix">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th v-for="(col, ci) in matrixCols(item)" :key="'pc' + ci">{{ col }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, ri) in matrixRows(item)" :key="'pr' + ri">
+                    <th>{{ row }}</th>
+                    <td v-for="(col, ci) in matrixCols(item)" :key="'pd' + ci">
+                      {{ matrixCell(item, row, col) }}<small> · {{ matrixPct(item, row, col) }}%</small>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="muted center">暂无回答数据</div>
+          </div>
+
+          <!-- 排序：平均名次 -->
+          <div v-else-if="isRanking(item.question.type)">
+            <div v-if="item.chartData && item.chartData.length" class="bars">
+              <div v-for="(row, ri) in sortedRanking(item)" :key="'rk' + ri" class="bar-row">
+                <span class="bar-label">{{ ri + 1 }}. {{ row.content }}</span>
+                <div class="bar-track">
+                  <i :style="{ width: rankingBarWidth(item, row) }"></i>
+                </div>
+                <span class="bar-value">平均 {{ rankingAvg(row) }} 名</span>
+              </div>
+            </div>
+            <div v-else class="muted center">暂无回答数据</div>
+          </div>
+
+          <!-- NPS：净推荐值 + 分布 -->
+          <div v-else-if="isNps(item.question.type)">
+            <div v-if="item.chartData && item.chartData.length" class="bars">
+              <p class="q-avg nps-public">
+                NPS {{ npsOf(item).score == null ? '—' : npsOf(item).score }} ·
+                推荐者 {{ npsOf(item).promoters }} / 被动者 {{ npsOf(item).passives }} / 贬损者 {{ npsOf(item).detractors }}
+              </p>
+              <div v-for="row in item.chartData" :key="'nps' + row.content" class="bar-row">
+                <span class="bar-label">{{ row.content }} 分</span>
+                <div class="bar-track">
+                  <i :class="'nps-fill-' + npsBucket(row.content)"
+                     :style="{ width: percent(item.chartData, row.count) + '%' }"></i>
+                </div>
+                <span class="bar-value">{{ row.count }} 人 · {{ percent(item.chartData, row.count) }}%</span>
+              </div>
+            </div>
+            <div v-else class="muted center">暂无回答数据</div>
+          </div>
+
+          <!-- 普通选项 / 评分：横向条形 -->
+          <template v-else-if="hasChart(item.question.type)">
             <div v-if="item.chartData && item.chartData.length" class="bars">
               <div v-for="row in item.chartData" :key="row.content" class="bar-row">
                 <span class="bar-label">{{ barLabel(item.question.type, row.content) }}</span>
@@ -83,7 +139,11 @@
 // ★ 公开结果页：**匿名可访问**，所以不引用任何需要登录态的组件/接口。
 //   后端只返回脱敏统计（不含填空题原文），这里也不做任何"补充查询"。
 import api from '../api'
-import { typeLabel, hasChart, isRating, ratingAverage } from '../utils/questionTypes'
+import {
+  typeLabel, hasChart, isRating, ratingAverage,
+  isMatrix, isRanking, isNps, parseMatrixAxis,
+  npsSummary, npsBucket
+} from '../utils/questionTypes'
 
 export default {
   name: 'PublicResult',
@@ -108,6 +168,10 @@ export default {
     typeLabel,
     hasChart,
     isRating,
+    isMatrix,
+    isRanking,
+    isNps,
+    npsBucket,
     async load() {
       try {
         this.data = await api.survey.result(this.shareCode)
@@ -126,6 +190,47 @@ export default {
       const total = (list || []).reduce((sum, item) => sum + Number(item.count || 0), 0)
       if (!total) return 0
       return Math.round((Number(count || 0) / total) * 100)
+    },
+
+    // ===== 矩阵 =====
+    matrixRows(item) {
+      return parseMatrixAxis(item.question.matrixRows)
+    },
+    matrixCols(item) {
+      return parseMatrixAxis(item.question.matrixCols)
+    },
+    matrixCell(item, row, col) {
+      const found = (item.chartData || []).find(d => d.row === row && d.content === col)
+      return found ? Number(found.count || 0) : 0
+    },
+    matrixRowTotal(item, row) {
+      return (item.chartData || [])
+        .filter(d => d.row === row)
+        .reduce((sum, d) => sum + Number(d.count || 0), 0)
+    },
+    matrixPct(item, row, col) {
+      const total = this.matrixRowTotal(item, row)
+      return total > 0 ? Math.round(this.matrixCell(item, row, col) * 100 / total) : 0
+    },
+
+    // ===== 排序 =====
+    sortedRanking(item) {
+      return (item.chartData || []).slice().sort((a, b) => Number(a.avgRank) - Number(b.avgRank))
+    },
+    rankingAvg(row) {
+      const avg = Number(row.avgRank)
+      return Number.isFinite(avg) ? avg.toFixed(2) : '—'
+    },
+    rankingBarWidth(item, row) {
+      const total = (item.chartData || []).length
+      const avg = Number(row.avgRank)
+      if (!total || !Number.isFinite(avg)) return '0%'
+      return `${Math.max(8, Math.round((1 - (avg - 1) / total) * 100))}%`
+    },
+
+    // ===== NPS =====
+    npsOf(item) {
+      return npsSummary(item.chartData)
     },
     goFill() {
       this.$router.push(`/s/${this.shareCode}`)
@@ -256,6 +361,47 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* 矩阵：小表格（公开页空间更窄，字号比后台统计页小一号） */
+.matrix-wrap {
+  overflow-x: auto;
+}
+.pub-matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+.pub-matrix th,
+.pub-matrix td {
+  padding: 7px 10px;
+  border: 1px solid var(--stroke);
+  font-size: 12px;
+  text-align: center;
+}
+.pub-matrix thead th {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.pub-matrix tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.pub-matrix small {
+  color: var(--ink-3);
+}
+.nps-public {
+  margin-bottom: 4px;
+}
+.nps-fill-promoter {
+  background: #34d399;
+}
+.nps-fill-passive {
+  background: #fbbf24;
+}
+.nps-fill-detractor {
+  background: #f87171;
 }
 .bar-row {
   display: flex;

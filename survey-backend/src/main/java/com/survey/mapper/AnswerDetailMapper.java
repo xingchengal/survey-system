@@ -27,17 +27,29 @@ import java.util.Map;
 public interface AnswerDetailMapper {
 
     /** 插入一条答案（一次提交里每题一行）。 */
-    @Insert("INSERT INTO t_answer_detail(answer_id, question_id, content) VALUES(#{answerId}, #{questionId}, #{content})")
+    @Insert("INSERT INTO t_answer_detail(answer_id, question_id, content, row_key, rank_no) " +
+            "VALUES(#{answerId}, #{questionId}, #{content}, #{rowKey}, #{rankNo})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(AnswerDetail detail);
 
     /**
      * 单题的选项分布：按 content 分组计数。
-     * ★ 返回的 Map key 是 SQL 里的列名 content / count（不是实体属性）。
+     * ★ 返回的 Map key 是 SQL 里的列名（content / count / row_key），不是实体属性。
+     * ★ 带上 row_key 是为了矩阵题：矩阵按"行 × 列"分组；普通题型的 row_key 恒为 NULL，
+     *   会聚成同一组，结果与原来的 `GROUP BY content` 完全一致（不影响既有题型）。
      */
-    @Select("SELECT content, COUNT(*) AS count FROM t_answer_detail " +
-            "WHERE question_id = #{questionId} GROUP BY content")
+    @Select("SELECT row_key AS row_key, content, COUNT(*) AS count FROM t_answer_detail " +
+            "WHERE question_id = #{questionId} GROUP BY row_key, content")
     List<Map<String, Object>> countByQuestionId(Integer questionId);
+
+    /**
+     * 排序题的统计：每个选项被排到第几名的**平均名次**。
+     * ★ 只统计 rank_no 非空的行：老版本/脏数据里没有名次的排序答案不参与平均，
+     *   否则 AVG 会被 NULL 拉成"看起来更靠前"的假象。
+     */
+    @Select("SELECT content, COUNT(*) AS count, AVG(rank_no) AS avg_rank FROM t_answer_detail " +
+            "WHERE question_id = #{questionId} AND rank_no IS NOT NULL GROUP BY content")
+    List<Map<String, Object>> countRankingByQuestionId(Integer questionId);
 
     /**
      * 单题选项分布，**只统计有效答卷**（`t_answer.quality_flag = 0`）。
@@ -47,24 +59,48 @@ public interface AnswerDetailMapper {
      *   排查时很难一眼看出走的是哪条。两条**静态 SQL** + 两个缓存 key，对应关系一目了然。
      * ★ JOIN 的方向：明细 → 答卷（`d.answer_id = a.id`），过滤条件挂在答卷上。
      */
-    @Select("SELECT d.content, COUNT(*) AS count FROM t_answer_detail d " +
+    @Select("SELECT d.row_key AS row_key, d.content, COUNT(*) AS count FROM t_answer_detail d " +
             "JOIN t_answer a ON d.answer_id = a.id " +
-            "WHERE d.question_id = #{questionId} AND a.quality_flag = 0 GROUP BY d.content")
+            "WHERE d.question_id = #{questionId} AND a.quality_flag = 0 " +
+            "GROUP BY d.row_key, d.content")
     List<Map<String, Object>> countValidByQuestionId(Integer questionId);
+
+    /** 排序题统计（只统计有效答卷）—— 与 {@link #countRankingByQuestionId} 同口径。 */
+    @Select("SELECT d.content, COUNT(*) AS count, AVG(d.rank_no) AS avg_rank FROM t_answer_detail d " +
+            "JOIN t_answer a ON d.answer_id = a.id " +
+            "WHERE d.question_id = #{questionId} AND d.rank_no IS NOT NULL AND a.quality_flag = 0 " +
+            "GROUP BY d.content")
+    List<Map<String, Object>> countValidRankingByQuestionId(Integer questionId);
 
     /**
      * ★ 批量版：多道题的选项分布，**只统计有效答卷**（整份问卷统计 + 剔除可疑样本时用）。
      * 返回每行 `qid / content / cnt`，与 {@link #countByQuestionIds} 同口径（全小写别名）。
      */
     @Select("<script>" +
-            "SELECT d.question_id AS qid, d.content, COUNT(*) AS cnt FROM t_answer_detail d " +
+            "SELECT d.question_id AS qid, d.row_key AS row_key, d.content, COUNT(*) AS cnt " +
+            "FROM t_answer_detail d " +
             "JOIN t_answer a ON d.answer_id = a.id " +
             "WHERE d.question_id IN " +
             "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
             "AND a.quality_flag = 0 " +
-            "GROUP BY d.question_id, d.content" +
+            "GROUP BY d.question_id, d.row_key, d.content" +
             "</script>")
     List<Map<String, Object>> countValidByQuestionIds(@Param("questionIds") List<Integer> questionIds);
+
+    /**
+     * ★ 批量版排序题统计：一次取回多道排序题的 `{content, count, avgRank}`。
+     * 与 {@link #countRankingByQuestionId} 同口径；`avg_rank` 为 double。
+     */
+    @Select("<script>" +
+            "SELECT d.question_id AS qid, d.content, COUNT(*) AS cnt, AVG(d.rank_no) AS avg_rank " +
+            "FROM t_answer_detail d " +
+            "JOIN t_answer a ON d.answer_id = a.id " +
+            "WHERE d.question_id IN " +
+            "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
+            "AND d.rank_no IS NOT NULL AND a.quality_flag = 0 " +
+            "GROUP BY d.question_id, d.content" +
+            "</script>")
+    List<Map<String, Object>> countValidRankingByQuestionIds(@Param("questionIds") List<Integer> questionIds);
 
     /**
      * ★ **批量版**选项分布：一次取回多道题的 `{content, count}`（整份问卷统计接口用它）。
@@ -81,12 +117,28 @@ public interface AnswerDetailMapper {
      * @param questionIds 题目 id 列表（调用方需保证非空：空列表会让 `IN ()` 变成语法错误）
      */
     @Select("<script>" +
-            "SELECT question_id AS qid, content, COUNT(*) AS cnt FROM t_answer_detail " +
+            "SELECT question_id AS qid, row_key AS row_key, content, COUNT(*) AS cnt " +
+            "FROM t_answer_detail " +
             "WHERE question_id IN " +
             "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
-            "GROUP BY question_id, content" +
+            "GROUP BY question_id, row_key, content" +
             "</script>")
     List<Map<String, Object>> countByQuestionIds(@Param("questionIds") List<Integer> questionIds);
+
+    /**
+     * ★ 批量版排序题统计（全部答卷口径）：`{qid, content, cnt, avg_rank}`。
+     * ★ 为什么单独一条 SQL：`GROUP BY content` 只能数"被选了几次"，
+     *   排序题要的是"平均排在第几名"，必须用 AVG(rank_no)。
+     */
+    @Select("<script>" +
+            "SELECT question_id AS qid, content, COUNT(*) AS cnt, AVG(rank_no) AS avg_rank " +
+            "FROM t_answer_detail " +
+            "WHERE question_id IN " +
+            "<foreach collection='questionIds' item='qid' open='(' separator=',' close=')'>#{qid}</foreach> " +
+            "AND rank_no IS NOT NULL " +
+            "GROUP BY question_id, content" +
+            "</script>")
+    List<Map<String, Object>> countRankingByQuestionIds(@Param("questionIds") List<Integer> questionIds);
 
     /**
      * 填空题的所有非空答案文本（前端做列表/词云展示）。

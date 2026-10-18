@@ -38,7 +38,17 @@ public enum WalletFeature {
 
     /** 协作者名额：进阶功能，前 2 名免费，之后 1 点/人（同一人只扣一次） */
     COLLABORATOR("collaborator", "协作者名额", 1,
-            "每份问卷前 2 名协作者免费，之后每名 1 点（同一人只扣一次）", BillingMode.PER_COLLABORATOR);
+            "每份问卷前 2 名协作者免费，之后每名 1 点（同一人只扣一次）", BillingMode.PER_COLLABORATOR),
+
+    /**
+     * 进阶题型包：矩阵题 / 排序题 / NPS，2 点/份（每份问卷只扣一次）。
+     * ★ 触发点是"保存题目"：问卷里出现这三种题型中的任意一种就扣一次；
+     *   幂等键 advanced-types:{surveyId}，之后加题/删题/重复保存都不再扣。
+     * ★ 为什么按"份"而不是按"题"：作者很难预估"加一道矩阵要多少钱"，
+     *   按份买断更符合"解锁一种能力"的直觉，也和高级设置包的计价方式一致。
+     */
+    ADVANCED_TYPES("advanced-types", "进阶题型包（矩阵/排序/NPS）", 2,
+            "矩阵题、排序题、NPS 任一种首次保存时扣 2 点；每份问卷只扣一次", BillingMode.ONCE_PER_SURVEY);
 
     /** 每份问卷免费的协作者名额（名额收费从第 3 名开始） */
     public static final int FREE_COLLABORATORS = 2;

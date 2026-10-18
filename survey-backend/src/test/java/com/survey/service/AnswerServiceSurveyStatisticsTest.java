@@ -211,4 +211,51 @@ class AnswerServiceSurveyStatisticsTest {
         verify(statsCacheService).putQuestionStats(eq(Q_MULTI), anyList());
         verify(statsCacheService).putQuestionTexts(eq(Q_TEXT), anyList());
     }
+
+    // ==================== 进阶题型（矩阵 / 排序） ====================
+
+    private static Map<String, Object> matrixRow(Integer qid, String rowKey, String content, Long cnt) {
+        Map<String, Object> m = row(qid, content, cnt);
+        m.put("row_key", rowKey);
+        return m;
+    }
+
+    private static Map<String, Object> rankingRow(Integer qid, String content, Long cnt, Double avgRank) {
+        Map<String, Object> m = row(qid, content, cnt);
+        m.put("avg_rank", avgRank);
+        return m;
+    }
+
+    @Test
+    @DisplayName("★ 矩阵题按 row_key 分组下发 row 字段；排序题走 AVG(rank_no) 的单独批量 SQL")
+    void advancedTypes_matrixRowAndRankingAvg() {
+        Question matrix = question(8, 8);
+        matrix.setMatrixRows("[\"服务态度\",\"响应速度\"]");
+        matrix.setMatrixCols("[\"满意\",\"不满意\"]");
+        Question ranking = question(9, 9);
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(matrix, ranking));
+        when(statsCacheService.getQuestionStats(anyInt())).thenReturn(null);
+        when(statsCacheService.getAnswerCount(SURVEY_ID)).thenReturn(3);
+        when(answerDetailMapper.countByQuestionIds(anyList()))
+                .thenReturn(List.of(matrixRow(8, "服务态度", "满意", 2L)));
+        when(answerDetailMapper.countRankingByQuestionIds(anyList()))
+                .thenReturn(List.of(rankingRow(9, "甲", 3L, 1.5)));
+
+        SurveyStatisticsDTO dto = answerService.getSurveyStatistics(survey());
+
+        // 矩阵：chartData 里必须带 row（前端按行拼表格）
+        Map<String, Object> matrixCell = dto.questions().get(0).chartData().get(0);
+        assertEquals("服务态度", matrixCell.get("row"));
+        assertEquals("满意", matrixCell.get("content"));
+        assertEquals(2L, matrixCell.get("count"));
+
+        // 排序：平均名次必须原样下发（前端按 avgRank 升序画条形图）
+        Map<String, Object> rankingItem = dto.questions().get(1).chartData().get(0);
+        assertEquals("甲", rankingItem.get("content"));
+        assertEquals(1.5, rankingItem.get("avgRank"));
+
+        // 两类各走各的批量 SQL：矩阵不能混进排序查询，反之亦然
+        verify(answerDetailMapper).countByQuestionIds(List.of(8));
+        verify(answerDetailMapper).countRankingByQuestionIds(List.of(9));
+    }
 }

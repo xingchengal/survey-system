@@ -67,6 +67,9 @@ public class WalletService {
     /** 协作者名额（第 3 名起，按人一次性） */
     public static final int COLLABORATOR_COST = WalletFeature.COLLABORATOR.getCost();
 
+    /** 进阶题型包（矩阵 / 排序 / NPS），每份问卷一次性 */
+    public static final int ADVANCED_TYPES_COST = WalletFeature.ADVANCED_TYPES.getCost();
+
     /** 注册赠送点数 */
     public static final int SIGNUP_BONUS_AMOUNT = 10;
 
@@ -239,6 +242,23 @@ public class WalletService {
         doCharge(ownerId, ADVANCED_SETTINGS_COST, WalletTxType.ADVANCED_SETTINGS,
                 String.valueOf(surveyId), "advanced:" + surveyId,
                 "高级设置包（密码/限量/公开结果）");
+    }
+
+    /**
+     * 进阶题型包：矩阵 / 排序 / NPS，**每份问卷一次性**（幂等键 advanced-types:{surveyId}）。
+     * ★ 由 {@code QuestionService.doSaveQuestions} 在**同一个保存事务**里调用：
+     *   余额不足会让整次保存回滚 —— 不会出现"题目存了、钱没扣到"或"钱扣了、题没存上"。
+     * ★ 作者是模板（userId=0）时免费：模板属于公共资产，不向维护者收费。
+     * ★ 删掉进阶题再保存**不退款**（买断语义）：否则"加题→保存→删题→保存"就能反复白嫖。
+     */
+    @Transactional
+    public void chargeForAdvancedTypes(Integer surveyId, Integer ownerId) {
+        if (surveyId == null || ownerId == null || ownerId == 0) {
+            return;
+        }
+        doCharge(ownerId, ADVANCED_TYPES_COST, WalletTxType.ADVANCED_TYPES,
+                String.valueOf(surveyId), "advanced-types:" + surveyId,
+                "进阶题型包（矩阵/排序/NPS）");
     }
 
     /**

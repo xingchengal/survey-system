@@ -662,6 +662,10 @@ public class SurveyService {
             newQ.setTitle(q.getTitle());
             newQ.setRequired(q.getRequired());
             newQ.setSortOrder(q.getSortOrder());
+            // ★ 矩阵题的行列标题必须一起复制：漏了的话副本会变成"没有行列的矩阵题"，
+            //   答题页渲染不出来、统计页也没有表头（而且保存时才报错，用户已以为复制成功）。
+            newQ.setMatrixRows(q.getMatrixRows());
+            newQ.setMatrixCols(q.getMatrixCols());
             questionMapper.insert(newQ);
             questionIdMap.put(q.getId(), newQ.getId());
         }

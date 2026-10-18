@@ -1,6 +1,7 @@
 package com.survey.service;
 
 import com.survey.common.BizException;
+import com.survey.common.MatrixConfig;
 import com.survey.common.PageParams;
 import com.survey.common.PageResult;
 import com.survey.common.QuestionType;
@@ -9,6 +10,7 @@ import com.survey.common.SurveyStatus;
 import com.survey.common.TextLimits;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
+import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
@@ -27,6 +29,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -111,6 +114,10 @@ public class AnswerService {
 
     /** 评分题的合法取值（前端渲染 5 颗星，1~5 分） */
     private static final Set<String> RATING_VALUES = Set.of("1", "2", "3", "4", "5");
+
+    /** NPS 的分数区间（0~10，整数） */
+    private static final int NPS_MIN = 0;
+    private static final int NPS_MAX = 10;
 
     /** 日期题的格式（value-format 统一为 yyyy-MM-dd，避免客户端时区把日期差一天） */
     private static final java.util.regex.Pattern DATE_PATTERN =
@@ -270,43 +277,76 @@ public class AnswerService {
         Map<Integer, Question> questionById = surveyQuestions.stream()
                 .filter(q -> q.getId() != null)
                 .collect(Collectors.toMap(Question::getId, q -> q, (a, b) -> a));
-        // ★★ 多选题的"一选项一行"：这类题的 questionId **允许**在一次提交里出现多行。
-        //   为什么（务必看完再改）：
+        // ★★ "一题多行"的题型：多选（一选项一行）、矩阵（一行一条）、排序（一名一条）。
+        //   为什么必须放行（务必看完再改）：
         //     · 前端答题页对多选的每个勾选项各生成一条明细（SurveyFillByCode.vue），
         //       演示数据也是这个形态（DemoDataService），而库里**历史答卷本来就是多行**
-        //       （如 answer_id=1 + question_id=8 有 3 行）—— 三处口径一致，都是"一选项一行"。
-        //     · 统计页按 `GROUP BY content` 数选项分布（AnswerDetailMapper.countByQuestionId），
-        //       这个口径**只认一选项一行**：若把多选拼成一行字符串，饼图会按"整串组合"分组而失真。
-        //     · 所以下面"同题只能一行"的守卫**必须**放过多选题，否则
-        //       **任何多选题勾选 ≥2 项提交必然 400**（「同一道题在一次提交里出现了多次」）。
-        //   ★ 所以这里按题型区别对待：多选题允许多行（但限行数，见 MAX_ROWS_PER_QUESTION），
-        //     单选/填空仍严格"一题一行"。
-        Set<Integer> multiChoiceQuestionIds = surveyQuestions.stream()
-                .filter(q -> QuestionType.hasOptions(q.getType()) && !QuestionType.isSingle(q.getType()))
+        //       （如 answer_id=1 + question_id=8 有 3 行）—— 三处口径一致，都是"一选项一行"；
+        //     · 矩阵一道题天然有 N 行（每行选一个列），排序一道题天然有 N 条（每个名次一条），
+        //       它们和"同题重复提交刷票"完全是两回事；
+        //     · 统计页按 `GROUP BY content`（矩阵再按 row_key 分组）数分布，
+        //       这个口径**只认一行一条**：若把矩阵拼成一行字符串，图表会按"整串组合"分组而失真。
+        //   ★ 其它题型（单选/下拉/填空/评分/日期/NPS）仍严格"一题一行"，重复出现即视为灌票。
+        Set<Integer> multiRowQuestionIds = surveyQuestions.stream()
+                .filter(q -> QuestionType.isMultiRow(q.getType()))
                 .map(Question::getId)
                 .collect(Collectors.toSet());
-        // 同题出现的行数：用来在不误杀多选的前提下，仍然挡住"一次 POST 给某个选项灌 200 票"
+        // 同题出现的行数：用来在不误杀多行题型的前提下，仍然挡住"一次 POST 给某个选项灌 200 票"
         Map<Integer, Integer> rowsPerQuestion = new HashMap<>();
+        Map<Integer, List<AnswerDetail>> detailsByQuestion = new HashMap<>();
         for (AnswerDetail d : details) {
             if (d.getQuestionId() == null || !validQuestionIds.contains(d.getQuestionId())) {
                 throw new BizException("答卷包含不属于该问卷的题目");
             }
             int rows = rowsPerQuestion.merge(d.getQuestionId(), 1, Integer::sum);
-            boolean multiChoice = multiChoiceQuestionIds.contains(d.getQuestionId());
-            if (!multiChoice && rows > 1) {
-                // 单选/填空：一句话只能有一个答案，重复出现即视为灌票
+            boolean multiRow = multiRowQuestionIds.contains(d.getQuestionId());
+            if (!multiRow && rows > 1) {
+                // 单选/填空/评分/日期/NPS：一句话只能有一个答案，重复出现即视为灌票
                 throw new BizException("同一道题在一次提交里出现了多次");
             }
-            if (multiChoice && rows > MAX_ROWS_PER_QUESTION) {
-                // 多选题：行数上限与"单题最多多少个选项"对齐（选项是答案的合法取值集合）
-                throw new BizException("同一道多选题的作答选项过多（最多 " + MAX_ROWS_PER_QUESTION + " 个）");
+            if (multiRow && rows > MAX_ROWS_PER_QUESTION) {
+                // 多行题型：行数上限与"单题最多多少个选项/行"对齐
+                if (QuestionType.MULTI.code() == questionById.get(d.getQuestionId()).getType()) {
+                    throw new BizException("同一道多选题的作答选项过多（最多 "
+                            + MAX_ROWS_PER_QUESTION + " 个）");
+                }
+                throw new BizException("同一道题的作答条目过多（最多 " + MAX_ROWS_PER_QUESTION + " 条）");
             }
             if (d.getContent() != null && d.getContent().length() > MAX_CONTENT_LENGTH) {
                 throw new BizException("单题回答不能超过 " + MAX_CONTENT_LENGTH + " 个字符");
             }
-            // ★ 新题型的取值校验：评分 / 日期。不校验的话，客户端可以往评分题里塞任意字符串，
+            detailsByQuestion.computeIfAbsent(d.getQuestionId(), k -> new ArrayList<>()).add(d);
+            // ★ 新题型的取值校验：评分 / 日期 / NPS（矩阵/排序另有结构化校验，见下）。
+            //   不校验的话，客户端可以往评分题里塞任意字符串，
             //   统计图（按 content 分组）就会出现 "abc"、"6" 这种分数。
-            validateContentByType(questionById.get(d.getQuestionId()), d.getContent());
+            validateContentByType(questionById.get(d.getQuestionId()), d);
+        }
+
+        // ★ 矩阵 / 排序的**结构化校验**：这两类题光看单条 content 不够，
+        //   还要校验"行是否属于本题""名次是否 1..N 连续且不重复"。不校验的话，
+        //   客户端可以塞进任意 row_key / rank_no，统计页会凭空多出几行几列。
+        Map<Integer, List<Option>> rankingOptions = new HashMap<>();
+        Set<Integer> rankingQuestionIds = surveyQuestions.stream()
+                .filter(q -> QuestionType.isRanking(q.getType()))
+                .map(Question::getId)
+                .collect(Collectors.toSet());
+        if (!rankingQuestionIds.isEmpty()) {
+            List<Option> options = optionMapper.findByQuestionIds(new ArrayList<>(rankingQuestionIds));
+            for (Option opt : options) {
+                rankingOptions.computeIfAbsent(opt.getQuestionId(), k -> new ArrayList<>()).add(opt);
+            }
+        }
+        for (Question q : surveyQuestions) {
+            List<AnswerDetail> questionDetails = detailsByQuestion.get(q.getId());
+            if (questionDetails == null) {
+                continue;
+            }
+            if (QuestionType.isMatrix(q.getType())) {
+                validateMatrixAnswer(q, questionDetails);
+            } else if (QuestionType.isRanking(q.getType())) {
+                validateRankingAnswer(q, questionDetails,
+                        rankingOptions.getOrDefault(q.getId(), List.of()));
+            }
         }
 
         // ★ IP 限制（高级设置包）：开启后同一 IP 只能提交一次。
@@ -425,12 +465,15 @@ public class AnswerService {
     }
 
     /**
-     * 新题型的取值校验（评分 / 日期）。
+     * 新题型的取值校验（评分 / 日期 / NPS）。
      * ★ 只做"值域"校验，不校验选项归属：选项归属由 AnswerQualityService 在提交后打
      *   OPTION_MISMATCH 标记（单选/多选历史口径一致），这里不引入第二套判定。
+     * ★ NPS 的 content 会被**规范化**成不带前导零的十进制（"07" → "7"）：
+     *   不规范化的话，同一个 7 分会以 "7" 和 "07" 两行出现在分布图里。
      */
-    private void validateContentByType(Question q, String content) {
-        if (q == null || content == null) return;
+    private void validateContentByType(Question q, AnswerDetail detail) {
+        if (q == null || detail == null || detail.getContent() == null) return;
+        String content = detail.getContent();
         if (QuestionType.isRating(q.getType())) {
             if (!RATING_VALUES.contains(content)) {
                 throw new BizException("评分题的答案必须是 1~5 分");
@@ -444,6 +487,88 @@ public class AnswerService {
             } catch (java.time.format.DateTimeParseException e) {
                 throw new BizException("日期题的答案不是合法日期");
             }
+        } else if (QuestionType.isNps(q.getType())) {
+            int score;
+            try {
+                score = Integer.parseInt(content.trim());
+            } catch (NumberFormatException e) {
+                throw new BizException("NPS 题的答案必须是 0~10 的整数");
+            }
+            if (score < NPS_MIN || score > NPS_MAX) {
+                throw new BizException("NPS 题的答案必须在 0~10 之间");
+            }
+            detail.setContent(String.valueOf(score));
+        }
+    }
+
+    /**
+     * 矩阵题的结构化校验：每一行必须属于本题、每个答案必须是一个合法列、同一行不能答两次。
+     *
+     * ★ 用**标题原文**匹配（不是下标）：答卷里存的就是标题原文，
+     *   作者改标题只会影响之后的答卷（与选项文本的既有口径一致）。
+     * ★ 为什么允许"只答一部分行"：必填校验一直在前端（全项目口径），
+     *   后端只保证"答了的内容是合法的"，不替前端决定 required 的语义。
+     */
+    private void validateMatrixAnswer(Question q, List<AnswerDetail> answers) {
+        List<String> rows = MatrixConfig.parse(q.getMatrixRows(), "矩阵行标题");
+        List<String> cols = MatrixConfig.parse(q.getMatrixCols(), "矩阵列标题");
+        if (rows.isEmpty() || cols.isEmpty()) {
+            throw new BizException("该矩阵题的行列配置不完整，暂时无法提交");
+        }
+        Set<String> rowSet = new HashSet<>(rows);
+        Set<String> colSet = new HashSet<>(cols);
+        Set<String> answeredRows = new HashSet<>();
+        for (AnswerDetail d : answers) {
+            String rowKey = d.getRowKey() == null ? "" : d.getRowKey().trim();
+            if (!rowSet.contains(rowKey)) {
+                throw new BizException("矩阵题的答案行不属于这道题");
+            }
+            if (d.getContent() == null || !colSet.contains(d.getContent())) {
+                throw new BizException("矩阵题的答案列不属于这道题");
+            }
+            d.setRowKey(rowKey);
+            if (!answeredRows.add(rowKey)) {
+                throw new BizException("矩阵题的同一行出现了多条答案");
+            }
+        }
+    }
+
+    /**
+     * 排序题的结构化校验：名次必须是 1..N 且不重复，答案必须都是本题选项，且**全部选项都要排**。
+     *
+     * ★ 为什么要求"排满全部选项"：平均名次的分母必须一致。
+     *   若允许只排前 3 名，A 的"平均 1.2 名"与 B 的"平均 1.0 名"就不可比
+     *   （前者可能来自"只排 3 个"的答卷），统计结论会失真。
+     *   前端排序控件本来就是把全部选项拖成 1..N，不存在"少排"的正常路径。
+     */
+    private void validateRankingAnswer(Question q, List<AnswerDetail> answers, List<Option> options) {
+        if (options.size() < 2) {
+            throw new BizException("该排序题的选项不足 2 个，暂时无法提交");
+        }
+        Set<String> optionTexts = options.stream()
+                .map(Option::getContent)
+                .collect(Collectors.toSet());
+        Set<Integer> ranks = new HashSet<>();
+        Set<String> contents = new HashSet<>();
+        for (AnswerDetail d : answers) {
+            if (d.getRankNo() == null) {
+                throw new BizException("排序题的答案缺少名次");
+            }
+            if (d.getRankNo() < 1 || d.getRankNo() > options.size()) {
+                throw new BizException("排序题的名次必须在 1~" + options.size() + " 之间");
+            }
+            if (!ranks.add(d.getRankNo())) {
+                throw new BizException("排序题的名次不能重复");
+            }
+            if (d.getContent() == null || !optionTexts.contains(d.getContent())) {
+                throw new BizException("排序题的答案不在选项里");
+            }
+            if (!contents.add(d.getContent())) {
+                throw new BizException("排序题的同一个选项出现了两条答案");
+            }
+        }
+        if (ranks.size() != options.size()) {
+            throw new BizException("排序题需要给全部 " + options.size() + " 个选项排名");
         }
     }
 
@@ -536,6 +661,47 @@ public class AnswerService {
         return stats;
     }
 
+    /**
+     * 单题统计（按题型分流）—— 控制器用这个版本，因为排序题不能走 `GROUP BY content` 的那条 SQL。
+     *
+     * ★ 排序题返回 `[{content, count, avgRank}]`：count = 被排进名次的次数，
+     *   avgRank = 平均名次（越小越靠前）。
+     * ★ 缓存 key 与其它题型共用同一对（`qstats` / `qstats-valid`）：
+     *   缓存里存的是"这道题的统计结果"，形状由题型决定，不会被别的题型读到。
+     */
+    public List<Map<String, Object>> countQuestion(Question question, boolean excludeInvalid) {
+        if (question == null || question.getId() == null) {
+            throw new BizException("题目不存在");
+        }
+        if (!QuestionType.isRanking(question.getType())) {
+            return countQuestion(question.getId(), excludeInvalid);
+        }
+        Integer questionId = question.getId();
+        List<Map<String, Object>> cached = excludeInvalid
+                ? statsCacheService.getValidQuestionStats(questionId)
+                : statsCacheService.getQuestionStats(questionId);
+        if (cached != null) {
+            return cached;
+        }
+        List<Map<String, Object>> rows = excludeInvalid
+                ? answerDetailMapper.countValidRankingByQuestionId(questionId)
+                : answerDetailMapper.countRankingByQuestionId(questionId);
+        List<Map<String, Object>> stats = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("content", row.get("content"));
+            item.put("count", row.get("count"));
+            item.put("avgRank", row.get("avg_rank"));
+            stats.add(item);
+        }
+        if (excludeInvalid) {
+            statsCacheService.putValidQuestionStats(questionId, stats);
+        } else {
+            statsCacheService.putQuestionStats(questionId, stats);
+        }
+        return stats;
+    }
+
     /** 单题的所有填空题文本（前端做词云或列表展示）。★ 同样走缓存，失效策略与选项分布一致。 */
     public List<String> listTextAnswers(Integer questionId) {
         List<String> cached = statsCacheService.getQuestionTexts(questionId);
@@ -584,13 +750,25 @@ public class AnswerService {
         Map<Integer, List<Map<String, Object>>> chartByQuestion = new LinkedHashMap<>();
         Map<Integer, List<String>> textByQuestion = new LinkedHashMap<>();
         List<Integer> missingChart = new ArrayList<>();
+        List<Integer> missingRanking = new ArrayList<>();
         List<Integer> missingText = new ArrayList<>();
 
         // ① 先读缓存（excludeInvalid 时走"有效样本"口径）
         for (Question q : questions) {
-            // ★ 用 hasChart 而不是 hasOptions：评分题没有选项，但 1~5 分的分布同样是"分组计数"，
-            //   要跟选择题一样走 chartData，不能落到"填空原文列表"里。
-            if (QuestionType.hasChart(q.getType())) {
+            // ★ 排序题单独一条回源 SQL（要 AVG(rank_no)），但缓存 key 与其它题型共用：
+            //   缓存里存的是"这道题的统计结果"，形状由题型决定，不会被别的题型读到。
+            if (QuestionType.isRanking(q.getType())) {
+                List<Map<String, Object>> cached = excludeInvalid
+                        ? statsCacheService.getValidQuestionStats(q.getId())
+                        : statsCacheService.getQuestionStats(q.getId());
+                if (cached != null) {
+                    chartByQuestion.put(q.getId(), cached);
+                } else {
+                    missingRanking.add(q.getId());
+                }
+            // ★ 用 hasChart 而不是 hasOptions：评分题 / NPS / 矩阵没有普通选项，
+            //   但它们的分布同样是"分组计数"，要跟选择题一样走 chartData。
+            } else if (QuestionType.hasChart(q.getType())) {
                 List<Map<String, Object>> cached = excludeInvalid
                         ? statsCacheService.getValidQuestionStats(q.getId())
                         : statsCacheService.getQuestionStats(q.getId());
@@ -618,6 +796,11 @@ public class AnswerService {
             for (Map<String, Object> row : rows) {
                 Integer qid = ((Number) row.get("qid")).intValue();
                 Map<String, Object> item = new LinkedHashMap<>();
+                // ★ 矩阵题：row_key 非空时带上是哪一行；其它题型 row_key 恒为 NULL，输出与原来一致。
+                Object rowKey = row.get("row_key");
+                if (rowKey != null) {
+                    item.put("row", rowKey);
+                }
                 item.put("content", row.get("content"));
                 item.put("count", row.get("cnt"));
                 grouped.computeIfAbsent(qid, k -> new ArrayList<>()).add(item);
@@ -625,6 +808,31 @@ public class AnswerService {
             for (Integer qid : missingChart) {
                 // ★ 一道题可能一份答卷都没有：GROUP BY 不会给它出行，必须补空列表，
                 //   否则前端拿到 null 而不是"暂无回答数据"。
+                List<Map<String, Object>> list = grouped.getOrDefault(qid, List.of());
+                chartByQuestion.put(qid, list);
+                if (excludeInvalid) {
+                    statsCacheService.putValidQuestionStats(qid, list);
+                } else {
+                    statsCacheService.putQuestionStats(qid, list);
+                }
+            }
+        }
+
+        // ②' 排序题：一次取回多题的 {content, count, avgRank}
+        if (!missingRanking.isEmpty()) {
+            Map<Integer, List<Map<String, Object>>> grouped = new HashMap<>();
+            List<Map<String, Object>> rows = excludeInvalid
+                    ? answerDetailMapper.countValidRankingByQuestionIds(missingRanking)
+                    : answerDetailMapper.countRankingByQuestionIds(missingRanking);
+            for (Map<String, Object> row : rows) {
+                Integer qid = ((Number) row.get("qid")).intValue();
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("content", row.get("content"));
+                item.put("count", row.get("cnt"));
+                item.put("avgRank", row.get("avg_rank"));
+                grouped.computeIfAbsent(qid, k -> new ArrayList<>()).add(item);
+            }
+            for (Integer qid : missingRanking) {
                 List<Map<String, Object>> list = grouped.getOrDefault(qid, List.of());
                 chartByQuestion.put(qid, list);
                 if (excludeInvalid) {

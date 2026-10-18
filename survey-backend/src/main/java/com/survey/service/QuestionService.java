@@ -1,5 +1,6 @@
 package com.survey.service;
 
+import com.survey.common.MatrixConfig;
 import com.survey.common.QuestionType;
 import com.survey.dto.QuestionIdItem;
 import com.survey.dto.SurveySnapshot;
@@ -53,6 +54,18 @@ public class QuestionService {
      */
     @Autowired
     private SurveyVersionService surveyVersionService;
+
+    /**
+     * 进阶题型包计费（矩阵 / 排序 / NPS）。
+     * ★ 必须在**本类的保存事务内**调用（不能放到 Controller）：
+     *   否则"扣费成功、题目保存校验失败"会扣了钱却没存上题。
+     */
+    @Autowired
+    private WalletService walletService;
+
+    /** 只用来取"问卷作者是谁" —— 扣的是作者的额度（协作者代改也一样）。 */
+    @Autowired
+    private com.survey.mapper.SurveyMapper surveyMapper;
 
     /**
      * 保存问卷的所有题目（全量覆盖）。
@@ -198,7 +211,12 @@ public class QuestionService {
             //   ⇒ 点一个就整组选中；下拉则变成空白面板，必填时把访客永久卡死。
             //   ★ 放在这里（任何写库动作之前）：中途抛异常不会留下"题目已插入、选项没了"的半成品。
             if (validateOptions && QuestionType.hasOptions(q.getType())) {
-                if (q.getOptions() == null || q.getOptions().isEmpty()) {
+                // ★ 排序题至少要两个选项：只有一个选项时"排序"没有意义，平均名次也恒为 1。
+                if (QuestionType.isRanking(q.getType())) {
+                    if (q.getOptions() == null || q.getOptions().size() < 2) {
+                        throw new BizException("第 " + (i + 1) + " 题（排序题）至少需要 2 个选项");
+                    }
+                } else if (q.getOptions() == null || q.getOptions().isEmpty()) {
                     throw new BizException("第 " + (i + 1) + " 题至少需要一个选项");
                 }
                 for (int j = 0; j < q.getOptions().size(); j++) {
@@ -207,6 +225,27 @@ public class QuestionService {
                         throw new BizException("第 " + (i + 1) + " 题的第 " + (j + 1) + " 个选项内容不能为空");
                     }
                 }
+            }
+            // ★ 矩阵题：行/列标题是 JSON 文本（见 common/MatrixConfig），保存前必须校验并规范化。
+            //   · 不校验 → 空白/重复标题会直接进库，答卷按标题统计时会把两行合并；
+            //   · 不规范化 → 前端传来的 [" A "] 与 ["A"] 会被当成两行（用户看不出来）。
+            //   回滚（validateOptions=false）不校验：那是恢复历史快照，不是新输入。
+            if (QuestionType.isMatrix(q.getType())) {
+                if (validateOptions) {
+                    java.util.List<String> rows = MatrixConfig.validate(q.getMatrixRows(),
+                            "第 " + (i + 1) + " 题的矩阵行标题",
+                            MatrixConfig.MAX_ROWS, 1);
+                    java.util.List<String> cols = MatrixConfig.validate(q.getMatrixCols(),
+                            "第 " + (i + 1) + " 题的矩阵列标题",
+                            MatrixConfig.MAX_COLS, 2);
+                    q.setMatrixRows(MatrixConfig.toJson(rows));
+                    q.setMatrixCols(MatrixConfig.toJson(cols));
+                }
+            } else {
+                // ★ 非矩阵题必须清空这两列：否则"矩阵→单选"改型后，旧行列会一直挂在题上，
+                //   将来再改回矩阵就会看到"上次的列"（用户以为系统记住了，实际是脏数据）。
+                q.setMatrixRows(null);
+                q.setMatrixCols(null);
             }
         }
 
@@ -241,7 +280,7 @@ public class QuestionService {
                 questionMapper.insert(q);
             }
 
-            // 4. 选择题：先删旧选项，再插新选项
+            // 4. 有选项的题：先删旧选项，再插新选项；没有选项的题也要删一次（清掉改型残留）
             if (QuestionType.hasOptions(q.getType())) {
                 optionMapper.deleteByQuestionId(q.getId());
                 if (q.getOptions() != null) {
@@ -254,6 +293,11 @@ public class QuestionService {
                         optionMapper.insert(opt);
                     }
                 }
+            } else {
+                // ★ 从选择题改成矩阵/文本/评分等"无选项"题型时，旧选项必须删掉。
+                //   不删的话 t_option 里会留下孤儿行：导出/统计按 question_id 直接取数时
+                //   会读到它们，"改过题型"的问卷就会出现幽灵选项。
+                optionMapper.deleteByQuestionId(q.getId());
             }
         }
 
@@ -293,6 +337,16 @@ public class QuestionService {
                             "有选项的跳转目标已不存在（可能刚被删除），请重新设置该题的跳转规则");
                 }
             }
+        }
+
+        // ★★ 进阶题型包（矩阵/排序/NPS）：问卷里出现任意一种就扣一次（幂等键 advanced-types:{surveyId}）。
+        //   ★ 位置在**所有校验之后、版本快照之前**：校验失败会整体回滚（包括这次扣费）；
+        //     重复保存 / 加第二道矩阵题都会命中幂等键，不会再扣。
+        //   ★ 扣的是**问卷作者**的额度（协作者代改不花自己的钱）。
+        //   ★ 回滚历史版本（validateOptions=false）不扣：那份版本当初保存时已经买过单。
+        if (validateOptions && questions.stream().anyMatch(q -> QuestionType.isAdvanced(q.getType()))) {
+            com.survey.entity.Survey survey = surveyMapper.findById(surveyId);
+            walletService.chargeForAdvancedTypes(surveyId, survey == null ? null : survey.getUserId());
         }
 
         // ★★ 保存成功后生成版本快照（**同一事务**：保存回滚，快照也不会留下）。

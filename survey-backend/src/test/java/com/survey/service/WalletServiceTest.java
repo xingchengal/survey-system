@@ -243,12 +243,19 @@ class WalletServiceTest {
     void pricing_shouldExposeFeatureCatalog() {
         var list = walletService.pricing();
 
-        assertEquals(5, list.size(), "发布/AI/导出/高级设置/协作者共 5 项");
+        assertEquals(6, list.size(), "发布/AI/导出/高级设置/协作者/进阶题型包共 6 项");
         var advanced = list.stream()
                 .filter(m -> "advanced".equals(m.get("code")))
                 .findFirst()
                 .orElseThrow();
         assertEquals(1, advanced.get("cost"));
         assertTrue(String.valueOf(advanced.get("description")).contains("每份问卷只扣一次"));
+
+        var types = list.stream()
+                .filter(m -> "advanced-types".equals(m.get("code")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, types.get("cost"), "进阶题型包 2 点/份");
+        assertTrue(String.valueOf(types.get("description")).contains("矩阵题"));
     }
 }

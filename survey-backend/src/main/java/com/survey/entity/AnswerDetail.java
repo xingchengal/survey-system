@@ -12,6 +12,9 @@ package com.survey.entity;
  *     单选 → 选项文本（如 "很满意"），**一题一行**
  *     多选 → 选项文本，**一选项一行**（勾了 3 个选项就是 3 行，questionId 相同）
  *     填空 → 用户输入的原文，一题一行
+ *     矩阵 → 内容=列标题、`row_key`=行标题，**一行一条**（3 行矩阵就是 3 行明细）
+ *     排序 → 内容=选项文本、`rank_no`=名次（1 起），**一名一条**
+ *     NPS  → "0"~"10"，一题一行
  *   所以单题统计可以直接 `GROUP BY content` 数出分布（见 AnswerDetailMapper.countByQuestionId）
  *   —— 这个统计口径**只认"一选项一行"**：若把多选拼成一行 "A,B"，饼图就会按"整串组合"分组而失真。
  *
@@ -30,6 +33,10 @@ public class AnswerDetail {
     private Integer answerId;        // 属于哪一份答卷（t_answer.id）
     private Integer questionId;      // 答的是哪道题（t_question.id）
     private String content;          // 答案本体（见类注释）
+    /** 矩阵题：这一行答案属于哪个矩阵行（**行标题原文**，不是下标）；其它题型为 null */
+    private String rowKey;
+    /** 排序题：名次（1 起）；其它题型为 null */
+    private Integer rankNo;
 
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
@@ -42,4 +49,10 @@ public class AnswerDetail {
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+
+    public String getRowKey() { return rowKey; }
+    public void setRowKey(String rowKey) { this.rowKey = rowKey; }
+
+    public Integer getRankNo() { return rankNo; }
+    public void setRankNo(Integer rankNo) { this.rankNo = rankNo; }
 }

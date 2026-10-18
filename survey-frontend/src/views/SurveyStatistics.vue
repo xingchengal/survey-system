@@ -92,8 +92,80 @@
             </div>
           </div>
 
-          <!-- 选择题 -->
-          <div v-if="isChoice(q)">
+          <!-- 矩阵题：按行展示列分布 -->
+          <div v-if="isMatrixQ(q)" class="matrix-stats">
+            <template v-if="q.chartData && q.chartData.length > 0">
+              <div class="matrix-table-wrap">
+                <table class="stat-matrix">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th v-for="(col, ci) in matrixCols(q)" :key="'sc' + ci">{{ col }}</th>
+                      <th class="stat-matrix-total">行合计</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, ri) in matrixRows(q)" :key="'sr' + ri">
+                      <th>{{ row }}</th>
+                      <td v-for="(col, ci) in matrixCols(q)" :key="'sd' + ci">
+                        <span class="matrix-count">{{ matrixCell(q, row, col) }}</span>
+                        <span class="matrix-pct">{{ matrixPct(q, row, col) }}%</span>
+                      </td>
+                      <td class="stat-matrix-total">{{ matrixRowTotal(q, row) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="stats-tip">百分比按每一行自己的回答数计算（每行互不影响）。</p>
+            </template>
+            <el-empty v-else description="暂无回答数据" :image-size="70" />
+          </div>
+
+          <!-- 排序题：平均名次越小越靠前 -->
+          <div v-else-if="isRankingQ(q)" class="ranking-stats">
+            <template v-if="q.chartData && q.chartData.length > 0">
+              <div v-for="(item, idx) in sortedRanking(q)" :key="'rk' + idx" class="rank-row">
+                <span class="rank-pos">{{ idx + 1 }}</span>
+                <span class="rank-label">{{ item.content }}</span>
+                <span class="rank-bar-wrap">
+                  <span class="rank-bar" :style="{ width: rankingBarWidth(q, item) }"></span>
+                </span>
+                <span class="rank-avg">平均 {{ rankingAvg(item) }} 名</span>
+              </div>
+              <p class="stats-tip">平均名次 = 该选项在全部答卷里的名次平均值（1 = 最靠前）。</p>
+            </template>
+            <el-empty v-else description="暂无回答数据" :image-size="70" />
+          </div>
+
+          <!-- NPS：总分 + 0~10 分布 -->
+          <div v-else-if="isNpsQ(q)" class="nps-stats">
+            <template v-if="q.chartData && q.chartData.length > 0">
+              <div class="nps-hero">
+                <div class="nps-score" :class="npsTone(npsOf(q).score)">{{ npsOf(q).score == null ? '—' : npsOf(q).score }}</div>
+                <div class="nps-hero-text">
+                  <div class="nps-hero-title">NPS 净推荐值</div>
+                  <div class="nps-hero-sub">
+                    推荐者 {{ npsOf(q).promoters }} · 被动者 {{ npsOf(q).passives }} · 贬损者 {{ npsOf(q).detractors }}
+                  </div>
+                </div>
+              </div>
+              <div class="nps-dist">
+                <div v-for="score in npsScores" :key="'nps' + score" class="nps-dist-item">
+                  <span class="nps-dist-score">{{ score }}</span>
+                  <span class="nps-dist-bar-wrap">
+                    <span class="nps-dist-bar" :class="npsBucketClass(score)"
+                          :style="{ height: npsBarHeight(q, score) }"></span>
+                  </span>
+                  <span class="nps-dist-count">{{ npsCount(q, score) }}</span>
+                </div>
+              </div>
+              <p class="stats-tip">NPS =（推荐者 9~10 − 贬损者 0~6）÷ 总回答 × 100。</p>
+            </template>
+            <el-empty v-else description="暂无回答数据" :image-size="70" />
+          </div>
+
+          <!-- 普通图表题（单选 / 多选 / 下拉 / 评分） -->
+          <div v-else-if="isEchart(q)">
             <div v-if="q.chartData && q.chartData.length > 0" :ref="el => setChartRef(el, q.id)" class="q-chart"></div>
             <el-empty v-else description="暂无回答数据" :image-size="70" />
           </div>
@@ -167,7 +239,7 @@
         <div class="detail-index">{{ idx + 1 }}</div>
         <div class="detail-body">
           <div class="detail-title">{{ getQuestionTitle(item.questionId) }}</div>
-          <div class="detail-content">{{ item.content || '（未作答）' }}</div>
+          <div class="detail-content">{{ formatDetail(item) }}</div>
         </div>
       </div>
       <el-empty v-if="answerDetails.length === 0" description="暂无回答内容" :image-size="70" />
@@ -207,7 +279,11 @@ import {
 // 分享图：纯 canvas 手绘（不引截图库），见 utils/shareCard.js
 import { renderStatsCard } from '../utils/shareCard'
 // 题型元数据与判定：与后端 common/QuestionType 同口径
-import { typeLabel, typeMeta, hasChart, isRating, ratingAverage } from '../utils/questionTypes'
+import {
+  NPS_SCORES, typeLabel, typeMeta, hasChart, isRating, ratingAverage,
+  isMatrix, isRanking, isNps, parseMatrixAxis,
+  npsSummary as calcNps, npsBucket
+} from '../utils/questionTypes'
 
 /** 填空题默认先展示多少条（其余折叠，避免 2000 条一次性铺满页面） */
 const TEXT_PREVIEW = 20
@@ -248,7 +324,9 @@ export default {
       shareImage: '',
       // ===== 填空题折叠 =====
       TEXT_PREVIEW,
-      textExpanded: {}
+      textExpanded: {},
+      /** NPS 的 0~10 分（分布条按这个顺序画） */
+      npsScores: NPS_SCORES
     }
   },
   computed: {
@@ -312,7 +390,7 @@ export default {
         item.resizeHandler = null
       })
       this.questions.forEach(q => {
-        if (this.isChoice(q) && q.chartData && q.chartData.length > 0) this.initChart(q)
+        if (this.isEchart(q) && q.chartData && q.chartData.length > 0) this.initChart(q)
       })
     },
 
@@ -351,7 +429,7 @@ export default {
       //   否则图表容器不存在 → init 出来是 0 宽画布（表现为"卡片空白且不报错"）。
       await this.$nextTick()
       this.questions.forEach(q => {
-        if (this.isChoice(q) && q.chartData && q.chartData.length > 0) {
+        if (this.isEchart(q) && q.chartData && q.chartData.length > 0) {
           this.initChart(q)
         }
       })
@@ -518,9 +596,97 @@ export default {
       window.addEventListener('resize', ref.resizeHandler)
     },
 
-    isChoice(q) {
-      // ★ 评分题也走图表：1~5 分的分布就是分组计数（与后端 hasChart 同口径）
-      return hasChart(q.type)
+    /**
+     * 普通图表题：单选 / 多选 / 下拉 / 评分。
+     * ★ 矩阵 / 排序 / NPS 也属于 hasChart（后端走 chartData），但它们的图形结构完全不同，
+     *   必须各自定制渲染；混进 ECharts 分支会得到一张没有 ref 的空卡片。
+     */
+    isEchart(q) {
+      return hasChart(q.type) && !isMatrix(q.type) && !isRanking(q.type) && !isNps(q.type)
+    },
+
+    isMatrixQ(q) {
+      return isMatrix(q.type)
+    },
+
+    isRankingQ(q) {
+      return isRanking(q.type)
+    },
+
+    isNpsQ(q) {
+      return isNps(q.type)
+    },
+
+    // ===== 矩阵题 =====
+    matrixRows(q) {
+      return parseMatrixAxis(q.matrixRows)
+    },
+
+    matrixCols(q) {
+      return parseMatrixAxis(q.matrixCols)
+    },
+
+    matrixCell(q, row, col) {
+      const item = (q.chartData || []).find(d => d.row === row && d.content === col)
+      return item ? Number(item.count || 0) : 0
+    },
+
+    matrixRowTotal(q, row) {
+      return (q.chartData || [])
+        .filter(d => d.row === row)
+        .reduce((sum, d) => sum + Number(d.count || 0), 0)
+    },
+
+    matrixPct(q, row, col) {
+      const total = this.matrixRowTotal(q, row)
+      return total > 0 ? Math.round(this.matrixCell(q, row, col) * 100 / total) : 0
+    },
+
+    // ===== 排序题 =====
+    sortedRanking(q) {
+      return (q.chartData || []).slice().sort((a, b) => Number(a.avgRank) - Number(b.avgRank))
+    },
+
+    rankingAvg(item) {
+      const avg = Number(item.avgRank)
+      return Number.isFinite(avg) ? avg.toFixed(2) : '—'
+    },
+
+    /** 条形长度：第 1 名最长、最后一名最短（按"名次越好条越长"的直觉画） */
+    rankingBarWidth(q, item) {
+      const total = (q.chartData || []).length
+      const avg = Number(item.avgRank)
+      if (!total || !Number.isFinite(avg)) return '0%'
+      const ratio = 1 - (avg - 1) / total
+      return `${Math.max(8, Math.round(ratio * 100))}%`
+    },
+
+    // ===== NPS =====
+    npsOf(q) {
+      return calcNps(q.chartData)
+    },
+
+    npsTone(score) {
+      if (score == null) return 'nps-none'
+      if (score >= 50) return 'nps-excellent'
+      if (score >= 0) return 'nps-good'
+      return 'nps-poor'
+    },
+
+    npsCount(q, score) {
+      const item = (q.chartData || []).find(d => String(d.content) === String(score))
+      return item ? Number(item.count || 0) : 0
+    },
+
+    /** 分布条高度：按该分值回答数 / 最大回答数 缩放（最低 4% 保证 0 也看得见底） */
+    npsBarHeight(q, score) {
+      const max = (q.chartData || []).reduce((m, d) => Math.max(m, Number(d.count || 0)), 0)
+      if (!max) return '4%'
+      return `${Math.max(4, Math.round(this.npsCount(q, score) * 100 / max))}%`
+    },
+
+    npsBucketClass(score) {
+      return `nps-b-${npsBucket(score)}`
     },
 
     typeName(type) {
@@ -533,7 +699,19 @@ export default {
 
     /** 每题"回答数"：选择题/评分题按计数求和，文本类按条数；评分题附带平均分 */
     answerSummary(q) {
-      if (this.isChoice(q)) {
+      if (this.isMatrixQ(q)) {
+        const cells = (q.chartData || []).reduce((sum, d) => sum + Number(d.count || 0), 0)
+        return `${cells} 格回答`
+      }
+      if (this.isRankingQ(q)) {
+        const votes = (q.chartData || []).reduce((sum, d) => sum + Number(d.count || 0), 0)
+        return `${votes} 票`
+      }
+      if (this.isNpsQ(q)) {
+        const n = (q.chartData || []).reduce((sum, d) => sum + Number(d.count || 0), 0)
+        return `${n} 份回答`
+      }
+      if (this.isEchart(q)) {
         const n = (q.chartData || []).reduce((sum, d) => sum + Number(d.count || 0), 0)
         if (isRating(q.type)) {
           const avg = ratingAverage(q.chartData)
@@ -599,6 +777,26 @@ export default {
     getQuestionTitle(questionId) {
       const q = this.questions.find(item => item.id === questionId)
       return q ? q.title : `题目 #${questionId}`
+    },
+
+    /**
+     * 单份答卷详情里，一行明细怎么显示。
+     * ★ 矩阵一行一个矩阵行、排序一名一条 —— 只显示 content 会丢掉"是哪一行/第几名"，
+     *   用户看到的就会是一串互不相干的列标题/选项。
+     */
+    formatDetail(item) {
+      const q = this.questions.find(x => x.id === item.questionId)
+      if (!q) return item.content || '（未作答）'
+      if (isMatrix(q.type)) {
+        return `${item.rowKey || '（行）'}：${item.content || '（未作答）'}`
+      }
+      if (isRanking(q.type)) {
+        return `第 ${item.rankNo == null ? '?' : item.rankNo} 名 · ${item.content || ''}`
+      }
+      if (isNps(q.type)) {
+        return `${item.content == null ? '（未作答）' : item.content + ' 分'}`
+      }
+      return item.content || '（未作答）'
     },
 
     /**
@@ -838,6 +1036,191 @@ export default {
 .q-chart {
   width: 100%;
   height: 300px;
+}
+
+/* ==================== 矩阵题统计 ==================== */
+.matrix-table-wrap {
+  overflow-x: auto;
+}
+.stat-matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+.stat-matrix th,
+.stat-matrix td {
+  padding: 9px 12px;
+  border: 1px solid var(--stroke);
+  font-size: 13px;
+  text-align: center;
+}
+.stat-matrix thead th {
+  background: #f5f9ff;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.stat-matrix tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+.stat-matrix-total {
+  font-weight: 600;
+  color: var(--ink-2);
+  background: #fafcff;
+}
+.matrix-count {
+  margin-right: 4px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.matrix-pct {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.stats-tip {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ==================== 排序题统计 ==================== */
+.ranking-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rank-pos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--sky-50);
+  color: var(--sky-600);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.rank-label {
+  width: 170px;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-bar-wrap {
+  flex: 1;
+  height: 14px;
+  border-radius: 999px;
+  background: #eef4fd;
+  overflow: hidden;
+}
+.rank-bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7db7ff, #3b82f6);
+}
+.rank-avg {
+  width: 110px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+/* ==================== NPS 统计 ==================== */
+.nps-hero {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.nps-score {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+}
+.nps-excellent {
+  color: #16a34a;
+}
+.nps-good {
+  color: #2563eb;
+}
+.nps-poor {
+  color: #dc2626;
+}
+.nps-none {
+  color: var(--ink-3);
+}
+.nps-hero-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.nps-hero-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.nps-dist {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 150px;
+  margin-top: 18px;
+}
+.nps-dist-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+.nps-dist-score {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.nps-dist-bar-wrap {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  flex: 1;
+}
+.nps-dist-bar {
+  display: block;
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+}
+.nps-b-promoter {
+  background: #34d399;
+}
+.nps-b-passive {
+  background: #fbbf24;
+}
+.nps-b-detractor {
+  background: #f87171;
+}
+.nps-dist-count {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+html[data-theme="dark"] .stat-matrix thead th,
+html[data-theme="dark"] .stat-matrix-total {
+  background: #16263f;
+}
+html[data-theme="dark"] .rank-bar-wrap {
+  background: #16263f;
 }
 
 /* ==================== 填空题回答 ==================== */
