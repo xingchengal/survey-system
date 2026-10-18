@@ -4,6 +4,7 @@
 
 **基于 Spring Boot 4 + Vue 3 的前后端分离问卷调查系统**
 
+[![CI](https://github.com/xingchengal/survey-system/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xingchengal/survey-system/actions/workflows/ci.yml)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.8-brightgreen.svg)](https://spring.io/projects/spring-boot)
 [![Vue](https://img.shields.io/badge/Vue-3.5-4FC08D.svg)](https://vuejs.org/)
 [![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1.svg)](https://www.mysql.com/)
@@ -12,9 +13,46 @@
 一个功能完整的问卷调查平台：问卷设计与逻辑跳转、匿名/登录双通道填写、数据统计与 Excel 导出、
 AI 生成问卷、账号与治理后台。
 
-[功能特性](#-功能特性) · [技术栈](#-技术栈) · [系统架构](#-系统架构) · [快速开始](#-快速开始) · [项目结构](#-项目结构) · [接口文档](#-接口文档) · [界面截图](#-界面截图)
+[30 秒速览](#-30-秒速览) · [功能特性](#-功能特性) · [技术栈](#-技术栈) · [系统架构](#-系统架构) · [快速开始](#-快速开始) · [项目结构](#-项目结构) · [接口文档](#-接口文档) · [界面截图](#-界面截图)
 
 </div>
+
+---
+
+## ⚡ 30 秒速览
+
+> 一个**能真的跑起来**的在线问卷系统：搭问卷（含逻辑跳转）→ 发链接 → 收答卷 → 看统计 → 导 Excel，全流程闭环；
+> 管理端有 RBAC 权限矩阵、举报审核、额度钱包与批量治理。
+>
+> 规模：**98** 个 REST 端点 · **21** 张表 · **339** 个后端用例（42 类）· **22** 个前端页面。
+
+**三个能对得上数字的点**
+
+| # | 亮点 | 数字 |
+|---|---|---|
+| 1 | 统计接口加了 Redis 预聚合 | 单题选项分布 **QPS 165 → 2333（×14）**，P50 **190ms → 11ms**（P99 256ms → 41ms） |
+| 2 | Redis 挂了**不会放行**限流 | 熔断后每个请求 **12ms** 返回（不熔断时 ~4000ms/请求），限流退化为进程内计数 |
+| 3 | 权限有**权威口径**且有测试钉住 | **98** 端点逐条分档（公开 12 / 需登录 31 / 归属 25 / 管理 30），MockMvc 全栈矩阵覆盖；**3** 个 CI 作业 |
+
+**架构（一行版）**
+
+```
+浏览器 → Vue 3 SPA → JwtAuthFilter → RateLimitInterceptor → @RequireAdmin 切面 → Controller/Service → MySQL 8 + Redis
+```
+
+完整分层图与四条不变量见 [系统架构](#-系统架构)。
+
+**跑起来**
+
+```bash
+cp .env.example .env      # Windows: copy .env.example .env
+# 编辑 .env：DB_PASSWORD、JWT_SECRET（≥32 字符）、QWEN_API_KEY（可留空）
+docker compose up --build
+```
+
+打开 <http://localhost:8080> → 注册一个账号 → `UPDATE t_user SET role='admin' WHERE username='你的账号';` 提权即可进管理端。
+
+> 不想用 Docker？[快速开始](#-快速开始) 是四步手工流程（MySQL 8 + JDK 17 + Node 18+）。
 
 ---
 
