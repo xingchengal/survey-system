@@ -2,7 +2,10 @@ package com.survey.service;
 
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
+import com.survey.common.BizException;
+import com.survey.common.DateRanges;
 import com.survey.common.PageParams;
+import com.survey.common.Role;
 import com.survey.common.SqlLikeEscaper;
 import com.survey.common.PageResult;
 import com.survey.entity.OperationLog;
@@ -36,6 +39,14 @@ public class OperationLogService {
 
     private static final Logger LOG = LoggerFactory.getLogger(OperationLogService.class);
 
+    /**
+     * 操作日志单次导出最多多少行。
+     * ★ 与 AnswerController / UserService / SurveyService 的导出上限同一个思路：
+     *   导出会把全部行读进内存，不设上限时一次"顺手点一下"就足以把堆打满。
+     *   SQL 侧固定 `LIMIT 10001`，超过就明确拒绝，不静默截断。
+     */
+    public static final int EXPORT_MAX_ROWS = 10_000;
+
     @Autowired
     private OperationLogMapper operationLogMapper;
 
@@ -63,10 +74,12 @@ public class OperationLogService {
     }
 
     /**
-     * 分页查询操作日志（管理端），支持按用户名和操作名筛选。
+     * 分页查询操作日志（管理端），支持按用户名、操作名、**操作人角色**筛选，
+     * 以及**操作时间范围**（`yyyy-MM-dd`，闭区间）。
      * ★ PageHelper 的 startPage 必须紧挨着 mapper 查询调用。
      */
-    public PageResult<OperationLog> page(int pageNum, int pageSize, String username, String operation) {
+    public PageResult<OperationLog> page(int pageNum, int pageSize, String username, String operation,
+                                         String role, String startDate, String endDate) {
         PageHelper.startPage(PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
         // ★ LIKE 通配符必须转义：
         //   否则用户在搜索框里输入一个 % 就等于"匹配所有行"（筛选被静默绕过），
@@ -74,7 +87,8 @@ public class OperationLogService {
         //   本方法有**两个**模糊搜索参数，都要转义。
         username = SqlLikeEscaper.escape(username);
         operation = SqlLikeEscaper.escape(operation);
-        List<OperationLog> list = operationLogMapper.findPageByCondition(username, operation);
+        List<OperationLog> list = operationLogMapper.findPageByCondition(username, operation,
+                normalizeRoleFilter(role), DateRanges.startOfDay(startDate), DateRanges.endOfDay(endDate));
         PageInfo<OperationLog> pageInfo = new PageInfo<>(list);
         // ★ 回显**钳制后**的页码/页大小（不能回显调用方传进来的原值）。
         //   分页保护 PageParams 只在 startPage 那一层生效，这里却把原值写进了响应：
@@ -82,5 +96,33 @@ public class OperationLogService {
         //   分页组件据此算总页数/显示"每页条数"都会错；pageSize=0 或负数时同理。
         return new PageResult<>(pageInfo.getTotal(), pageInfo.getList(),
                 PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
+    }
+
+    /**
+     * 导出用的操作日志（**不分页**，最多 {@link #EXPORT_MAX_ROWS} 行）。
+     * ★ 筛选条件与 {@link #page} 完全一致，所以"导出的就是屏幕上筛出来的"。
+     * ★ 超过上限明确报错拒绝，不静默截断（静默截断会让管理员以为"导出了全部日志"）。
+     */
+    public List<OperationLog> exportLogs(String username, String operation,
+                                         String role, String startDate, String endDate) {
+        List<OperationLog> list = operationLogMapper.findForExport(
+                SqlLikeEscaper.escape(username), SqlLikeEscaper.escape(operation),
+                normalizeRoleFilter(role), DateRanges.startOfDay(startDate), DateRanges.endOfDay(endDate));
+        if (list.size() > EXPORT_MAX_ROWS) {
+            throw new BizException("导出结果超过 " + EXPORT_MAX_ROWS
+                    + " 条日志，请缩小时间范围后再导出（导出的每一行都要进内存，不设上限会拖垮服务）");
+        }
+        return list;
+    }
+
+    /**
+     * 角色筛选归一：只放行 admin / user，其余（含空串与非法值）当作"全部"。
+     * ★ 与 UserService.normalizeRoleFilter 同一口径。两个 Service 各留一份，是因为
+     *   入参来源不同（用户列表 / 日志列表），为一行判断再引一个工具类不划算。
+     */
+    private static String normalizeRoleFilter(String role) {
+        if (role == null) return null;
+        String value = role.trim();
+        return Role.ADMIN.equals(value) || Role.USER.equals(value) ? value : null;
     }
 }

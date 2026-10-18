@@ -1,5 +1,6 @@
 package com.survey.controller;
 
+import com.alibaba.excel.EasyExcel;
 import com.survey.annotation.RequireAdmin;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
@@ -29,6 +30,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +54,8 @@ import java.util.Map;
  *                  PUT /nickname|/password|/avatar|/contact、
  *                  DELETE /account（★ 注销自己的账号，软删除）
  *   需管理员     : GET /page、GET /page-deleted（★ 已注销用户列表）、
- *                  DELETE /delete/{id}、PUT /restore/{id}（★ 恢复已注销账号）
+ *                  DELETE /delete/{id}、PUT /restore/{id}（★ 恢复已注销账号）、
+ *                  PUT /{id}/disabled（★ 禁用/解禁）、GET /export（★ 导出 Excel）
  *   ★ GET /list 与 GET /count **不存在**（原因见方法处注释）：用户列表走 /page，
  *     用户总数从 /page 的 total 或 /api/survey/system-overview 的 users 字段拿。
  *
@@ -166,6 +172,16 @@ public class UserController {
             //     （需求："账号为唯一标识""原有用户名统一合并为账号"），
             //     两个词混用会让用户在登录页对不上号。
             throw new BizException("账号或密码错误");
+        }
+
+        // ★★ 禁用判定必须在"密码已验过"之后：
+        //   放在密码校验**之前**（或与登录失败共用一句文案）会多出一条账号探测信号
+        //   —— 攻击者只要乱试密码，就能从"账号已被禁用"这句话得知该账号存在且被处置过。
+        //   现在只有**知道该账号密码**的人才会看到这句提示，不构成信息泄露。
+        // ★ 与 JwtAuthFilter 里那道判定是**两个入口**，缺一不可：
+        //   这里拦"新登录"，那里拦"已经拿着票的老会话"。
+        if (loginUser.getDisabled() != null && loginUser.getDisabled() == 1) {
+            throw new BizException("该账号已被管理员禁用，请联系管理员解禁");
         }
 
         // ★★ 记一条登录日志（需求 三.3「最近登录时间、登录IP，数据取自系统登录日志」）。
@@ -407,14 +423,18 @@ public class UserController {
     //   ★ 下面这些端点**没有** @RequestHeader("X-User-Role") 形参（角色由类/方法上的
     //     @RequireAdmin → aspect/AdminCheckAspect 统一校验）：多一个"收了不用"的形参，
     //     只会让端点审计误判成"这里另有一道校验"。
-    @Operation(summary = "分页查询普通用户（管理员，支持关键词搜索）")
+    @Operation(summary = "分页查询用户（管理员，支持关键词搜索 + 角色/禁用状态筛选）")
     @GetMapping("/page")
     @RequireAdmin
     public PageResult<User> pageUsers(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
-            @RequestParam(required = false) String keyword) {
-        return userService.listNormalUsersPage(pageNum, pageSize, keyword);
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) Integer disabled) {
+        // ★ role 为空 = 全部角色（含管理员）；只认 admin/user，其余按"全部"处理（见 Service 注释）。
+        // ★ disabled：1 = 只看已禁用、0 = 只看正常、空 = 全部（默认**不过滤**）。
+        return userService.listActiveUsersPage(pageNum, pageSize, keyword, role, disabled);
     }
 
     /**
@@ -427,6 +447,7 @@ public class UserController {
      *   否则 `/restore/{id}` 就是一个"有端点、没入口"的功能。
      *   消费方是 UserManage.vue：它按当前 tab 在 /page 与 /page-deleted 之间切换，
      *   并对选中行调 remove（彻底删除）或 restore（恢复）—— 两两成对，别单独删任一个。
+     * ★ 同样支持 role 筛选（已注销的管理员也要能被筛出来并恢复）。
      */
     @Operation(summary = "分页查询已注销用户（管理员，用于恢复）")
     @GetMapping("/page-deleted")
@@ -434,8 +455,100 @@ public class UserController {
     public PageResult<User> pageDeletedUsers(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
-            @RequestParam(required = false) String keyword) {
-        return userService.listDeletedUsersPage(pageNum, pageSize, keyword);
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String role) {
+        return userService.listDeletedUsersPage(pageNum, pageSize, keyword, role);
+    }
+
+    /**
+     * 禁用 / 解禁一个账号（管理员）。
+     *
+     * ── 为什么是"一个端点 + 布尔参数"而不是 /disable/{id} 与 /enable/{id} 两条 ──
+     *   两者是**同一格状态的两个方向**，保护规则也完全一样（不能禁自己、不能禁用最后一个可用管理员）。
+     *   拆成两条必然要把那段保护复制两份，改一处就会漏一处。
+     *
+     * ── 批量怎么用 ──────────────────────────────────────────
+     *   前端多选后**逐条调用本端点**（Promise.allSettled），不另设"批量端点"：
+     *   逐条调用能精确告诉管理员"哪几个成功、哪几个为什么失败"，
+     *   而一个批量端点只要有一条不合法就得整批回滚 —— 对"清理违规账号"这种场景反而更难用。
+     *
+     * ★ disabled 只接受 0/1（Service 校验），非法值 → 400。
+     * ★ 禁用/解禁都会作废该账号此前签发的 token（见 UserService.setDisabled）。
+     */
+    @OperationLog("设置用户禁用状态")
+    @Operation(summary = "禁用/解禁用户（管理员）")
+    @PutMapping("/{id}/disabled")
+    @RequireAdmin
+    public String setUserDisabled(@PathVariable Integer id,
+                                  @RequestParam(required = false) Integer disabled,
+                                  @RequestHeader("X-User-Id") Integer currentUserId) {
+        // ★ 这里**不能**把 disabled 声明成必填（required 默认 true）：
+        //   必填 @RequestParam 的绑定发生在方法调用**之前**，缺参数会直接 400，
+        //   于是权限切面（@RequireAdmin → AdminCheckAspect）根本没机会执行 ——
+        //   普通用户不带参数调本端点会拿到 400 而不是 403，
+        //   端点权限矩阵测试（EndpointAuthMatrixTest 的管理档逐条 403）会因此变红。
+        //   改为非必填、在这里自己判：权限先判，参数后判。
+        if (disabled == null) {
+            throw new BizException("请指定 disabled 参数：1=禁用，0=解禁");
+        }
+        return userService.setDisabled(id, disabled, currentUserId);
+    }
+
+    /**
+     * 导出用户列表为 Excel（管理员）。
+     *
+     * ★ 与页面上的两个视图一一对应：`deleted=true` 导「已注销」，否则导「在用」。
+     *   筛选条件（keyword / role）与列表接口**同一套**，所以"导出的就是屏幕上筛出来的"。
+     * ★ 上限 10000 行（UserService.EXPORT_MAX_ROWS），超出明确拒绝而不是静默截断。
+     * ★ 不导出 avatar（mediumtext，单张可达 2MB）：导出表里只有账号/昵称/角色/状态/时间。
+     */
+    @Operation(summary = "导出用户列表为 Excel（管理员）")
+    @GetMapping("/export")
+    @RequireAdmin
+    public void exportUsers(@RequestParam(required = false) String keyword,
+                            @RequestParam(required = false) String role,
+                            @RequestParam(defaultValue = "false") boolean deleted,
+                            @RequestParam(required = false) Integer disabled,
+                            HttpServletResponse response) throws IOException {
+        List<User> users = userService.exportUsers(keyword, role, deleted, disabled);
+
+        List<List<String>> head = List.of(
+                List.of("ID"), List.of("账号"), List.of("昵称"), List.of("角色"),
+                List.of("状态"), List.of("注册时间"), List.of(deleted ? "注销时间" : "禁用状态"));
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        List<List<String>> rows = new ArrayList<>(users.size());
+        for (User u : users) {
+            List<String> row = new ArrayList<>(7);
+            row.add(u.getId() == null ? "" : String.valueOf(u.getId()));
+            row.add(nullToEmpty(u.getUsername()));
+            row.add(nullToEmpty(u.getNickname()));
+            row.add(Role.isAdmin(u.getRole()) ? "管理员" : "普通用户");
+            row.add(deleted ? "已注销" : (u.getDisabled() != null && u.getDisabled() == 1 ? "已禁用" : "正常"));
+            row.add(u.getCreatedTime() == null ? "" : u.getCreatedTime().format(fmt));
+            row.add(deleted
+                    ? (u.getDeletedAt() == null ? "" : u.getDeletedAt().format(fmt))
+                    : (u.getDisabled() != null && u.getDisabled() == 1 ? "是" : "否"));
+            rows.add(row);
+        }
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        // ★ 文件名两层编码（同 AnswerController.export）：filename 只能 ASCII，
+        //   中文名放 filename*（RFC 5987），否则浏览器拿到的是 %E7%94%A8... 这种乱码名。
+        String baseName = deleted ? "用户列表_已注销" : "用户列表";
+        String encodedName = URLEncoder.encode(baseName, "UTF-8").replace("+", "%20");
+        String asciiName = deleted ? "users_deleted.xlsx" : "users.xlsx";
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"" + asciiName + "\"; filename*=UTF-8''" + encodedName + ".xlsx");
+
+        EasyExcel.write(response.getOutputStream())
+                .head(head)
+                .sheet("用户列表")
+                .doWrite(rows);
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     @OperationLog("删除用户")

@@ -19,9 +19,12 @@ import java.util.List;
  *   phone / email : varchar(20) / varchar(100)，**空值统一存 NULL**（见 updateContact 的 NULLIF）
  *   deleted_at    : datetime NULL —— 账号注销（软删除）。语义 **NULL = 正常；非 NULL = 已注销**
  *   token_valid_after : datetime NULL —— **令牌生效起点**：JWT 的 `iat` **不晚于**它即视为失效
- *                   （NULL = 不限制）。改密码 / 恢复账号时写入，见 updateTokenValidAfter。
+ *                   （NULL = 不限制）。改密码 / 恢复账号 / 禁用 / 解禁时写入，见 updateTokenValidAfter。
  *                   ★ 写入值来自应用侧 `UserService.nowForTokenCutoff()`（**截到秒**，
  *                     与 JWT `iat` 的秒精度对齐），**不是数据库的 NOW()**。
+ *   disabled      : tinyint NOT NULL —— 管理端「禁用」标记（0/1）。与 deleted_at **不是一回事**：
+ *                   注销是用户自己的决定，禁用是管理员的处置；两者都"登不进去"但数据都保留。
+ *                   ★ 它**不参与任何查询过滤**（禁用的账号必须能在管理端列表里被看到、被解禁）
  *   ★ 已废弃的列：`profile_public`（原「资料公开开关」，需求方后来明确"不需要这个需求"，
  *     应用代码已全部剔除）。**列留在库里没删** —— 删列是不可逆操作，等确认后再单独做。
  *   唯一索引 : username —— 重名 insert 会被数据库挡住（并发注册的最后一道防线）
@@ -41,7 +44,10 @@ import java.util.List;
  * ── 三个注意点 ────────────────────────────────────────
  *   1. 所有查询都会带出 password 字段，安全性靠实体上的
  *      @JsonProperty(WRITE_ONLY) 保证它"只进不出"；
- *   2. findAllNormalUsers 永远只查 role='user' —— 管理员不会出现在用户管理列表里；
+ *   2. `findActiveUsers` / `findDeletedUsers` 都支持 `role` 筛选；**不传 role 时返回全部角色**
+ *      （含管理员）—— 「用户管理」页要能按角色筛人，管理员也必须能在列表里被看到
+ *      （否则"禁用某个管理员"这件事没有任何入口）。★ 历史口径是"只查 role='user'"，
+ *      已按 G3 需求改为含管理员；删除保护仍在 `UserService.deleteUser` / `setDisabled`。
  *   3. findByUsernamePrefix / countByUsernamePrefix 是给演示数据用的：
  *      演示用户名统一以 demo_user 开头，reset 时靠它精确回收，不碰真实用户。
  */
@@ -80,7 +86,15 @@ public interface UserMapper {
     int insert(User user);
 
     /**
-     * 查询所有普通用户（支持按用户名/昵称搜索）。keyword 为 null 时返回全部。
+     * 查询「在用」用户（未注销），支持按用户名/昵称搜索 + 按角色筛选。keyword 为 null 时返回全部。
+     *
+     * ★ **含管理员**（不传 role 时）：用户管理页要能按角色筛人，管理员也必须能在列表里被看到 ——
+     *   否则"禁用/删除某个管理员"没有任何入口。历史口径是写死 `role='user'`，
+     *   那会让页面上的「角色」列永远显示"普通用户"，角色筛选也无从谈起。
+     * ★ 禁用的账号**照常返回**（disabled 只是带出来的一个字段）：禁用的意义就是"要能在列表里看到并解禁"。
+     *   ★ `disabled` 参数是**筛选**而非默认过滤：传 1 只看已禁用、传 0 只看正常、不传看全部。
+     *     它**绝不能**变成"默认只查 disabled=0" —— 那样被禁用的账号会从列表里消失、再也无法解禁。
+     * ★ keyword 由调用方先过 SqlLikeEscaper；role 只接受 admin/user（Service 侧归一）。
      *
      * ★ **显式排除 avatar**，不要 `SELECT *`。
      *   原因：t_user.avatar 是 mediumtext，直接存 base64 图片（真实生效上限是**解码后 2MB**，
@@ -89,39 +103,86 @@ public interface UserMapper {
      *   ★ 需要头像的地方走 findById（个人中心 /profile），那条路径不受影响。
      */
     @Select("<script>" +
-            "SELECT id, username, nickname, role, phone, email, created_time FROM t_user " +
-            "WHERE role = 'user' AND deleted_at IS NULL " +
+            "SELECT id, username, nickname, role, phone, email, created_time, deleted_at, disabled FROM t_user " +
+            "WHERE deleted_at IS NULL " +
             "<if test='keyword != null and keyword != \"\"'>" +
             "AND (username LIKE CONCAT('%', #{keyword}, '%') " +
             "OR nickname LIKE CONCAT('%', #{keyword}, '%')) " +
             "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
+            "<if test='disabled != null'>AND disabled = #{disabled} </if>" +
             "ORDER BY created_time DESC" +
             "</script>")
-    List<User> findAllNormalUsers(@Param("keyword") String keyword);
+    List<User> findActiveUsers(@Param("keyword") String keyword,
+                               @Param("role") String role,
+                               @Param("disabled") Integer disabled);
+
+    /**
+     * 导出用：与 {@link #findActiveUsers} 同一口径，但**不分页**、固定截断在 10001 条。
+     *
+     * ★ 为什么不复用 findActiveUsers：PageHelper 只能通过 startPage 影响"下一次查询"，
+     *   而导出要求全量。给它加一个可空 LIMIT 参数又会让分页那条 SQL 变成动态拼接 ——
+     *   两条查询的用途（分页展示 / 一次性导出）本来就不同，分开更不容易改坏。
+     * ★ 为什么是 10001 而不是 10000：多取一条只为判断"是否超限"。
+     *   调用方（UserService.exportUsers）见到 10001 条就明确拒绝，而不是静默截断
+     *   —— 静默截断会让管理员以为"导出全了"。
+     */
+    @Select("<script>" +
+            "SELECT id, username, nickname, role, phone, email, created_time, deleted_at, disabled FROM t_user " +
+            "WHERE deleted_at IS NULL " +
+            "<if test='keyword != null and keyword != \"\"'>" +
+            "AND (username LIKE CONCAT('%', #{keyword}, '%') " +
+            "OR nickname LIKE CONCAT('%', #{keyword}, '%')) " +
+            "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
+            "<if test='disabled != null'>AND disabled = #{disabled} </if>" +
+            "ORDER BY created_time DESC LIMIT 10001" +
+            "</script>")
+    List<User> findActiveUsersForExport(@Param("keyword") String keyword,
+                                        @Param("role") String role,
+                                        @Param("disabled") Integer disabled);
 
     /**
      * 查询所有**已注销**的用户（管理端的"已注销用户"视图，配合 `/user/page-deleted` + `/user/restore/{id}`）。
      *
-     * ★ 为什么必须有它：软删除之后，`findAllNormalUsers` 按设计把已注销的人**过滤掉了** ——
+     * ★ 为什么必须有它：软删除之后，`findActiveUsers` 按设计把已注销的人**过滤掉了** ——
      *   于是管理员在用户列表里既看不到他们，也就无从恢复（`restore` 端点会变成"有端点没入口"，
      *   同类问题（`set-template` 有端点没入口）已有先例。）
      *   ⇒ 恢复能力要有，就必须先**看得见**。
      *
      * ★ 同样显式排除 avatar（mediumtext）：这张列表只在管理端展示账号/昵称，
-     *   把头像一并查出来是白传（理由见 findAllNormalUsers 的注释）。
+     *   把头像一并查出来是白传（理由见 findActiveUsers 的注释）。
      * ★ 把 deleted_at 一起查出来：界面上要显示"注销于 X 时间"，
      *   否则管理员面对一串账号，不知道哪个是刚注销的、哪个是几个月前的。
+     * ★ 也支持 role 筛选，且**含管理员**（已注销的管理员同样要能被恢复）。
      */
     @Select("<script>" +
-            "SELECT id, username, nickname, role, phone, email, created_time, deleted_at FROM t_user " +
+            "SELECT id, username, nickname, role, phone, email, created_time, deleted_at, disabled FROM t_user " +
             "WHERE deleted_at IS NOT NULL " +
             "<if test='keyword != null and keyword != \"\"'>" +
             "AND (username LIKE CONCAT('%', #{keyword}, '%') " +
             "OR nickname LIKE CONCAT('%', #{keyword}, '%')) " +
             "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
             "ORDER BY deleted_at DESC" +
             "</script>")
-    List<User> findDeletedUsers(@Param("keyword") String keyword);
+    List<User> findDeletedUsers(@Param("keyword") String keyword, @Param("role") String role);
+
+    /**
+     * 导出用：已注销用户的全量查询（与 {@link #findDeletedUsers} 同口径，固定截断 10001 条）。
+     * ★ 存在的理由与 findActiveUsersForExport 相同（PageHelper 只管"下一次查询"）。
+     */
+    @Select("<script>" +
+            "SELECT id, username, nickname, role, phone, email, created_time, deleted_at, disabled FROM t_user " +
+            "WHERE deleted_at IS NOT NULL " +
+            "<if test='keyword != null and keyword != \"\"'>" +
+            "AND (username LIKE CONCAT('%', #{keyword}, '%') " +
+            "OR nickname LIKE CONCAT('%', #{keyword}, '%')) " +
+            "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
+            "ORDER BY deleted_at DESC LIMIT 10001" +
+            "</script>")
+    List<User> findDeletedUsersForExport(@Param("keyword") String keyword, @Param("role") String role);
 
     /**
      * 物理删除用户。★ 调用前 UserService.deleteUser() 已经把他的问卷/答卷/通知都清干净了。
@@ -143,6 +204,17 @@ public interface UserMapper {
      */
     @Select("SELECT COUNT(*) FROM t_user WHERE role = 'admin' AND deleted_at IS NULL")
     int countAdmins();
+
+    /**
+     * **可用**管理员数量（未注销 **且未禁用**）—— 用于"不能禁用最后一个管理员"的保护。
+     *
+     * ★ 为什么不能复用 {@link #countAdmins}：那个口径把"已禁用的管理员"也算作管理员。
+     *   若拿它做禁用保护，库里只剩 1 个管理员且已被禁用时仍会放行，
+     *   结果就是**没有任何人能登录管理后台**（只能改数据库恢复）。
+     *   ⇒ "还有几个管理员能真的操作"与"有几个管理员账号"是两个问题，两个计数各司其职。
+     */
+    @Select("SELECT COUNT(*) FROM t_user WHERE role = 'admin' AND deleted_at IS NULL AND disabled = 0")
+    int countActiveAdmins();
 
     /**
      * 按 id 查（取当前登录用户信息、归属校验时查昵称、刷新令牌校验）。
@@ -176,6 +248,15 @@ public interface UserMapper {
     /** 恢复已注销账号（管理员）：把 deleted_at 清零。★ 同样只动这一列，密码与资料都还在。 */
     @Update("UPDATE t_user SET deleted_at = NULL WHERE id = #{id}")
     int restoreById(Integer id);
+
+    /**
+     * 设置禁用标记（管理员）：disabled ∈ {0,1}，**只动这一列**。
+     * ★ 调用前 UserService.setDisabled 已经做过全部保护判断（不能禁自己、不能禁用最后一个可用管理员、
+     *   已注销账号要先恢复），并负责同时写 `token_valid_after` —— 那一列才是"已经登录的会话立刻失效"的关键。
+     * ★ 不过滤 deleted_at：它按主键写，调用方已用 findByIdIncludeDeleted 确认过账号存在。
+     */
+    @Update("UPDATE t_user SET disabled = #{disabled} WHERE id = #{id}")
+    int updateDisabled(@Param("id") Integer id, @Param("disabled") Integer disabled);
 
     /** 改昵称。★ 昵称会显示在操作日志/回收站里，所以 Service 不允许改成全空白。 */
     @Update("UPDATE t_user SET nickname = #{nickname} WHERE id = #{id}")

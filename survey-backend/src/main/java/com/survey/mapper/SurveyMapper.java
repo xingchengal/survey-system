@@ -167,10 +167,14 @@ public interface SurveyMapper {
     Survey findByShareCode(String shareCode);
 
     /**
-     * 管理员问卷列表：分页 + 关键字 + 状态筛选（动态 SQL）。
+     * 管理员问卷列表：分页 + 关键字 + 状态 + **创建时间范围**筛选（动态 SQL）。
      * ★ 排除模板（is_template 为 1 的不出现在"全部问卷"里）。
      * ★ <if> 里判断 keyword 非空才拼 LIKE，避免传空串时全表匹配。
+     * ★ 时间范围是**左闭右闭**，且用 `>= / <=` 直接比 datetime 列（不用 DATE(created_time)）：
+     *   列上有索引（`t_survey(created_time)`），包一层函数会让索引失效、变成全表扫。
+     *   起止值由 SurveyService 归一成 `yyyy-MM-dd 00:00:00` / `yyyy-MM-dd 23:59:59`。
      * ★ 分页靠 PageHelper：调用方必须先 startPage，且紧跟这次查询。
+     * ★ 参数超过 4 个之后不再用位置顺序，全部显式 @Param —— 少一个名字就会在运行期报绑定错误。
      */
     @Select("<script>" +
             "SELECT * FROM t_survey WHERE deleted = 0 AND (is_template IS NULL OR is_template = 0) " +
@@ -187,10 +191,41 @@ public interface SurveyMapper {
             "AND (status = #{status} " +
             "<if test='status == 0'>OR status IS NULL</if>) " +
             "</if>" +
+            "<if test='startTime != null'>AND created_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND created_time &lt;= #{endTime} </if>" +
             "ORDER BY created_time DESC" +
             "</script>")
     List<Survey> findPageByCondition(@Param("keyword") String keyword,
-                                     @Param("status") Integer status);
+                                     @Param("status") Integer status,
+                                     @Param("startTime") java.time.LocalDateTime startTime,
+                                     @Param("endTime") java.time.LocalDateTime endTime);
+
+    /**
+     * 导出用：与 {@link #findPageByCondition} 同一套筛选条件，但**不分页**、固定截断 10001 条。
+     *
+     * ★ 为什么不共用一条 SQL：PageHelper 只能影响"紧随其后的那一次查询"，
+     *   而导出要全量；给公共查询加可空 LIMIT 会让分页那条也变成动态 SQL，风险更大。
+     * ★ 10001 = 10000 + 1：多取一条只为判断"是否超过导出上限"，
+     *   调用方（SurveyService.exportSurveys）见到 10001 条就明确拒绝，而不是静默截断。
+     */
+    @Select("<script>" +
+            "SELECT * FROM t_survey WHERE deleted = 0 AND (is_template IS NULL OR is_template = 0) " +
+            "<if test='keyword != null and keyword != \"\"'>" +
+            "AND (title LIKE CONCAT('%', #{keyword}, '%') " +
+            "OR description LIKE CONCAT('%', #{keyword}, '%')) " +
+            "</if>" +
+            "<if test='status != null'>" +
+            "AND (status = #{status} " +
+            "<if test='status == 0'>OR status IS NULL</if>) " +
+            "</if>" +
+            "<if test='startTime != null'>AND created_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND created_time &lt;= #{endTime} </if>" +
+            "ORDER BY created_time DESC LIMIT 10001" +
+            "</script>")
+    List<Survey> findForExport(@Param("keyword") String keyword,
+                               @Param("status") Integer status,
+                               @Param("startTime") java.time.LocalDateTime startTime,
+                               @Param("endTime") java.time.LocalDateTime endTime);
 
     /**
      * 某用户的全部问卷，**含回收站里的**。

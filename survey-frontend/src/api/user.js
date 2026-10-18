@@ -92,19 +92,39 @@ export default {
    */
   deleteAccount: (password) => http.del('/api/user/account', { password }),
 
-  /** 用户分页（管理员），params: { pageNum, pageSize, keyword } */
+  /**
+   * 用户分页（管理员），params: { pageNum, pageSize, keyword, role }
+   * ★ role 只认 'admin' / 'user'；不传 = **全部角色（含管理员）**。
+   *   历史行为是"只查普通用户"，G3 起改为含管理员 —— 否则页面上的角色筛选无从谈起。
+   * ★ 行上的 `disabled` 字段：0 = 正常，1 = 已禁用（禁止登录、数据保留，管理员可解禁）。
+   */
   page: (params) => http.get('/api/user/page', params),
 
-  /** 已注销用户分页（管理员）—— 「恢复账号」列表，params 同上 */
+  /** 已注销用户分页（管理员）—— 「恢复账号」列表，params: { pageNum, pageSize, keyword, role } */
   pageDeleted: (params) => http.get('/api/user/page-deleted', params),
 
   /**
-   * 恢复已注销账号（管理员）。
-   * ★ 恢复后该用户**必须重新登录**（后端会把 token_valid_after 推到此刻，注销前签发的票全作废）；
-   *   数据一直都在（软删除只标记、不删数据）。
+   * 禁用 / 解禁一个账号（管理员）。缺省参数 disabled：1 = 禁用，0 = 解禁。
+   * ★ 批量操作由页面**逐条调用**（Promise.allSettled），opt 可传 `{ silent: true }`，
+   *   避免每失败一条弹一次红字（由页面统一汇总）。后端没有批量端点 ——
+   *   逐条调用能精确告诉管理员"哪几个成功、哪几个为什么失败"。
+   * ★ 后端的保护：不能禁用自己、不能禁用最后一个可用管理员、已注销账号要先恢复。
+   * ★ 禁用/解禁都会作废该账号此前签发的 token（本人会被踢下线，需重新登录）。
    */
-  restore: (id) => http.put(`/api/user/restore/${id}`, {}),
+  setDisabled: (id, disabled, opts) => http.put(`/api/user/${id}/disabled`, null, { ...opts, params: { disabled } }),
 
-  /** 删除用户（管理员，后端级联删除其问卷/答卷/通知；失败 → 400 而不是"谎报成功"） */
-  remove: (id) => http.del(`/api/user/delete/${id}`)
+  /**
+   * 导出用户列表为 Excel（管理员），params: { keyword, role, deleted }
+   * ★ deleted=true 导「已注销」视图，否则导「在用」；筛选条件与 page 同一套，
+   *   所以"导出的就是屏幕上筛出来的"。
+   * ★ 后端上限 10000 行，超出返回 400 + 明确文案（http.js 会自动弹红字）。
+   */
+  exportExcel: (params) => http.download('/api/user/export', params, '用户列表.xlsx'),
+
+  /** 恢复已注销账号（管理员）。opts 可传 { silent: true }（批量恢复时避免逐条弹错） */
+  restore: (id, opts) => http.put(`/api/user/restore/${id}`, {}, opts),
+
+  /** 删除用户（管理员，后端级联删除其问卷/答卷/通知；失败 → 400 而不是"谎报成功"）。
+   *  opts 可传 { silent: true }（批量删除时由页面统一汇总提示） */
+  remove: (id, opts) => http.del(`/api/user/delete/${id}`, null, opts)
 }

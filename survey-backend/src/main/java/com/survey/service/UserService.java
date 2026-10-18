@@ -51,6 +51,14 @@ public class UserService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UserService.class);
 
+    /**
+     * 用户导出单次最多多少行。
+     * ★ 与 AnswerController 的导出上限同一个思路：导出会把全部行读进内存，
+     *   不设上限时一次"顺手点一下"就足以把堆打满。SQL 侧固定 `LIMIT 10001`
+     *   （多取一条只为判断是否超过本值），超过就明确拒绝，不静默截断。
+     */
+    public static final int EXPORT_MAX_ROWS = 10_000;
+
     @Autowired
     private UserMapper userMapper;
     @Autowired
@@ -337,16 +345,26 @@ public class UserService {
         return userMapper.findById(id);
     }
 
-    // ★ mapper 的 findAllNormalUsers(keyword) 传 null 即全量查询：listNormalUsersPage 是它的唯一入口。
+    // ★ mapper 的 findActiveUsers(keyword, role) 传 null 即全量查询：listActiveUsersPage 是它的唯一分页入口。
 
-    /** 分页查普通用户（管理员用户管理页，支持关键字搜索）。 */
-    public PageResult<User> listNormalUsersPage(int pageNum, int pageSize, String keyword) {
+    /**
+     * 分页查「在用」用户（管理员用户管理页，支持关键字搜索 + 角色筛选）。
+     *
+     * ★ role 口径：只认 `admin` / `user` 两个值，**空/null = 全部角色（含管理员）**。
+     *   非法值（例如 `role=root`）按"全部"处理而不是报 400 —— 它是筛选条件，
+     *   不是业务入参；把它当错误只会让前端拼错参数时整页打不开。
+     * ★ disabled 口径：1 = 只看已禁用、0 = 只看正常、null = 全部（**默认不过滤**，
+     *   否则被禁用的账号会从列表里消失、再也无法解禁）。
+     * ★ 禁用的账号照常返回（disabled 是行上的一个字段）：禁用的意义就是"能看见、能解禁"。
+     */
+    public PageResult<User> listActiveUsersPage(int pageNum, int pageSize, String keyword,
+                                                String role, Integer disabled) {
         PageHelper.startPage(PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
         // ★ 关键字必须转义 LIKE 通配符（见 common/SqlLikeEscaper）：
         //   否则用户在搜索框里输入一个 % 就等于"匹配所有行"（筛选被静默绕过），
         //   输入 _ 会被当成"任意一个字符"。
         keyword = SqlLikeEscaper.escape(keyword);
-        List<User> list = userMapper.findAllNormalUsers(keyword);
+        List<User> list = userMapper.findActiveUsers(keyword, normalizeRoleFilter(role), normalizeDisabledFilter(disabled));
         PageInfo<User> pageInfo = new PageInfo<>(list);
         // ★ 必须回显**钳制后**的页码/页大小：分页保护（PageParams）只在 startPage 那一层生效，
         //   若把调用方传进来的原值写进响应，请求 pageSize=100000 时实际只返回 100 条、
@@ -356,20 +374,105 @@ public class UserService {
     }
 
     /**
-     * 分页查**已注销**的用户（管理员，支持关键字搜索）—— 配合「恢复账号」。
-     * ★ 与 {@link #listNormalUsersPage} 是**两份**查询，而不是一个 boolean 开关：
+     * 分页查**已注销**的用户（管理员，支持关键字搜索 + 角色筛选）—— 配合「恢复账号」。
+     * ★ 与 {@link #listActiveUsersPage} 是**两份**查询，而不是一个 boolean 开关：
      *   两者的 WHERE 条件与排序都不同（这份按 `deleted_at DESC` —— 最近注销的在前，
      *   管理员最可能要找的就是刚误点注销的那个人），用开关拼 SQL 只会让 MyBatis 的
      *   `<if>` 越来越难读，而这里的重复只有几行。
      * ★ 同样必须转义 LIKE 通配符：否则 % / _ 会静默绕过关键字筛选。
      */
-    public PageResult<User> listDeletedUsersPage(int pageNum, int pageSize, String keyword) {
+    public PageResult<User> listDeletedUsersPage(int pageNum, int pageSize, String keyword, String role) {
         PageHelper.startPage(PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
         keyword = SqlLikeEscaper.escape(keyword);
-        List<User> list = userMapper.findDeletedUsers(keyword);
+        List<User> list = userMapper.findDeletedUsers(keyword, normalizeRoleFilter(role));
         PageInfo<User> pageInfo = new PageInfo<>(list);
         return new PageResult<>(pageInfo.getTotal(), pageInfo.getList(),
                 PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
+    }
+
+    /** 角色筛选参数归一：只放行 admin / user，其余（含空串与非法值）一律当作"全部"。 */
+    private static String normalizeRoleFilter(String role) {
+        if (role == null) return null;
+        String value = role.trim();
+        return Role.ADMIN.equals(value) || Role.USER.equals(value) ? value : null;
+    }
+
+    /** 禁用筛选参数归一：只放行 0 / 1，其余（含 null 与非法值）当作"不过滤"。 */
+    private static Integer normalizeDisabledFilter(Integer disabled) {
+        return disabled != null && (disabled == 0 || disabled == 1) ? disabled : null;
+    }
+
+    /**
+     * 导出用的用户列表（**不分页**，最多 10000 行）。
+     *
+     * ★ deletedView=true 走「已注销」口径，否则走「在用」口径 —— 与页面上的两个视图一一对应。
+     * ★ 超过 10000 行**明确报名拒绝**，不静默截断：静默截断会让管理员以为"导出全了"。
+     *   （上限判定的口径：mapper 固定 `LIMIT 10001`，多取的一条只为判断是否超限。）
+     */
+    public List<User> exportUsers(String keyword, String role, boolean deletedView, Integer disabled) {
+        keyword = SqlLikeEscaper.escape(keyword);
+        String normalizedRole = normalizeRoleFilter(role);
+        List<User> users = deletedView
+                ? userMapper.findDeletedUsersForExport(keyword, normalizedRole)
+                : userMapper.findActiveUsersForExport(keyword, normalizedRole, normalizeDisabledFilter(disabled));
+        if (users.size() > EXPORT_MAX_ROWS) {
+            throw new BizException("导出结果超过 " + EXPORT_MAX_ROWS
+                    + " 位用户，请缩小筛选范围后再导出（导出的每一行都要进内存，不设上限会拖垮服务）");
+        }
+        return users;
+    }
+
+    /**
+     * 禁用 / 解禁一个账号（管理员）。
+     *
+     * ── 保护（缺一条就会造成不可自救的状态）────────────────
+     *   1. **不能禁用自己**：disabled 一旦生效，连自己的管理入口都没了；
+     *   2. **不能禁用最后一个可用管理员**：否则没人能登录后台（恢复只能改数据库）；
+     *      解禁方向不需要这道保护；
+     *   3. **已注销的账号要先恢复**：禁用一个"本来就登不进来"的账号没有意义，
+     *      而且会让列表出现"已注销 + 已禁用"这种看不明白的状态。
+     *
+     * ── 为什么同时写 token_valid_after ─────────────────────
+     *   JWT 无法吊销，`disabled` 只在新请求进 JwtAuthFilter 时才会被读到 —— 但那只解决
+     *   "之后的请求"。为了让**手里那枚票立刻作废**（语义上"禁用即刻生效"），
+     *   这里把"令牌生效起点"推到此刻，与注销/改密码同一套机制。
+     *   ★ 解禁方向**也**写：解禁前那段时间账号处于"被处置"状态，
+     *     之前泄露/遗留的票不该在解禁后自动复活。
+     *
+     * @param disabled 1 = 禁用，0 = 解禁
+     */
+    @Transactional
+    public String setDisabled(Integer id, Integer disabled, Integer currentUserId) {
+        if (id == null) throw new BizException("请指定要操作的用户");
+        if (disabled == null || (disabled != 0 && disabled != 1)) {
+            throw new BizException("禁用标记只能是 0（解禁）或 1（禁用）");
+        }
+        // ★ 用 findByIdIncludeDeleted：已注销账号要给出"请先恢复"的明确提示，
+        //   而不是让他看到一句"用户不存在"（那个人就在「已注销」列表里）。
+        User user = userMapper.findByIdIncludeDeleted(id);
+        if (user == null) throw new BizException("用户不存在");
+
+        boolean disabling = disabled == 1;
+
+        if (user.getDeletedAt() != null) {
+            throw new BizException("该账号已注销，请先恢复账号再设置禁用状态");
+        }
+        if (disabling) {
+            if (id.equals(currentUserId)) {
+                throw new BizException("不能禁用自己的账号");
+            }
+            if (Role.isAdmin(user.getRole()) && userMapper.countActiveAdmins() <= 1) {
+                throw new BizException("系统必须保留至少一个可用的管理员，无法禁用最后一个管理员");
+            }
+        }
+
+        int result = userMapper.updateDisabled(id, disabled);
+        if (result <= 0) throw new BizException("操作失败");
+        // ★ 作废此刻之前签发的票（理由见方法注释）。截到秒，与 JWT 的 iat 精度一致。
+        userMapper.updateTokenValidAfter(id, nowForTokenCutoff());
+        LOG.info("账号禁用状态已更新：userId={} username={} disabled={} 操作人={}",
+                id, user.getUsername(), disabled, currentUserId);
+        return disabling ? "已禁用" : "已解禁";
     }
 
     /**

@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
  *
  * ── 字段 ↔ 列 ────────────────────────────────────────
  *   id / username / password / nickname / role / created_time / avatar / phone / email /
- *   deleted_at / token_valid_after
+ *   deleted_at / token_valid_after / disabled
  *   （项目开了 map-underscore-to-camel-case，created_time ↔ createdTime 自动映射）
  *
  * ── ★ 表里有、但本实体**故意不映射**的列（别以为是漏了）──
@@ -78,6 +78,22 @@ public class User {
      */
     private LocalDateTime tokenValidAfter;
 
+    /**
+     * 禁用标记（管理端处置）：**0 = 正常；1 = 已禁用**。
+     * ★ 对应列 `t_user.disabled`（NOT NULL DEFAULT 0，见 sql/migration-user-disabled.sql）。
+     * ★ 与 {@link #deletedAt} 的区别（两者都会"登不进去"，但语义不同）：
+     *   · 注销 = **用户自己**不打算用了（走 DELETE /api/user/account，要输密码），数据保留；
+     *   · 禁用 = **管理员**的处置（内容违规 / 异常操作），数据同样保留，但由管理员解禁。
+     *   合并成一列会让列表里分不清"他自己注销的"还是"被我禁用的"，恢复路径也不同。
+     * ★ 生效链路三处，缺一处就会"看起来禁了、其实还能用"：
+     *   ① 登录：`UserController.login` 在密码验过后判它；
+     *   ② 已登录：`JwtAuthFilter` 每个请求查库时判它；
+     *   ③ 禁用/解禁同时写 `tokenValidAfter`（作废此前签发的票），否则最长要等 12 小时。
+     * ★ 用 Integer 而不是 boolean：与 tinyint 列一一对应，且 null 能表达"老数据没读到这一列"
+     *   （读不到时前端显示为正常，而不是把所有人显示成禁用）。
+     */
+    private Integer disabled;
+
     public String getPhone() { return phone; }
     public void setPhone(String phone) { this.phone = phone; }
     public String getEmail() { return email; }
@@ -86,6 +102,8 @@ public class User {
     public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
     public LocalDateTime getTokenValidAfter() { return tokenValidAfter; }
     public void setTokenValidAfter(LocalDateTime tokenValidAfter) { this.tokenValidAfter = tokenValidAfter; }
+    public Integer getDisabled() { return disabled; }
+    public void setDisabled(Integer disabled) { this.disabled = disabled; }
     public String getAvatar() { return avatar; }
     public void setAvatar(String avatar) { this.avatar = avatar; }
     public Integer getId() { return id; }

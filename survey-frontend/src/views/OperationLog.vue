@@ -20,8 +20,34 @@
         <div class="toolbar-card">
           <el-input v-model="opUsername" placeholder="按操作人筛选..." clearable :prefix-icon="User" @keyup.enter="loadOperations" @clear="loadOperations" />
           <el-input v-model="opOperation" placeholder="按操作类型筛选..." clearable :prefix-icon="Search" @keyup.enter="loadOperations" @clear="loadOperations" />
-          <el-button type="primary" @click="loadOperations">搜索</el-button>
+          <!-- 级别筛选（G3）：t_operation_log **没有"级别"列**，这里的"级别"= 操作人角色。
+               管理员操作与普通用户操作混在一张表里，筛出"管理员做了什么"才是审计的真需求。
+               ★ 不新增 level 列：那要改表 + 回填历史 + 改 LogAspect 的写入契约；
+                 "高危操作"（删除类）用左边的"操作类型"搜"删除"就能筛出来。 -->
+          <el-select v-model="opRole" placeholder="全部级别" clearable class="log-role-select" @change="handleOpSearch">
+            <el-option label="全部级别" value="" />
+            <el-option label="管理员操作" value="admin" />
+            <el-option label="普通用户操作" value="user" />
+          </el-select>
+          <!-- 时间范围（G3）：闭区间、只到"天"。后端把结束日补到 23:59:59，
+               所以"选 10-01 到 10-01"能查到当天的全部日志。 -->
+          <el-date-picker
+            v-model="opDateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            range-separator="至"
+            start-placeholder="操作起"
+            end-placeholder="操作止"
+            class="log-date-range"
+            @change="handleOpSearch"
+          />
+          <el-button type="primary" @click="handleOpSearch">搜索</el-button>
+          <el-button @click="handleOpReset">重置</el-button>
           <el-button :icon="Refresh" @click="loadOperations">刷新</el-button>
+          <!-- 导出（G3）：导的是**当前筛选结果**（不是当前页），后端上限 10000 行 -->
+          <el-button type="success" plain :icon="Download" :loading="opExporting" @click="handleOpExport">
+            导出 Excel
+          </el-button>
           <TableDensity />
         </div>
 
@@ -189,7 +215,7 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // Search / User 用于 :prefix-icon，Refresh / Delete 用于 :icon，都是「属性变量」形式，必须 import；
 // 注意区别：模板标签形式（<WarningFilled />）由 main.js 全局注册提供，不需要 import
-import { Refresh, Search, User, Delete } from '@element-plus/icons-vue'
+import { Refresh, Search, User, Delete, Download } from '@element-plus/icons-vue'
 // ★ 统一接口层（src/api）：日志类接口按「操作日志 / 异常日志」两个子对象导出，
 //   页面只关心「调哪个接口、拿到什么数据」
 import api from '../api'
@@ -219,6 +245,11 @@ export default {
       opError: false,
       opUsername: '',
       opOperation: '',
+      // 级别筛选（G3）：'' = 全部、'admin' / 'user' = 按操作人角色筛
+      opRole: '',
+      // 时间范围（G3）：['2026-10-01', '2026-10-02'] 或 null
+      opDateRange: null,
+      opExporting: false,
       opPageNum: 1,
       opPageSize: 10,
       opTotal: 0,
@@ -240,7 +271,8 @@ export default {
       User: markRaw(User),
       Search: markRaw(Search),
       Refresh: markRaw(Refresh),
-      Delete: markRaw(Delete)
+      Delete: markRaw(Delete),
+      Download: markRaw(Download)
     }
   },
   mounted() {
@@ -296,11 +328,15 @@ export default {
       this.opError = false
       try {
         // 参数对象交给接口层，toQuery 会自动拼串并跳过 null/undefined/空串
+        // ★ 空的时间范围会变成 undefined（被 toQuery 跳过），所以不必自己拼条件
         const data = await api.operationLog.page({
           pageNum: this.opPageNum,
           pageSize: this.opPageSize,
           username: this.opUsername.trim(),
-          operation: this.opOperation.trim()
+          operation: this.opOperation.trim(),
+          role: this.opRole,
+          startDate: this.opDateRange && this.opDateRange[0],
+          endDate: this.opDateRange && this.opDateRange[1]
         })
         this.operations = data.list || []
         this.opTotal = data.total || 0
@@ -309,6 +345,43 @@ export default {
         this.opError = true
       } finally {
         this.opLoading = false
+      }
+    },
+
+    /** 操作日志筛选后回第 1 页（否则在第 5 页改了条件会落到空页） */
+    handleOpSearch() {
+      this.opPageNum = 1
+      savePageNum(OP_PAGE_KEY, 1)
+      this.loadOperations()
+    },
+
+    /** 重置操作日志的全部筛选条件（G3）：操作人 / 操作类型 / 级别 / 时间范围 */
+    handleOpReset() {
+      this.opUsername = ''
+      this.opOperation = ''
+      this.opRole = ''
+      this.opDateRange = null
+      this.handleOpSearch()
+    },
+
+    /** 导出操作日志（G3）：导当前筛选结果，不是当前页 */
+    async handleOpExport() {
+      this.opExporting = true
+      try {
+        // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
+        //   失败（如超过 10000 行）由 http.js 统一弹红字并 throw，这里不用再提示。
+        await api.operationLog.exportExcel({
+          username: this.opUsername.trim(),
+          operation: this.opOperation.trim(),
+          role: this.opRole,
+          startDate: this.opDateRange && this.opDateRange[0],
+          endDate: this.opDateRange && this.opDateRange[1]
+        })
+        ElMessage.success('导出已开始，请查看浏览器下载')
+      } catch {
+        // 失败提示已由 http.js 统一弹出
+      } finally {
+        this.opExporting = false
       }
     },
 
@@ -395,6 +468,17 @@ export default {
 </script>
 
 <style scoped>
+/* 级别筛选与时间范围：固定宽度，避免把工具栏挤成两行 */
+.log-role-select {
+  width: 140px;
+  flex: 0 0 auto;
+}
+
+.log-date-range {
+  width: 250px;
+  flex: 0 0 auto;
+}
+
 :deep(.el-tabs__item) {
   font-size: 14px;
   font-weight: 500;

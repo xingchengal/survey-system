@@ -16,8 +16,16 @@ export default {
   /** 我的问卷列表 */
   my: () => http.get('/api/survey/my'),
 
-  /** 全部问卷（管理员），params: { pageNum, pageSize, keyword, status } */
+  /** 全部问卷（管理员），params: { pageNum, pageSize, keyword, status, startDate, endDate } */
   page: (params) => http.get('/api/survey/page', params),
+
+  /**
+   * 导出问卷列表为 Excel（管理员），params: { keyword, status, startDate, endDate }
+   * ★ 筛选条件与 page 完全一致，页面把当前筛选原样传过来即可（"导出的就是屏幕上筛的"）。
+   * ★ 口径是「全部问卷」：**不含模板**（与 page 的 SQL 一致；模板有单独的管理页）。
+   * ★ 后端上限 10000 份，超出返回 400 + 明确文案（http.js 会自动弹红字）。
+   */
+  exportExcel: (params) => http.download('/api/survey/export', params, '问卷列表.xlsx'),
 
   /**
    * 全部问卷 + 每份的答卷数（管理员，一次请求）。
@@ -91,11 +99,15 @@ export default {
 
   // ===== 回收站（★ 动词容易记错，注释里都标了）=====
 
-  /** 移入回收站（★ 是 PUT，不是 POST） */
-  recycle: (id) => http.put(`/api/survey/recycle/${id}`),
+  /**
+   * 移入回收站（★ 是 PUT，不是 POST）。
+   * ★ opts 可传 `{ silent: true }`：**批量**移入时页面用 allSettled 逐条调用，
+   *   传 silent 可以避免"每失败一条弹一次红字"，由页面统一汇总提示。
+   */
+  recycle: (id, opts) => http.put(`/api/survey/recycle/${id}`, null, opts),
 
-  /** 从回收站恢复（★ 是 PUT） */
-  restore: (id) => http.put(`/api/survey/restore/${id}`),
+  /** 从回收站恢复（★ 是 PUT）。opts 同 recycle（批量时传 silent） */
+  restore: (id, opts) => http.put(`/api/survey/restore/${id}`, null, opts),
 
   /** 彻底删除（★ 是 DELETE；后端要求问卷**已在回收站里**，否则 400） */
   permanent: (id) => http.del(`/api/survey/permanent/${id}`),

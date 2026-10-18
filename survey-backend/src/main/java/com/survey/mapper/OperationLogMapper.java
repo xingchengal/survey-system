@@ -37,8 +37,15 @@ public interface OperationLogMapper {
     int insert(OperationLog log);
 
     /**
-     * 分页条件查询（动态 SQL）：可按用户名、操作类型模糊筛选。
+     * 分页条件查询（动态 SQL）：按用户名、操作类型模糊筛选，按角色精确筛选，
+     * 以及**操作时间范围**（闭区间）。
      * 配合 PageHelper 使用（调用方先 startPage，且紧跟这次查询）。
+     *
+     * ★ 时间范围用 `create_time >= / <=` 直接比列（表上有 `idx_create_time`），
+     *   不要包 `DATE(create_time)` —— 那样索引失效，日志表越大越慢。
+     *   起止值由 {@link com.survey.common.DateRanges} 归一成 `yyyy-MM-dd 00:00:00` /
+     *   `yyyy-MM-dd 23:59:59`。
+     * ★ role 只接受 admin / user（Service 侧归一），空 = 不限。
      */
     @Select("<script>" +
             "SELECT * FROM t_operation_log WHERE 1=1 " +
@@ -48,8 +55,41 @@ public interface OperationLogMapper {
             "<if test='operation != null and operation != \"\"'>" +
             "AND operation LIKE CONCAT('%', #{operation}, '%') " +
             "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
+            "<if test='startTime != null'>AND create_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND create_time &lt;= #{endTime} </if>" +
             "ORDER BY create_time DESC" +
             "</script>")
     List<OperationLog> findPageByCondition(@Param("username") String username,
-                                           @Param("operation") String operation);
+                                           @Param("operation") String operation,
+                                           @Param("role") String role,
+                                           @Param("startTime") java.time.LocalDateTime startTime,
+                                           @Param("endTime") java.time.LocalDateTime endTime);
+
+    /**
+     * 导出用：与 {@link #findPageByCondition} 同一套筛选条件，但**不分页**、固定截断 10001 条。
+     *
+     * ★ 为什么不共用一条 SQL：PageHelper 只能影响"紧随其后的那一次查询"，
+     *   而导出要全量；给公共查询加可空 LIMIT 会让分页那条也变成动态 SQL，风险更大。
+     * ★ 10001 = 10000 + 1：多取一条只为判断"是否超过导出上限"，
+     *   调用方（OperationLogService.exportLogs）见到 10001 条就明确拒绝，而不是静默截断。
+     */
+    @Select("<script>" +
+            "SELECT * FROM t_operation_log WHERE 1=1 " +
+            "<if test='username != null and username != \"\"'>" +
+            "AND username LIKE CONCAT('%', #{username}, '%') " +
+            "</if>" +
+            "<if test='operation != null and operation != \"\"'>" +
+            "AND operation LIKE CONCAT('%', #{operation}, '%') " +
+            "</if>" +
+            "<if test='role != null and role != \"\"'>AND role = #{role} </if>" +
+            "<if test='startTime != null'>AND create_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND create_time &lt;= #{endTime} </if>" +
+            "ORDER BY create_time DESC LIMIT 10001" +
+            "</script>")
+    List<OperationLog> findForExport(@Param("username") String username,
+                                     @Param("operation") String operation,
+                                     @Param("role") String role,
+                                     @Param("startTime") java.time.LocalDateTime startTime,
+                                     @Param("endTime") java.time.LocalDateTime endTime);
 }

@@ -1,5 +1,6 @@
 package com.survey.controller;
 
+import com.alibaba.excel.EasyExcel;
 import com.survey.common.SurveyStatus;
 import com.survey.annotation.RequireAdmin;
 import com.survey.annotation.OperationLog;
@@ -18,11 +19,15 @@ import com.survey.common.OwnershipGuard;
 import com.survey.common.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -31,7 +36,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 问卷管理：问卷的增删改查、发布、复制、回收站、模板、统计。共 **19** 个端点。
+ * 问卷管理：问卷的增删改查、发布、复制、回收站、模板、统计。共 **20** 个端点。
  * （★ 另有 4 个被其它端点完全覆盖的单词式端点（GET /list、GET /statistics、GET /recycle、
  *   DELETE /delete/{id}）已下线，它们的 URL 仍由 REMOVED_LITERAL_PATHS 显式挡着 ——
  *   不挡就会被 /{id} 吞掉，见 getOne() 上方注释。）
@@ -51,7 +56,7 @@ import java.util.Set;
  *   需登录       : /add、/my、/my-statistics、/templates、/from-template/{id}、/recycle/page
  *   需登录+归属  : /update、/publish/{id}、/copy/{id}、
  *                  /recycle/{id}、/restore/{id}、/permanent/{id}、GET /{id}
- *   需管理员     : /list-with-response-count、/page、/system-overview、/set-template/{id}
+ *   需管理员     : /list-with-response-count、/page、/export、/system-overview、/set-template/{id}
  *
  * ── 三条贯穿全类的约定（改代码时请遵守）──────────────────
  *   1. 归属以登录身份为准：/add 会用 X-User-Id 覆盖请求体里的 userId，/update 会强制
@@ -195,15 +200,80 @@ public class SurveyController {
         return rows;
     }
 
-    @Operation(summary = "分页查询全部问卷（管理员，支持搜索+状态筛选）")
+    @Operation(summary = "分页查询全部问卷（管理员，支持搜索 + 状态 + 创建时间范围筛选）")
     @GetMapping("/page")
     @RequireAdmin
     public PageResult<Survey> pageSurveys(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Integer status) {
-        return surveyService.pageAllSurveys(pageNum, pageSize, keyword, status);
+            @RequestParam(required = false) Integer status,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        // ★ 日期格式只有一种：yyyy-MM-dd（见 common/DateRanges）。
+        //   传空 = 不限制；传错 = 400 + "应为 yyyy-MM-dd"，不会变成 500。
+        return surveyService.pageAllSurveys(pageNum, pageSize, keyword, status, startDate, endDate);
+    }
+
+    /**
+     * 导出问卷列表为 Excel（管理员）。
+     *
+     * ★ 筛选条件（keyword / status / startDate / endDate）与 {@code /page} **完全一致**，
+     *   前端把当前筛选原样带过来，"导出的就是屏幕上筛出来的"。
+     * ★ 口径是「全部问卷」：**不含模板**（与 /page 的 SQL 一致，模板有自己的管理页）。
+     * ★ 上限 10000 份（SurveyService.SURVEY_EXPORT_MAX_ROWS），超出明确拒绝，不静默截断。
+     * ★ 答卷数用一次 GROUP BY 补齐（countResponsesBySurveyIds），**不要**在循环里逐份 count。
+     */
+    @Operation(summary = "导出问卷列表为 Excel（管理员）")
+    @GetMapping("/export")
+    @RequireAdmin
+    public void exportSurveys(@RequestParam(required = false) String keyword,
+                              @RequestParam(required = false) Integer status,
+                              @RequestParam(required = false) String startDate,
+                              @RequestParam(required = false) String endDate,
+                              HttpServletResponse response) throws IOException {
+        List<Survey> surveys = surveyService.exportSurveys(keyword, status, startDate, endDate);
+        // 一次 GROUP BY 拿全部答卷数（没有答卷的问卷不会出现在 Map 里，取值必须 getOrDefault）
+        Map<Integer, Integer> counts = surveyService.countResponsesBySurveyIds(surveys);
+
+        List<List<String>> head = List.of(
+                List.of("ID"), List.of("问卷标题"), List.of("描述"), List.of("状态"),
+                List.of("答卷数"), List.of("创建时间"));
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        List<List<String>> rows = new ArrayList<>(surveys.size());
+        for (Survey s : surveys) {
+            List<String> row = new ArrayList<>(6);
+            row.add(s.getId() == null ? "" : String.valueOf(s.getId()));
+            row.add(s.getTitle() == null ? "" : s.getTitle());
+            row.add(s.getDescription() == null ? "" : s.getDescription());
+            row.add(exportSurveyStatus(s.getStatus()));
+            row.add(String.valueOf(counts.getOrDefault(s.getId(), 0)));
+            row.add(s.getCreatedTime() == null ? "" : s.getCreatedTime().format(fmt));
+            rows.add(row);
+        }
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        // ★ 文件名两层编码（同 AnswerController.export）：filename 只能是 ASCII，
+        //   中文名放 filename*（RFC 5987），否则浏览器下载到的是一串 %E9%97%AE... 乱码名。
+        String encodedName = URLEncoder.encode("问卷列表", "UTF-8").replace("+", "%20");
+        response.setHeader("Content-Disposition",
+                "attachment; filename=\"surveys.xlsx\"; filename*=UTF-8''" + encodedName + ".xlsx");
+
+        EasyExcel.write(response.getOutputStream())
+                .head(head)
+                .sheet("问卷列表")
+                .doWrite(rows);
+    }
+
+    /**
+     * 导出里的状态文案 —— 与前端列表的三种标签一致（草稿 / 已发布 / 已结束）。
+     * ★ 用 {@link SurveyStatus} 判定而不是 `status == 1`：NULL 视为草稿的口径收在那个枚举里。
+     */
+    private static String exportSurveyStatus(Integer status) {
+        if (SurveyStatus.isPublished(status)) return "已发布";
+        if (SurveyStatus.isEnded(status)) return "已结束";
+        return "草稿";
     }
 
     @Operation(summary = "查询当前用户的问卷（我的问卷）")

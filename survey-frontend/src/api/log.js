@@ -10,8 +10,19 @@ import http from './http'
 
 /** 操作日志（基础路径 /api/log） */
 export const operationLog = {
-  /** 分页查询，params: { pageNum, pageSize, username, operation } */
-  page: (params) => http.get('/api/log/page', params)
+  /**
+   * 分页查询，params: { pageNum, pageSize, username, operation, role, startDate, endDate }
+   * ★ role 是「级别筛选」的落地口径：只认 'admin' / 'user'，不传 = 全部。
+   *   t_operation_log 没有"级别"列（那是异常日志的概念），这里的"级别"= **操作人角色**。
+   * ★ startDate / endDate 是 `yyyy-MM-dd`（闭区间，后端把结束日补到 23:59:59）。
+   */
+  page: (params) => http.get('/api/log/page', params),
+
+  /**
+   * 导出操作日志为 Excel（管理员），params 与 page 的筛选条件相同（不含分页参数）。
+   * ★ 后端上限 10000 行，超出返回 400 + 明确文案（http.js 会自动弹红字）。
+   */
+  exportExcel: (params) => http.download('/api/log/export', params, '操作日志.xlsx')
 }
 
 /** 异常日志（基础路径 /api/error-log） */

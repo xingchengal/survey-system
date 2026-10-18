@@ -281,6 +281,7 @@ CREATE TABLE `t_user` (
   `profile_public` tinyint DEFAULT 1 COMMENT '【已废弃】原「资料公开开关」，需求已撤销、应用代码不再读写；列保留未删',
   `deleted_at` datetime DEFAULT NULL COMMENT '注销时间（软删除）：NULL=正常，非NULL=已注销；所有用户查询都要过滤 deleted_at IS NULL',
   `token_valid_after` datetime DEFAULT NULL COMMENT '令牌生效起点：JWT 的 iat 不晚于它即视为失效（NULL=不限制；改密码/恢复账号时写入）',
+  `disabled` tinyint NOT NULL DEFAULT 0 COMMENT '禁用标记：0=正常，1=已禁用（禁止登录；数据保留；管理员可解禁）',
   PRIMARY KEY (`id`),
   UNIQUE KEY `username` (`username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=467 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户表';

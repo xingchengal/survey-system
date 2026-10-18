@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">全部问卷</h2>
-        <p class="page-subtitle">共 {{ total }} 份 · 可查看、设为模板或移入回收站</p>
+        <p class="page-subtitle">共 {{ total }} 份 · 可多选批量移入回收站、按创建时间筛选、导出 Excel</p>
       </div>
     </div>
 
@@ -23,10 +23,55 @@
         <el-option label="已发布" :value="1" />
         <el-option label="已结束" :value="2" />
       </el-select>
+      <!-- 创建时间范围（G3）：闭区间，只到"天"。
+           ★ /survey/templates 不支持时间筛选，所以模板视图下禁用，避免"选了日期但没生效"的错觉。 -->
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        value-format="YYYY-MM-DD"
+        range-separator="至"
+        start-placeholder="创建起"
+        end-placeholder="创建止"
+        :disabled="showTemplates"
+        class="date-range"
+        @change="handleSearch"
+      />
       <el-input v-model="keyword" placeholder="搜索标题或描述..." clearable :prefix-icon="Search" @keyup.enter="handleSearch" @clear="handleSearch" />
       <el-button type="primary" @click="handleSearch">搜索</el-button>
+      <el-button @click="handleReset">重置</el-button>
       <el-button :icon="Refresh" @click="loadSurveys">刷新</el-button>
+      <!-- 导出（G3）：导的是**当前筛选结果**（不是当前页），后端上限 10000 份。
+           模板视图没有对应口径（导出 SQL 与 /page 一致、不含模板），所以禁用。 -->
+      <el-button type="success" plain :icon="Download" :loading="exporting" :disabled="showTemplates" @click="handleExport">
+        导出 Excel
+      </el-button>
+      <!-- 列设置（G3）：纯前端偏好，存 localStorage。至少保留一列，否则表格会空成一片。 -->
+      <el-popover placement="bottom-end" :width="180" trigger="click">
+        <template #reference>
+          <el-button :icon="Setting">列设置</el-button>
+        </template>
+        <div class="col-setting">
+          <div class="col-setting-title">显示哪些列</div>
+          <el-checkbox-group v-model="visibleColumns">
+            <el-checkbox v-for="col in columnOptions" :key="col.key" :value="col.key" :disabled="visibleColumns.length === 1 && visibleColumns.includes(col.key)">
+              {{ col.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+      </el-popover>
       <TableDensity />
+    </div>
+
+    <!-- 批量操作条：选中 ≥1 项才出现。
+         ★ 所有批量动作都是**逐条调单条端点**（Promise.allSettled），后端没有批量端点 ——
+           这样能精确报告"哪几份成功、哪几份为什么失败"，而不是整批回滚。 -->
+    <div v-if="selectedRows.length > 0" class="batch-bar">
+      <span class="batch-count">已选 <strong>{{ selectedRows.length }}</strong> 项</span>
+      <el-button type="danger" size="small" :icon="Delete" :loading="batchWorking" @click="handleBatchRecycle">
+        批量移入回收站
+      </el-button>
+      <el-button size="small" link @click="clearSelection">取消选择</el-button>
+      <span class="batch-hint">移入后可在「回收站」恢复</span>
     </div>
 
     <div class="table-card">
@@ -37,23 +82,33 @@
       empty-text="暂无问卷"
       @retry="loadSurveys"
     >
-    <el-table class="w-full" :data="surveys" stripe border max-height="560">
-      <el-table-column prop="id" label="ID" width="70" align="center" />
-      <el-table-column prop="title" label="问卷标题" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
-      <el-table-column v-if="showTemplates" label="模板分类" width="110" align="center">
+    <el-table
+      ref="tableRef"
+      class="w-full"
+      :data="surveys"
+      stripe
+      border
+      max-height="560"
+      row-key="id"
+      @selection-change="handleSelectionChange"
+    >
+      <el-table-column type="selection" width="46" align="center" />
+      <el-table-column v-if="isColumnVisible('id')" prop="id" label="ID" width="70" align="center" />
+      <el-table-column v-if="isColumnVisible('title')" prop="title" label="问卷标题" min-width="180" show-overflow-tooltip />
+      <el-table-column v-if="isColumnVisible('description')" prop="description" label="描述" min-width="200" show-overflow-tooltip />
+      <el-table-column v-if="showTemplates && isColumnVisible('templateCategory')" label="模板分类" width="110" align="center">
         <template #default="{ row }">
           <el-tag size="small" type="success">{{ row.templateCategory || '通用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="100" align="center">
+      <el-table-column v-if="isColumnVisible('status')" prop="status" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.status === 1" type="success" size="small">已发布</el-tag>
           <el-tag v-else-if="row.status === 2" type="danger" size="small">已结束</el-tag>
           <el-tag v-else type="info" size="small">草稿</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="createdTime" label="创建时间" width="170" />
+      <el-table-column v-if="isColumnVisible('createdTime')" prop="createdTime" label="创建时间" width="170" />
       <el-table-column label="操作" :width="showTemplates ? 250 : 220" align="center" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="handleView(row)">查看</el-button>
@@ -132,14 +187,14 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-// 统一接口层：本页 5 个请求全部走 src/api/ ——
-//   分页列表 / 模板列表（"显示模板"开关用）/ 题目列表 / 设为模板 / 移入回收站。
+// 统一接口层：本页的请求全部走 src/api/ ——
+//   分页列表 / 模板列表（"显示模板"开关用）/ 题目列表 / 设为模板 / 移入回收站 / 导出。
 //   页面不再自己取 token、拼 query、判断 res.ok、parse JSON。
 import api from '../api'
-// Refresh / Search 都用于「属性变量」形式（:icon="Refresh"、:prefix-icon="Search"），
+// Refresh / Search / Download / Setting 都用于「属性变量」形式（:icon="Download"），
 // 这种写法需要真实的变量，所以必须 import；
 // 若某图标只以模板标签形式出现（<Bell />），则由 main.js 全局注册即可，无需在这里 import。
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { Refresh, Search, Download, Setting, Delete } from '@element-plus/icons-vue'
 // 三态容器：骨架 / 空 / 错误（带重试）
 import PageState from '../components/PageState.vue'
 // 行密度切换（默认 / 紧凑）
@@ -150,8 +205,51 @@ import { readPageNum, savePageNum } from '../utils/pageMemory'
 /** 本页在 sessionStorage 里的页码键 */
 const PAGE_KEY = 'AdminSurveyList'
 
+/** 列设置（G3）的 localStorage 键：记住"哪几列可见"，刷新页面后不丢 */
+const COLUMN_KEY = 'AdminSurveyList:columns'
+
+/** 可开关的列（ID / 标题 / 描述 / 状态 / 创建时间）。模板分类列只在模板视图出现，一并纳入开关。 */
+const COLUMN_OPTIONS = [
+  { key: 'id', label: 'ID' },
+  { key: 'title', label: '问卷标题' },
+  { key: 'description', label: '描述' },
+  { key: 'templateCategory', label: '模板分类（模板视图）' },
+  { key: 'status', label: '状态' },
+  { key: 'createdTime', label: '创建时间' }
+]
+
+const ALL_COLUMNS = COLUMN_OPTIONS.map((c) => c.key)
+
+/** 读回上次的列设置；数据坏了/没存过就用全量（绝不让表格因为一条脏数据变成空白） */
+function readVisibleColumns() {
+  try {
+    const raw = localStorage.getItem(COLUMN_KEY)
+    if (!raw) return [...ALL_COLUMNS]
+    const saved = JSON.parse(raw)
+    if (!Array.isArray(saved)) return [...ALL_COLUMNS]
+    const valid = saved.filter((k) => ALL_COLUMNS.includes(k))
+    return valid.length > 0 ? valid : [...ALL_COLUMNS]
+  } catch {
+    return [...ALL_COLUMNS]
+  }
+}
+
+/** 把一次批量操作的结果汇总成"成功数 + 失败明细" */
+function summarizeBatch(rows, results) {
+  const failures = []
+  let ok = 0
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      ok += 1
+    } else {
+      failures.push({ title: rows[i].title, message: (r.reason && r.reason.message) || '未知原因' })
+    }
+  })
+  return { ok, failures }
+}
+
 // 图标已在 main.js 里全局注册，这里不再重复注册。
-// 说明：模板标签形式（<Bell />）和属性变量形式（:prefix-icon="Search"）都不受影响 ——
+// 说明：模板标签形式（<Bell />）和属性变量形式（:icon="Refresh"）都不受影响 ——
 //       前者走全局注册，后者走本文件顶部的 import。
 export default {
   components: { PageState, TableDensity },
@@ -163,6 +261,9 @@ export default {
       error: false,
       keyword: '',
       statusFilter: '',
+      // 创建时间范围（G3）：['2026-10-01', '2026-10-02'] 或 null。
+      // ★ value-format 决定它永远是 'YYYY-MM-DD' 字符串，直接进 query 不用再格式化。
+      dateRange: null,
       // false = 走 api.survey.page（排除模板，默认视图）
       // true  = 走 api.survey.templates（含模板，用来管理模板身份）
       showTemplates: false,
@@ -172,6 +273,13 @@ export default {
       dialogVisible: false,
       currentSurvey: {},
       currentQuestions: [],
+      // ===== G3：多选 / 批量 / 导出 / 列设置 =====
+      // el-table 的选中行（selection-change 事件回填）
+      selectedRows: [],
+      batchWorking: false,
+      exporting: false,
+      visibleColumns: readVisibleColumns(),
+      columnOptions: COLUMN_OPTIONS,
       // ===== 设为/取消模板 =====
       templateDialogVisible: false,
       templateSubmitting: false,
@@ -181,7 +289,23 @@ export default {
       // 用 allow-create 允许管理员新建分类，前端不做白名单校验（后端也没有分类白名单）。
       templateCategoryOptions: ['满意度', '报名', '反馈', '调研', '教育', '健康', '其他'],
       Search: markRaw(Search),
-      Refresh: markRaw(Refresh)
+      Refresh: markRaw(Refresh),
+      Download: markRaw(Download),
+      Setting: markRaw(Setting),
+      Delete: markRaw(Delete)
+    }
+  },
+  watch: {
+    // 列设置改动立即落 localStorage（不需要"保存"按钮，与 TableDensity 的习惯一致）
+    visibleColumns: {
+      deep: true,
+      handler(value) {
+        try {
+          localStorage.setItem(COLUMN_KEY, JSON.stringify(value))
+        } catch {
+          // 隐私模式/配额满时写不进去：列设置只是偏好，失败不影响使用，静默即可
+        }
+      }
     }
   },
   mounted() {
@@ -191,7 +315,7 @@ export default {
   },
   methods: {
     // ===== 分页加载全部问卷（管理员）=====
-    // 关联：surveys 喂给表格；total 喂给 el-pagination；statusFilter / keyword 来自顶部筛选栏。
+    // 关联：surveys 喂给表格；total 喂给 el-pagination；statusFilter / keyword / dateRange 来自顶部筛选栏。
     // ★ showTemplates 为真时必须走 api.survey.templates()（模板列表）：
     //   api.survey.page 的 SQL 排除 is_template = 1，不切数据源就看不到模板、也就无法取消它。
     async loadSurveys() {
@@ -210,11 +334,14 @@ export default {
         // 参数对象交给 api.survey.page()，由 http.js 的 toQuery 统一拼串并做 URL 编码。
         // ★ 注意 status 的 0（草稿）不会被误当成空值丢掉 —— toQuery 只过滤 '' / null / undefined，
         //   所以这里不必自己判空。
+        // ★ dateRange 为 null 时下面两个字段都是 undefined，toQuery 会自动跳过（= 不限制时间）。
         const data = await api.survey.page({
           pageNum: this.pageNum,
           pageSize: this.pageSize,
           keyword: this.keyword.trim(),
-          status: this.statusFilter
+          status: this.statusFilter,
+          startDate: this.dateRange && this.dateRange[0],
+          endDate: this.dateRange && this.dateRange[1]
         })
         this.surveys = data.list || []
         this.total = data.total || 0
@@ -232,11 +359,21 @@ export default {
       this.loadSurveys()
     },
 
+    /** 重置全部筛选条件（G3）：关键词 / 状态 / 时间范围一起清，页码回 1 */
+    handleReset() {
+      this.keyword = ''
+      this.statusFilter = ''
+      this.dateRange = null
+      this.handleSearch()
+    },
+
     // ★ 模板列表接口不分页（一次给全部），前端本地分页；
     //   切换视图时把页码复位，否则在"全部问卷"翻到第 3 页再切"显示模板"会落到空页。
     handleTemplateViewChange() {
       this.pageNum = 1
       savePageNum(PAGE_KEY, 1)
+      // 切视图时清空选中：两个视图的行集合不同，留着上一批选中会误操作
+      this.clearSelection()
       this.loadSurveys()
     },
 
@@ -251,6 +388,77 @@ export default {
       this.pageNum = page
       savePageNum(PAGE_KEY, page)
       this.loadSurveys()
+    },
+
+    // ===== G3：多选与批量操作 =====
+    handleSelectionChange(rows) {
+      this.selectedRows = rows || []
+    },
+
+    clearSelection() {
+      this.selectedRows = []
+      // 同步清掉表格内部的勾选状态（否则换页/刷新后表头复选框还是"半选"）
+      if (this.$refs.tableRef) {
+        this.$refs.tableRef.clearSelection()
+      }
+    },
+
+    /**
+     * 批量移入回收站。
+     * ★ 逐条调用 `PUT /api/survey/recycle/{id}`（管理员对该端点有权限，见审计表「需登录+归属」档）。
+     *   传 `{ silent: true }` 是为了**不让 http.js 对每条失败各弹一次红字** ——
+     *   批量 10 条里有 3 条失败时，弹 3 次比一次汇总更难读。
+     * ★ 用 allSettled 而不是 all：一条失败不该让已成功的回滚（后端本来就是各自独立的事务）。
+     */
+    handleBatchRecycle() {
+      const rows = [...this.selectedRows]
+      if (rows.length === 0) return
+      ElMessageBox.confirm(
+        `确定把选中的 ${rows.length} 份问卷移入回收站吗？移入后可在「回收站」恢复。`,
+        '批量移入回收站',
+        { confirmButtonText: '确定移入', cancelButtonText: '取消', type: 'warning' }
+      ).then(async () => {
+        this.batchWorking = true
+        try {
+          const results = await Promise.allSettled(rows.map((r) => api.survey.recycle(r.id, { silent: true })))
+          const { ok, failures } = summarizeBatch(rows, results)
+          if (failures.length === 0) {
+            ElMessage.success(`已将 ${ok} 份问卷移入回收站`)
+          } else {
+            const detail = failures.slice(0, 3).map((f) => `「${f.title}」${f.message}`).join('；')
+            ElMessage.warning(`${ok} 份已移入回收站，${failures.length} 份失败：${detail}${failures.length > 3 ? ' 等' : ''}`)
+          }
+          this.clearSelection()
+          this.loadSurveys()
+        } finally {
+          this.batchWorking = false
+        }
+      }).catch(() => {})
+    },
+
+    // ===== G3：导出（当前筛选结果，不是当前页）=====
+    async handleExport() {
+      this.exporting = true
+      try {
+        // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
+        //   失败（如超过 10000 份）由 http.js 统一弹红字并 throw，这里不用再提示。
+        await api.survey.exportExcel({
+          keyword: this.keyword.trim(),
+          status: this.statusFilter,
+          startDate: this.dateRange && this.dateRange[0],
+          endDate: this.dateRange && this.dateRange[1]
+        })
+        ElMessage.success('导出已开始，请查看浏览器下载')
+      } catch {
+        // 失败提示已由 http.js 统一弹出
+      } finally {
+        this.exporting = false
+      }
+    },
+
+    // ===== G3：列设置 =====
+    isColumnVisible(key) {
+      return this.visibleColumns.includes(key)
     },
 
     // ===== 查看问卷详情（弹窗里列出题目）=====
@@ -331,3 +539,57 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+/* 时间范围选择器：固定宽度，避免把工具栏挤成两行 */
+.date-range {
+  width: 250px;
+  flex: 0 0 auto;
+}
+
+/* 批量操作条（G3）：选中才出现，粘在工具栏与表格之间 */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 16px;
+  border-radius: var(--r-md, 10px);
+  border: 1px solid var(--sky-200, #bae0ff);
+  background: var(--sky-50, #f0f9ff);
+  animation: batch-bar-in 0.18s ease-out;
+}
+
+.batch-count {
+  font-size: 14px;
+  color: var(--text-regular, #606266);
+}
+
+.batch-count strong {
+  color: var(--sky-600, #1677ff);
+  font-size: 15px;
+}
+
+.batch-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+}
+
+@keyframes batch-bar-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 列设置弹层 */
+.col-setting-title {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  margin-bottom: 8px;
+}
+
+.col-setting :deep(.el-checkbox) {
+  display: flex;
+  height: 28px;
+}
+</style>

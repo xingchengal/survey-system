@@ -136,6 +136,17 @@ public class JwtAuthFilter implements Filter {
             writeJson(response, 401, "账号不存在或已注销，请重新登录");
             return;
         }
+        // ★★ 被管理员禁用的账号：**已经签发的票也立刻失效**。
+        //   与"注销"是两条不同的处置（注销是用户自己干的，禁用是管理员干的），
+        //   所以文案也分开 —— 否则被禁用的用户会以为是自己注销了，找客服的说法都对不上。
+        //   ★ 这道检查之所以必须在这里（而不只在登录接口），原因与 deleted_at 完全相同：
+        //     JWT 无法吊销，禁用时若不逐请求查库，旧票还能再用最长 12 小时。
+        //   （UserService.setDisabled 同时会写 token_valid_after，双保险：
+        //     即便将来有人只改 disabled 忘了改时间，这里也能立刻拦住。）
+        if (currentUser.getDisabled() != null && currentUser.getDisabled() == 1) {
+            writeJson(response, 401, "账号已被管理员禁用，请联系管理员解禁");
+            return;
+        }
         if (!JwtUtil.isIssuedAtOrAfter(claims, currentUser.getTokenValidAfter())) {
             // ★ 与"账号不可用"分开写文案：这句对应用户能理解的两件事 ——
             //   "你改过密码"或"管理员刚恢复了这个账号"，两种情况都要求重新登录。

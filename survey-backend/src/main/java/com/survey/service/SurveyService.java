@@ -8,6 +8,7 @@ import com.survey.common.QuestionType;
 import com.survey.common.SurveyLifecycle;
 import com.survey.common.SurveyStatus;
 import com.survey.common.BizException;
+import com.survey.common.DateRanges;
 import com.survey.common.PageParams;
 import com.survey.common.SqlLikeEscaper;
 import com.survey.common.PageResult;
@@ -180,6 +181,14 @@ public class SurveyService {
      *     否则又回到上面那个 500。
      */
     private static final int MAX_DESC_LENGTH = TextLimits.SURVEY_DESCRIPTION;
+
+    /**
+     * 问卷列表单次导出最多多少行。
+     * ★ 与 AnswerController / UserService 的导出上限同一个思路：导出会把全部行读进内存，
+     *   不设上限时一次"顺手点一下"就足以把堆打满。SQL 侧固定 `LIMIT 10001`，
+     *   超过就明确拒绝，不静默截断。
+     */
+    public static final int SURVEY_EXPORT_MAX_ROWS = 10_000;
 
     /**
      * 问卷文本字段的长度上限校验。
@@ -857,15 +866,19 @@ public class SurveyService {
     // ===== 分页 =====
 
     /**
-     * 分页查全部问卷（管理员问卷列表页，支持关键字 + 状态筛选）。
+     * 分页查全部问卷（管理员问卷列表页，支持关键字 + 状态 + **创建时间范围**筛选）。
      * ★ PageHelper 的用法：startPage 只对**紧随其后的那一条**查询生效，
      *   所以 startPage 和 mapper 调用必须紧挨着，中间不要插别的查询。
+     * ★ 时间范围由 {@link com.survey.common.DateRanges} 解析（格式错 → 400 而不是 500）：
+     *   `startDate`/`endDate` 是 `yyyy-MM-dd`，闭区间，结束取当天 23:59:59。
      */
-    public PageResult<Survey> pageAllSurveys(int pageNum, int pageSize, String keyword, Integer status) {
+    public PageResult<Survey> pageAllSurveys(int pageNum, int pageSize, String keyword,
+                                             Integer status, String startDate, String endDate) {
         PageHelper.startPage(PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
         // 同上：转义 LIKE 通配符（见 listTemplates()）。
         keyword = SqlLikeEscaper.escape(keyword);
-        List<Survey> list = surveyMapper.findPageByCondition(keyword, status);
+        List<Survey> list = surveyMapper.findPageByCondition(keyword, status,
+                DateRanges.startOfDay(startDate), DateRanges.endOfDay(endDate));
         PageInfo<Survey> pageInfo = new PageInfo<>(list);
         // ★ 必须回显**钳制后**的页码/页大小：分页保护 PageParams 只在 startPage 那一层生效，
         //   若把调用方传进来的原值写进响应，请求 pageSize=100000 时实际只返回 100 条、
@@ -873,6 +886,26 @@ public class SurveyService {
         //   pageSize=0 或负数时同理。
         return new PageResult<>(pageInfo.getTotal(), pageInfo.getList(),
                 PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
+    }
+
+    /**
+     * 导出用的问卷列表（**不分页**，最多 10000 份）。
+     *
+     * ★ 筛选条件与 {@link #pageAllSurveys} 完全一致，所以"导出的就是屏幕上筛出来的"。
+     * ★ 超过 10000 份明确报错拒绝，不静默截断（静默截断会让管理员以为"导出全了"）。
+     *   mapper 侧固定 `LIMIT 10001`，多取的一条只为判断是否超限。
+     * ★ 本方法**不返回**答卷数：控制器若要展示，用
+     *   {@link #countResponsesBySurveyIds(java.util.List)} 一次 GROUP BY 补齐，别在循环里逐份 count。
+     */
+    public List<Survey> exportSurveys(String keyword, Integer status, String startDate, String endDate) {
+        keyword = SqlLikeEscaper.escape(keyword);
+        List<Survey> surveys = surveyMapper.findForExport(keyword, status,
+                DateRanges.startOfDay(startDate), DateRanges.endOfDay(endDate));
+        if (surveys.size() > SURVEY_EXPORT_MAX_ROWS) {
+            throw new BizException("导出结果超过 " + SURVEY_EXPORT_MAX_ROWS
+                    + " 份问卷，请缩小筛选范围后再导出（导出的每一行都要进内存，不设上限会拖垮服务）");
+        }
+        return surveys;
     }
 
     /** 分页查某用户的回收站（Recycle.vue 普通用户视角）。 */
