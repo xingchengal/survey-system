@@ -14,6 +14,7 @@ import com.survey.entity.Question;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
 import com.survey.dto.MyScoreDTO;
+import com.survey.dto.MyAnswerItem;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
@@ -327,6 +328,22 @@ public class AnswerController {
         }
         requireSurveyOwnership(answer.getSurveyId(), userId, role);
         return answerService.listDetailsByAnswerId(answerId);
+    }
+
+    /**
+     * 我答过的问卷（分页）。
+     *
+     * ★ 权限档位：**需登录**（只查自己的，不接受 userId 参数）。
+     * ★ 匿名答卷查不到 —— 这是产品口径：没有身份就没有"我的记录"。
+     * ★ 返回 `PageResult<MyAnswerItem>`：问卷标题/分数/状态由一条 JOIN 取回，前端不再 N+1。
+     */
+    @Operation(summary = "我答过的问卷（分页）")
+    @GetMapping("/my")
+    public PageResult<MyAnswerItem> myAnswers(
+            @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+            @RequestParam(defaultValue = "1") int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        return answerService.myAnswers(userId, pageNum, pageSize);
     }
 
     /**

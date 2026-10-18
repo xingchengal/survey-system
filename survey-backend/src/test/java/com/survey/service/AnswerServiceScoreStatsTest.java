@@ -1,6 +1,9 @@
 package com.survey.service;
 
+import com.survey.common.BizException;
+import com.survey.common.PageResult;
 import com.survey.common.SurveyStatus;
+import com.survey.dto.MyAnswerItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Answer;
 import com.survey.entity.Question;
@@ -29,6 +32,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -174,5 +179,26 @@ class AnswerServiceScoreStatsTest {
 
         assertSame(answer, answerService.getLatestAnswer(SURVEY_ID, 9));
         verify(answerMapper, never()).findById(anyInt());
+    }
+
+    @Test
+    @DisplayName("我的答题记录：按当前用户分页（offset=(页-1)×条数）；无记录不查列表；匿名为 400")
+    void myAnswers_paginationAndIdentity() {
+        when(answerMapper.countByUser(9)).thenReturn(0);
+        PageResult<MyAnswerItem> empty = answerService.myAnswers(9, 1, 10);
+        assertEquals(0, empty.getTotal());
+        verify(answerMapper, never()).pageByUser(any(), anyLong(), anyInt());
+
+        when(answerMapper.countByUser(9)).thenReturn(25);
+        MyAnswerItem item = new MyAnswerItem();
+        item.setSurveyTitle("期中测验");
+        when(answerMapper.pageByUser(eq(9), eq(20L), eq(10))).thenReturn(List.of(item));
+
+        PageResult<MyAnswerItem> page = answerService.myAnswers(9, 3, 10);
+        assertEquals(25, page.getTotal());
+        assertEquals(3, page.getPageNum());
+        assertEquals(1, page.getList().size(), "第 3 页的 offset 必须是 20");
+
+        assertThrows(BizException.class, () -> answerService.myAnswers(null, 1, 10));
     }
 }

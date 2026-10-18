@@ -48,6 +48,16 @@ export default {
   detail: (answerId) => http.get(`/api/answer/detail/${answerId}`),
 
   /**
+   * 我答过的问卷（分页）。
+   *
+   * ★ 只返回**登录态提交**的记录：匿名答卷没有 user_id，永远查不到。
+   * ★ 返回 `{ total, list, pageNum, pageSize }`；list 项含问卷标题、分数、
+   *   问卷状态与 shareCode（用来判断还能不能打开）。
+   */
+  my: (pageNum = 1, pageSize = 10) =>
+    http.get(`/api/answer/my?pageNum=${pageNum}&pageSize=${pageSize}`),
+
+  /**
    * 查**我**在某份问卷的成绩（登录用户；考试问卷才有）。
    *
    * ★ 只按 `surveyId + 当前登录用户` 定位，不接受 answerId ——

@@ -76,6 +76,10 @@
               <el-icon><Document /></el-icon>
               <span>我的问卷</span>
             </el-menu-item>
+            <el-menu-item index="/my/answers">
+              <el-icon><Memo /></el-icon>
+              <span>我的成绩</span>
+            </el-menu-item>
             <el-menu-item index="/my/recycle">
               <el-icon><Delete /></el-icon>
               <span>回收站</span>

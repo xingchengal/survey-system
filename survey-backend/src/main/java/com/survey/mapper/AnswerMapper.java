@@ -1,6 +1,7 @@
 package com.survey.mapper;
 
 import com.survey.entity.Answer;
+import com.survey.dto.MyAnswerItem;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
@@ -158,6 +159,31 @@ public interface AnswerMapper {
     @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} AND user_id = #{userId} " +
             "ORDER BY id DESC LIMIT 1")
     Answer findLatestBySurveyAndUser(@Param("surveyId") Integer surveyId, @Param("userId") Integer userId);
+
+    /**
+     * 「我答过的问卷」**分页列表** —— 一条 JOIN 取回答卷 + 问卷标题/分数/状态。
+     *
+     * ★ 为什么 JOIN 而不是只查 t_answer：列表要显示问卷标题与"还能不能进"，
+     *   只查答卷就得让前端对每条再查一次问卷（N+1）。
+     * ★ 排序 `submit_time DESC, id DESC`：同一秒提交多条时顺序才确定（与答卷列表同口径）。
+     * ★ 包含已删除/已结束的问卷：历史记录不该因为作者删了问卷就消失，
+     *   由前端按 deleted/status 显示并禁用"去填写"。
+     * ★ 偏移量由 {@link com.survey.common.PageParams#offset} 算好传入（防溢出/深翻页）。
+     */
+    @Select("SELECT a.id AS answer_id, a.survey_id, s.title AS survey_title, a.submit_time, " +
+            "a.total_score, a.earned_score, a.is_passed, s.pass_score, s.grade_enabled, " +
+            "s.share_code, s.status, s.deleted " +
+            "FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
+            "WHERE a.user_id = #{userId} " +
+            "ORDER BY a.submit_time DESC, a.id DESC " +
+            "LIMIT #{pageSize} OFFSET #{offset}")
+    List<MyAnswerItem> pageByUser(@Param("userId") Integer userId,
+                                  @Param("offset") long offset,
+                                  @Param("pageSize") int pageSize);
+
+    /** 我答过的问卷总数（分页用）。★ 与 pageByUser 同一个 WHERE，避免总数与列表口径不一致。 */
+    @Select("SELECT COUNT(*) FROM t_answer WHERE user_id = #{userId}")
+    int countByUser(Integer userId);
 
     /**
      * 判分摘要（统计页的"平均分 / 及格率"）。

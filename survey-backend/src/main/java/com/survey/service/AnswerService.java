@@ -13,6 +13,7 @@ import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
+import com.survey.dto.MyAnswerItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
 import com.survey.entity.Survey;
@@ -978,6 +979,28 @@ public class AnswerService {
     public Answer getLatestAnswer(Integer surveyId, Integer userId) {
         if (surveyId == null || userId == null) return null;
         return answerMapper.findLatestBySurveyAndUser(surveyId, userId);
+    }
+
+    /**
+     * 「我答过的问卷」分页列表（GET /api/answer/my）。
+     *
+     * ★ 身份只取当前登录用户：匿名答卷没有 user_id，天然查不到（产品口径）。
+     * ★ total=0 时**不查列表**：省一次无意义的 LIMIT/OFFSET 查询。
+     * ★ 包含已删除 / 已结束的问卷：历史记录不该因为作者删了问卷就消失，
+     *   能不能打开由前端按 deleted/status 判断。
+     * ★ 页码/每页条数一律过 {@link PageParams}：深翻页与 int 溢出都挡在这里。
+     */
+    public PageResult<MyAnswerItem> myAnswers(Integer userId, int pageNum, int pageSize) {
+        if (userId == null) {
+            throw new BizException("请先登录后再查看答题记录");
+        }
+        int num = PageParams.pageNum(pageNum);
+        int size = PageParams.pageSize(pageSize);
+        int total = answerMapper.countByUser(userId);
+        List<MyAnswerItem> list = total == 0
+                ? List.of()
+                : answerMapper.pageByUser(userId, PageParams.offset(num, size), size);
+        return new PageResult<>(total, list, num, size);
     }
 
     /** 某问卷的**全部**答卷明细（统计页做整体分析用，注意数据量）。 */
