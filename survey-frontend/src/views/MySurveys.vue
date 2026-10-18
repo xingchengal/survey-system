@@ -352,7 +352,7 @@
     </el-dialog>
 
     <!-- ========== 新建问卷对话框（带模板） ========== -->
-    <el-dialog v-model="createDialogVisible" title="新建问卷" width="900px" top="8vh">
+    <el-dialog v-model="createDialogVisible" title="新建问卷" width="960px" top="8vh">
       <!-- ★ 双卡片入口：比灰字 tab 更能说明"两种开始方式"，且按用户要求**不放数量徽标**。
            键盘：左右方向键切换，role=tab + aria-selected 保持可访问性。 -->
       <div class="create-switch" role="tablist" aria-label="新建问卷方式">
@@ -454,33 +454,34 @@
           role="tabpanel"
           aria-labelledby="create-tab-template"
         >
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
-            <el-radio-group v-model="templateCategory" size="default">
-              <el-radio-button value="全部">全部</el-radio-button>
-              <el-radio-button
+          <!-- 分类 + 搜索合一行：分类用带计数的下拉，避免 8 个分类胶囊在 900px 里换两行 -->
+          <div class="tpl-toolbar">
+            <el-select v-model="templateCategory" class="tpl-category" size="default">
+              <el-option label="全部分类" value="全部" />
+              <el-option
                 v-for="cat in templateCategories"
                 :key="cat.name"
+                :label="`${cat.name} (${cat.count})`"
                 :value="cat.name"
-              >
-                {{ cat.name }} ({{ cat.count }})
-              </el-radio-button>
-            </el-radio-group>
+              />
+            </el-select>
+            <span class="tpl-count">共 {{ filteredTemplates.length }} 个模板</span>
 
-            <div style="display: flex;">
+            <div class="tpl-search">
               <el-input
                 v-model="templateKeyword"
+                class="tpl-search-input"
                 placeholder="搜索模板名称..."
                 clearable
                 :prefix-icon="Search"
-                style="width: 220px;"
                 @keyup.enter="loadTemplates"
                 @clear="loadTemplates"
               />
-              <el-button class="ml-8" type="primary" @click="loadTemplates">搜索</el-button>
+              <el-button type="primary" @click="loadTemplates">搜索</el-button>
             </div>
           </div>
 
-          <div v-loading="templateLoading" style="min-height: 300px; max-height: 520px; overflow-y: auto; padding: 4px;">
+          <div v-loading="templateLoading" class="tpl-panel">
             <div v-if="filteredTemplates.length > 0" class="template-grid">
               <div
                 v-for="tpl in filteredTemplates"
@@ -496,7 +497,7 @@
                 <h4 class="tpl-title">{{ tpl.title }}</h4>
                 <p class="tpl-desc">{{ tpl.description || '暂无描述' }}</p>
                 <div class="tpl-footer">
-                  <span style="color: #409eff; font-size: 13px;">使用此模板 →</span>
+                  <span class="tpl-use-link">使用此模板 →</span>
                 </div>
               </div>
             </div>
@@ -1706,27 +1707,57 @@ export default {
   box-shadow: 0 4px 10px rgba(100, 116, 139, 0.16);
 }
 
-/* ============== 模板卡片 ============== */
+/* ============== 模板弹窗：工具栏 + 卡片 ============== */
+.tpl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.tpl-category {
+  width: 170px;
+}
+.tpl-count {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.tpl-search {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.tpl-search-input {
+  width: 240px;
+}
+.tpl-panel {
+  min-height: 300px;
+  max-height: 470px;
+  overflow-y: auto;
+  padding: 2px 4px 4px;
+}
+
 .template-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
 }
 
 .template-card {
+  height: 150px;
+  padding: 14px 16px;
   border: 1px solid #ebeef5;
   border-radius: 10px;
-  padding: 16px;
   cursor: pointer;
   transition: all 0.25s ease;
   background: #fff;
   display: flex;
   flex-direction: column;
-  min-height: 150px;
+  overflow: hidden;
 }
 
 .template-card:hover {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
   border-color: #409eff;
 }
@@ -1736,7 +1767,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 .tpl-usage {
   flex-shrink: 0;
@@ -1772,13 +1803,20 @@ export default {
 }
 
 .tpl-footer {
-  margin-top: 12px;
+  margin-top: auto;
+  padding-top: 6px;
   text-align: right;
-  opacity: 0;
+  opacity: 0.65;
   transition: opacity 0.25s;
 }
 
 .template-card:hover .tpl-footer { opacity: 1; }
+
+.tpl-use-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: #2f80ed;
+}
 
 /* 宽屏收窄一点、操作列按屏幕逐级压缩；窄屏只留图标（但按钮仍是 30px，不再是小圆点） */
 @media (max-width: 1500px) {
@@ -1950,6 +1988,16 @@ html[data-theme="dark"] .switch-card.active .switch-icon {
 }
 html[data-theme="dark"] .switch-text b {
   color: #e2e8f0;
+}
+html[data-theme="dark"] .template-card {
+  background: #101d31;
+  border-color: #1d2c44;
+}
+html[data-theme="dark"] .tpl-title {
+  color: #e2e8f0;
+}
+html[data-theme="dark"] .tpl-desc {
+  color: #94a3b8;
 }
 
 /* 窄屏两张卡片改上下排列 */
