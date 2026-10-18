@@ -15,6 +15,7 @@ import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
 import com.survey.dto.MyScoreDTO;
 import com.survey.dto.MyAnswerItem;
+import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
@@ -347,6 +348,21 @@ public class AnswerController {
     }
 
     /**
+     * 我某份答卷的详情（逐题回放）。
+     *
+     * ★ 权限按**答卷归属**校验（answer.userId == 当前用户），不是问卷归属 ——
+     *   答题人不是问卷作者，不能复用作者的 /answer/detail/{answerId}。
+     * ★ 正确答案只在作者开启「提交后显示答案」时返回（与交卷成绩卡同口径）。
+     */
+    @Operation(summary = "我某份答卷的详情（逐题对错）")
+    @GetMapping("/my/{answerId}")
+    public MyAnswerDetailDTO myAnswerDetail(
+            @PathVariable Integer answerId,
+            @RequestHeader(value = "X-User-Id", required = false) Integer userId) {
+        return answerService.getMyAnswerDetail(userId, answerId);
+    }
+
+    /**
      * 查询「我在某份问卷的成绩」。
      *
      * ★ 权限档位：**需登录**（只查自己，不需要问卷归属）——
@@ -470,64 +486,11 @@ public class AnswerController {
     /**
      * 把一道题的全部明细拼成一个 Excel 单元格。
      *
-     * ── 为什么要按题型拼 ────────────────────────────────
-     *   多选是"一选项一行"、矩阵是"一行一条"、排序是"一名一条"——
-     *   直接取第一条会**静默丢数据**（旧实现用 Map 覆盖，连多选都只剩最后一项）。
-     *
-     * ── 各题型的单元格格式 ──────────────────────────────
-     *   多选      ：`A、B、C`（按存储顺序）
-     *   矩阵      ：`服务态度：满意；响应速度：一般`（按题目里配置的行顺序，脏行追加在后）
-     *   排序      ：`1. A；2. B；3. C`（按名次升序）
-     *   单选/填空 ：原文
-     *
-     * ★ 这里**不做任何转义/换行**：Excel 单元格本来就适合放长文本。
+     * ★ 渲染口径已经抽到 {@link com.survey.common.AnswerDisplay}：
+     *   「我的成绩 → 查看详情」用的是同一份实现 —— 两处各写一遍必然漂移
+     *   （历史上"多选只剩最后一项""矩阵丢行"都是这么来的）。
      */
     private static String formatExportCell(Question q, List<AnswerDetail> details) {
-        if (details == null || details.isEmpty()) {
-            return "";
-        }
-        if (QuestionType.isRanking(q.getType())) {
-            List<AnswerDetail> sorted = new ArrayList<>(details);
-            // null 名次放最后（历史脏数据），不参与排序断言的稳定性
-            sorted.sort((a, b) -> Integer.compare(
-                    a.getRankNo() == null ? Integer.MAX_VALUE : a.getRankNo(),
-                    b.getRankNo() == null ? Integer.MAX_VALUE : b.getRankNo()));
-            StringBuilder sb = new StringBuilder();
-            for (AnswerDetail d : sorted) {
-                if (sb.length() > 0) sb.append("；");
-                sb.append(d.getRankNo() == null ? "?" : d.getRankNo())
-                        .append(". ").append(d.getContent() == null ? "" : d.getContent());
-            }
-            return sb.toString();
-        }
-        if (QuestionType.isMatrix(q.getType())) {
-            Map<String, String> byRow = new LinkedHashMap<>();
-            for (AnswerDetail d : details) {
-                if (d.getRowKey() != null) {
-                    byRow.putIfAbsent(d.getRowKey(),
-                            d.getContent() == null ? "" : d.getContent());
-                }
-            }
-            List<String> configuredRows = MatrixConfig.parse(q.getMatrixRows(), "矩阵行标题");
-            StringBuilder sb = new StringBuilder();
-            for (String row : configuredRows) {
-                if (!byRow.containsKey(row)) continue;
-                if (sb.length() > 0) sb.append("；");
-                sb.append(row).append("：").append(byRow.get(row));
-            }
-            // ★ 不在配置里的行（历史脏数据/作者后来删了行）必须追加，不能静默丢掉
-            for (Map.Entry<String, String> e : byRow.entrySet()) {
-                if (configuredRows.contains(e.getKey())) continue;
-                if (sb.length() > 0) sb.append("；");
-                sb.append(e.getKey()).append("：").append(e.getValue());
-            }
-            return sb.toString();
-        }
-        StringBuilder sb = new StringBuilder();
-        for (AnswerDetail d : details) {
-            if (sb.length() > 0) sb.append("、");
-            sb.append(d.getContent() == null ? "" : d.getContent());
-        }
-        return sb.toString();
+        return com.survey.common.AnswerDisplay.format(q, details);
     }
 }

@@ -3,9 +3,12 @@ package com.survey.service;
 import com.survey.common.BizException;
 import com.survey.common.PageResult;
 import com.survey.common.SurveyStatus;
+import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.dto.MyAnswerItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Answer;
+import com.survey.entity.AnswerDetail;
+import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
 import com.survey.mapper.AnswerDetailMapper;
@@ -32,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -200,5 +204,64 @@ class AnswerServiceScoreStatsTest {
         assertEquals(1, page.getList().size(), "第 3 页的 offset 必须是 20");
 
         assertThrows(BizException.class, () -> answerService.myAnswers(null, 1, 10));
+    }
+
+    @Test
+    @DisplayName("我的答卷详情：按答卷归属校验；未开启「显示答案」时不给正确答案")
+    void myAnswerDetail_ownershipAndPrivacy() {
+        Answer a = new Answer();
+        a.setId(55);
+        a.setSurveyId(SURVEY_ID);
+        a.setUserId(9);
+        when(answerMapper.findById(55)).thenReturn(a);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(1, 60));
+        Question q = choiceQuestion();
+        q.setScore(10);
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(q));
+        AnswerDetail d = new AnswerDetail();
+        d.setAnswerId(55);
+        d.setQuestionId(11);
+        d.setContent("A");
+        d.setIsCorrect(1);
+        when(answerDetailMapper.findByAnswerId(55)).thenReturn(List.of(d));
+
+        MyAnswerDetailDTO dto = answerService.getMyAnswerDetail(9, 55);
+        assertEquals(1, dto.questions().size());
+        assertEquals("A", dto.questions().get(0).answer());
+        assertTrue(dto.questions().get(0).correct());
+        assertNull(dto.questions().get(0).correctAnswers(), "没开显示答案就不能带正确答案");
+
+        assertThrows(BizException.class, () -> answerService.getMyAnswerDetail(10, 55), "别人的答卷不能看");
+        assertThrows(BizException.class, () -> answerService.getMyAnswerDetail(null, 55));
+    }
+
+    @Test
+    @DisplayName("我的答卷详情：开启「显示答案」时带正确答案")
+    void myAnswerDetail_includesCorrectAnswersWhenEnabled() {
+        Survey s = survey(1, 60);
+        s.setShowAnswerAfterSubmit(1);
+        Answer a = new Answer();
+        a.setId(56);
+        a.setSurveyId(SURVEY_ID);
+        a.setUserId(9);
+        when(answerMapper.findById(56)).thenReturn(a);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(s);
+        Question q = choiceQuestion();
+        q.setScore(10);
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(q));
+        AnswerDetail d = new AnswerDetail();
+        d.setAnswerId(56);
+        d.setQuestionId(11);
+        d.setContent("A");
+        d.setIsCorrect(1);
+        when(answerDetailMapper.findByAnswerId(56)).thenReturn(List.of(d));
+        Option correct = new Option();
+        correct.setQuestionId(11);
+        correct.setContent("A");
+        correct.setIsCorrect(1);
+        when(optionMapper.findByQuestionIds(anyList())).thenReturn(List.of(correct));
+
+        MyAnswerDetailDTO dto = answerService.getMyAnswerDetail(9, 56);
+        assertEquals(List.of("A"), dto.questions().get(0).correctAnswers());
     }
 }

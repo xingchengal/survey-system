@@ -58,6 +58,14 @@ export default {
     http.get(`/api/answer/my?pageNum=${pageNum}&pageSize=${pageSize}`),
 
   /**
+   * 我某份答卷的详情（逐题回放）。
+   *
+   * ★ 权限按**答卷归属**校验：别人的 answerId 会 400（不是 403，避免探测存在性）。
+   * ★ `correct` 只有计分题才有值；`correctAnswers` 只在作者开启「提交后显示答案」时才有。
+   */
+  myDetail: (answerId) => http.get(`/api/answer/my/${answerId}`),
+
+  /**
    * 查**我**在某份问卷的成绩（登录用户；考试问卷才有）。
    *
    * ★ 只按 `surveyId + 当前登录用户` 定位，不接受 answerId ——

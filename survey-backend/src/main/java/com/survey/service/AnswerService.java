@@ -1,5 +1,6 @@
 package com.survey.service;
 
+import com.survey.common.AnswerDisplay;
 import com.survey.common.BizException;
 import com.survey.common.Grader;
 import com.survey.common.MatrixConfig;
@@ -13,6 +14,7 @@ import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
+import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.dto.MyAnswerItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
@@ -1001,6 +1003,75 @@ public class AnswerService {
                 ? List.of()
                 : answerMapper.pageByUser(userId, PageParams.offset(num, size), size);
         return new PageResult<>(total, list, num, size);
+    }
+
+    /**
+     * 「我的成绩 → 查看详情」：一份答卷的逐题回放。
+     *
+     * ★ 权限按**答卷归属**校验（answer.userId == 当前用户）：
+     *   作者侧的 GET /answer/detail/{answerId} 要求"问卷归属"，答题人不是作者，不能复用。
+     * ★ 正确答案只在作者开启「提交后显示答案」时返回；对错只认 t_answer_detail.is_correct
+     *   （P1 之前的历史答卷没有这一列值 → 返回 null，不硬判成"答错"）。
+     */
+    public MyAnswerDetailDTO getMyAnswerDetail(Integer userId, Integer answerId) {
+        if (userId == null) {
+            throw new BizException("请先登录后再查看答卷详情");
+        }
+        Answer answer = answerMapper.findById(answerId);
+        if (answer == null) {
+            throw new BizException("答卷不存在");
+        }
+        if (answer.getUserId() == null || !answer.getUserId().equals(userId)) {
+            throw new BizException("无权查看该答卷");
+        }
+        Survey survey = surveyMapper.findById(answer.getSurveyId());
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        List<Question> questions = questionMapper.findBySurveyId(answer.getSurveyId());
+        List<AnswerDetail> details = answerDetailMapper.findByAnswerId(answerId);
+        Map<Integer, List<AnswerDetail>> rowsByQuestion = new HashMap<>();
+        for (AnswerDetail d : details) {
+            rowsByQuestion.computeIfAbsent(d.getQuestionId(), k -> new ArrayList<>()).add(d);
+        }
+
+        boolean showAnswers = survey.getShowAnswerAfterSubmit() != null
+                && survey.getShowAnswerAfterSubmit() == 1;
+        Map<Integer, List<Option>> optionsByQuestion = new HashMap<>();
+        if (showAnswers) {
+            List<Integer> gradableIds = questions.stream()
+                    .filter(q -> Grader.isGradable(q.getType()) && q.getId() != null)
+                    .map(Question::getId)
+                    .collect(Collectors.toList());
+            if (!gradableIds.isEmpty()) {
+                for (Option opt : optionMapper.findByQuestionIds(gradableIds)) {
+                    optionsByQuestion.computeIfAbsent(opt.getQuestionId(), k -> new ArrayList<>()).add(opt);
+                }
+            }
+        }
+
+        List<MyAnswerDetailDTO.QuestionDetail> items = new ArrayList<>(questions.size());
+        for (Question q : questions) {
+            List<AnswerDetail> rows = rowsByQuestion.getOrDefault(q.getId(), List.of());
+            String text = rows.isEmpty() ? "未作答" : AnswerDisplay.format(q, rows);
+            Boolean correct = null;
+            boolean scored = Grader.isGradable(q.getType())
+                    && q.getScore() != null && q.getScore() > 0;
+            if (scored) {
+                // ★ 老答卷（P1 之前）没有 is_correct → 保持 null，不硬判成"答错"
+                Integer recorded = rows.stream().map(AnswerDetail::getIsCorrect)
+                        .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+                correct = recorded == null ? null : recorded == 1;
+            }
+            List<String> correctAnswers = (correct != null && showAnswers)
+                    ? AnswerDisplay.correctAnswers(optionsByQuestion.get(q.getId()))
+                    : null;
+            items.add(new MyAnswerDetailDTO.QuestionDetail(q.getId(), q.getTitle(), q.getType(),
+                    text, correct, correctAnswers));
+        }
+        return new MyAnswerDetailDTO(answer.getId(), answer.getSurveyId(), survey.getTitle(),
+                answer.getSubmitTime(), answer.getTotalScore(), answer.getEarnedScore(),
+                survey.getPassScore(), answer.getIsPassed(), items);
     }
 
     /** 某问卷的**全部**答卷明细（统计页做整体分析用，注意数据量）。 */

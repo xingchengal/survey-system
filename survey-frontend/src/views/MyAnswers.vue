@@ -41,12 +41,13 @@
             <el-tag v-else type="info" size="small">草稿</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="180" align="center">
           <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="openDetail(row)">查看详情</el-button>
             <el-button v-if="canOpen(row)" type="primary" link size="small" @click="openSurvey(row)">
               打开问卷
             </el-button>
-            <span v-else class="muted">—</span>
+            <span v-else-if="!canOpen(row)" class="muted">—</span>
           </template>
         </el-table-column>
       </el-table>
@@ -62,6 +63,45 @@
         />
       </div>
     </el-card>
+
+    <!-- 答卷详情：逐题回放（对错来自 t_answer_detail.is_correct；正确答案只有作者开启时才给） -->
+    <el-dialog v-model="detailVisible" title="答卷详情" width="720px">
+      <div v-if="detailLoading" class="detail-loading">
+        <el-skeleton :rows="6" animated />
+      </div>
+      <template v-else-if="detail">
+        <div class="detail-head">
+          <span class="detail-survey">{{ detail.surveyTitle }}</span>
+          <span class="detail-time">{{ detail.submitTime }}</span>
+        </div>
+        <div class="detail-score">
+          <template v-if="detail.earnedScore != null">
+            得分 <b>{{ detail.earnedScore }}</b> / {{ detail.totalScore }}
+            <el-tag v-if="detail.passed === 1" type="success" size="small" round>及格</el-tag>
+            <el-tag v-else-if="detail.passed === 0" type="danger" size="small" round>未及格</el-tag>
+            <span v-if="detail.passScore != null" class="muted">（及格线 {{ detail.passScore }}）</span>
+          </template>
+          <span v-else class="muted">这份答卷未判分</span>
+        </div>
+        <div class="detail-list">
+          <div v-for="(q, i) in detail.questions" :key="q.questionId" class="detail-item">
+            <div class="detail-q">
+              <span class="detail-idx">{{ i + 1 }}</span>
+              <span class="detail-title">{{ q.title }}</span>
+              <el-tag v-if="q.correct === true" type="success" size="small">答对</el-tag>
+              <el-tag v-else-if="q.correct === false" type="danger" size="small">答错</el-tag>
+            </div>
+            <div class="detail-a" :class="{ muted: q.answer === '未作答' }">
+              我的答案：{{ q.answer }}
+            </div>
+            <div v-if="q.correctAnswers && q.correctAnswers.length" class="detail-correct">
+              正确答案：{{ q.correctAnswers.join('、') }}
+            </div>
+          </div>
+        </div>
+      </template>
+      <el-empty v-else description="详情加载失败" :image-size="70" />
+    </el-dialog>
   </div>
 </template>
 
@@ -86,7 +126,11 @@ export default {
       rows: [],
       total: 0,
       pageNum: 1,
-      pageSize: 10
+      pageSize: 10,
+      // 答卷详情弹窗
+      detailVisible: false,
+      detailLoading: false,
+      detail: null
     }
   },
   mounted() {
@@ -120,6 +164,19 @@ export default {
     },
     openSurvey(row) {
       window.open(`/s/${row.shareCode}`, '_blank')
+    },
+    /** 查看逐题详情（对错 + 我的答案；正确答案由后端按作者设置决定给不给） */
+    async openDetail(row) {
+      this.detailVisible = true
+      this.detailLoading = true
+      this.detail = null
+      try {
+        this.detail = await api.answer.myDetail(row.answerId)
+      } catch {
+        // 失败提示由 http.js 统一弹出；弹窗里显示空态即可
+      } finally {
+        this.detailLoading = false
+      }
     }
   }
 }
@@ -149,5 +206,82 @@ export default {
   display: flex;
   justify-content: flex-end;
   margin-top: 14px;
+}
+
+/* ===== 答卷详情弹窗 ===== */
+.detail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-1, #eef2f7);
+}
+.detail-survey {
+  font-weight: 600;
+}
+.detail-time {
+  font-size: 12px;
+  color: var(--ink-3, #94a3b8);
+}
+.detail-score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  font-size: 14px;
+}
+.detail-score b {
+  color: var(--sky-600, #0284c7);
+  font-size: 20px;
+}
+.detail-list {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.detail-item {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--line-1, #f1f5f9);
+}
+.detail-item:last-child {
+  border-bottom: none;
+}
+.detail-q {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.detail-idx {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--sky-50, #eff6ff);
+  color: var(--sky-600, #0284c7);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.detail-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+}
+.detail-a {
+  margin: 6px 0 0 30px;
+  font-size: 13px;
+  color: var(--ink-2, #475569);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.detail-correct {
+  margin: 4px 0 0 30px;
+  font-size: 12px;
+  color: #16a34a;
+}
+.detail-loading {
+  padding: 6px 2px;
 }
 </style>
