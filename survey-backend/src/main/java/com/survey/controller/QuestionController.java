@@ -44,6 +44,14 @@ public class QuestionController {
     @Autowired
     private SurveyService surveyService;
 
+    /**
+     * 编辑器用这个请求头声明"我是编辑器在读题目"。
+     * ★ 只有带它、**且**请求者是作者本人或管理员时，才免答题密码（见
+     *   {@code SurveyService.requireAccessPasswordForEditor}）。
+     *   填写页永远不带它 —— 所以作者自己打开分享链接时，同样必须输对密码。
+     */
+    private static final String EDITOR_HEADER = "1";
+
     @Operation(summary = "保存问卷的题目（全量覆盖）")
     @PostMapping("/save/{surveyId}")
     public List<QuestionIdItem> saveQuestions(@PathVariable Integer surveyId,
@@ -57,7 +65,11 @@ public class QuestionController {
         //   这个接口是**全量覆盖**语义（没传的旧题会被删掉），在回收站问卷上执行
         //   会让历史答卷的 question_id 悬空 —— 后果比改个标题严重得多。
         OwnershipGuard.requireNotInRecycleBin(survey, "编辑题目");
-        return questionService.saveQuestions(surveyId, questions, userId);
+        List<QuestionIdItem> saved = questionService.saveQuestions(surveyId, questions, userId);
+        // ★ 题目保存在 t_question / t_option 上，t_survey 一行都没动，
+        //   不显式推一下的话编辑器的"已保存 · X 分钟前"会一直停在旧时间。
+        surveyService.touchUpdatedTime(surveyId);
+        return saved;
     }
 
     /**
@@ -72,7 +84,8 @@ public class QuestionController {
     public List<Question> getQuestions(@PathVariable Integer surveyId,
                                        @RequestHeader(value = "X-User-Id", required = false) Integer userId,
                                        @RequestHeader(value = "X-User-Role", required = false) String role,
-                                       @RequestHeader(value = "X-Survey-Password", required = false) String password) {
+                                       @RequestHeader(value = "X-Survey-Password", required = false) String password,
+                                       @RequestHeader(value = "X-Survey-Editor", required = false) String editor) {
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) {
             throw new BizException("问卷不存在");
@@ -83,7 +96,15 @@ public class QuestionController {
         // ★ 答题密码：没设就直通；设了就必须带对请求头。
         //   放在 requireVisible 之后：先判"能不能看"，再判"要不要密码"，
         //   否则草稿问卷会先被问密码、反而泄露"存在这样一份问卷"。
-        surveyService.requireAccessPassword(survey, password);
+        // ★ 两条口径，别合并：
+        //   · 编辑器（带 X-Survey-Editor）→ 作者/管理员免口令，否则作者一设密码就把自己锁死；
+        //   · 填写页 → 一律比口令（含作者自己打开分享链接），否则"能不能读题"就不再等于
+        //     "口令对不对"，密码门会形同虚设。
+        if (EDITOR_HEADER.equals(editor)) {
+            surveyService.requireAccessPasswordForEditor(survey, userId, role, password);
+        } else {
+            surveyService.requireAccessPassword(survey, password);
+        }
 
         return questionService.getQuestionsBySurveyId(surveyId);
     }

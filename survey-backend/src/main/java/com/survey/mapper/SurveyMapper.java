@@ -88,6 +88,14 @@ public interface SurveyMapper {
     int update(Survey survey);
 
     /**
+     * 只把「最后更新时间」推到当前时刻。
+     * ★ 用于"没改 t_survey 字段、但问卷内容变了"的入口：保存题目、版本回滚
+     *   （updated_time 是 ON UPDATE CURRENT_TIMESTAMP，不碰那一行就不会变）。
+     */
+    @Update("UPDATE t_survey SET updated_time = NOW() WHERE id = #{id}")
+    int touchUpdatedTime(@Param("id") Integer id);
+
+    /**
      * 只更新**状态与分享码** —— 供发布路径使用（publish / 自动发布 / 自动关闭）。
      *
      * ★ 为什么单独开一个方法：{@link #update(Survey)} 已从 SQL 层拿掉 status 与 share_code，

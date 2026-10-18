@@ -152,7 +152,11 @@ public class QuestionService {
             }
         }
 
-        doSaveQuestions(surveyId, restored, userId, "回滚到 v" + version.getVersionNo());
+        // ★ 回滚**不做"选项内容非空"校验**（validateOptions=false）：
+        //   历史快照里可能就带着空选项（第三十三轮之前作者能保存空选项，874 就是这种），
+        //   要求"回滚也必须满足新校验"＝ 这些版本的问卷永远回滚不回来。
+        //   回滚的语义是"原样恢复当时的快照"；恢复之后作者在编辑器里补选项、再保存才走严格校验。
+        doSaveQuestions(surveyId, restored, userId, "回滚到 v" + version.getVersionNo(), false);
 
         SurveyVersion latest = surveyVersionService.getLatest(surveyId);
         if (latest == null) {
@@ -163,6 +167,16 @@ public class QuestionService {
 
     private List<QuestionIdItem> doSaveQuestions(Integer surveyId, List<Question> questions,
                                                  Integer userId, String note) {
+        // 默认走严格校验（用户保存）；回滚传 false，理由见 rollbackToVersion 的调用点注释
+        return doSaveQuestions(surveyId, questions, userId, note, true);
+    }
+
+    /**
+     * @param validateOptions 是否校验"选项内容非空 / 有选项题型至少一个选项"。
+     *                        ★ 只有"用户保存"这条路径该为 true；回滚是恢复历史快照，不是新输入。
+     */
+    private List<QuestionIdItem> doSaveQuestions(Integer surveyId, List<Question> questions,
+                                                 Integer userId, String note, boolean validateOptions) {
         // ★ **题目与选项的条数必须有上限**。
         //   请求体上限是 4MB，而一道题的 JSON 只有几十字节 —— 一次保存可以塞进**几万道题**，
         //   之后每个读到这份问卷的地方都会放大：
@@ -174,9 +188,25 @@ public class QuestionService {
         if (questions.size() > MAX_QUESTIONS_PER_SURVEY) {
             throw new BizException("一份问卷最多 " + MAX_QUESTIONS_PER_SURVEY + " 道题");
         }
-        for (Question q : questions) {
+        for (int i = 0; i < questions.size(); i++) {
+            Question q = questions.get(i);
             if (q.getOptions() != null && q.getOptions().size() > MAX_OPTIONS_PER_QUESTION) {
                 throw new BizException("单题的选项最多 " + MAX_OPTIONS_PER_QUESTION + " 个");
+            }
+            // ★★ 选项内容必须非空（与 SurveyEdit.vue 保存前校验同口径，这里是后端兜底）：
+            //   答题页用 content 当 el-radio / el-checkbox 的 value，多个空选项的 value 全是 ""，
+            //   ⇒ 点一个就整组选中；下拉则变成空白面板，必填时把访客永久卡死。
+            //   ★ 放在这里（任何写库动作之前）：中途抛异常不会留下"题目已插入、选项没了"的半成品。
+            if (validateOptions && QuestionType.hasOptions(q.getType())) {
+                if (q.getOptions() == null || q.getOptions().isEmpty()) {
+                    throw new BizException("第 " + (i + 1) + " 题至少需要一个选项");
+                }
+                for (int j = 0; j < q.getOptions().size(); j++) {
+                    String content = q.getOptions().get(j).getContent();
+                    if (content == null || content.isBlank()) {
+                        throw new BizException("第 " + (i + 1) + " 题的第 " + (j + 1) + " 个选项内容不能为空");
+                    }
+                }
             }
         }
 

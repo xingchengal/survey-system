@@ -145,6 +145,23 @@ class QuestionServiceRollbackTest {
     }
 
     @Test
+    @DisplayName("★ 回滚不做「选项内容非空」校验：历史快照里的空选项必须能回滚回来")
+    void rollbackAllowsBlankOptionContent() {
+        // 874（用户实测那份）的历史快照里选项就是空的 —— 第三十三轮之前编辑器允许存空选项。
+        // 若回滚也走"保存"那套严格校验，这些版本的问卷就**永远回滚不回来**了。
+        SurveyVersion target = version(5, 2);
+        Question q = single(1, "带空选项的题", 0, "", "   ");
+        SurveyVersion newVersion = version(9, 8);
+
+        when(surveyVersionService.loadSnapshot(target)).thenReturn(snapshot(List.of(q)));
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(single(1, "现在", 0, "A")));
+        when(surveyVersionService.getLatest(SURVEY_ID)).thenReturn(newVersion);
+
+        assertDoesNotThrow(() -> questionService.rollbackToVersion(target, 7));
+        verify(optionMapper, atLeastOnce()).insert(any(Option.class));
+    }
+
+    @Test
     @DisplayName("回滚后要生成新版本（回滚也是一次编辑，历史不丢）")
     void rollbackCapturesNewVersion() {
         SurveyVersion target = version(5, 2);

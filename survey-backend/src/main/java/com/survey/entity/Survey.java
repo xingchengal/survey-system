@@ -146,6 +146,20 @@ public class Survey {
         return accessPassword != null && !accessPassword.isBlank();
     }
 
+    /**
+     * 是否**已经收满**（答卷数 ≥ maxResponses）。只有 /share/{code} 会算它，其它接口为 null。
+     *
+     * ★ 为什么要暴露给填写页：限量问卷以前只有"提交时"才判满 ——
+     *   填写人把整份问卷填完、点提交，才看到「已收满」，白填一遍。
+     *   现在进页面就能看到"已收满，别填了"，并直接给结果页入口。
+     * ★ 与提交时那道守卫（AnswerService.submit 第六道）**同一口径**：
+     *   maxResponses 为 null 或 ≤ 0 视为不限量。
+     */
+    private Boolean responsesFull;
+
+    public Boolean getResponsesFull() { return responsesFull; }
+    public void setResponsesFull(Boolean responsesFull) { this.responsesFull = responsesFull; }
+
     public Integer getMaxResponses() { return maxResponses; }
     public void setMaxResponses(Integer maxResponses) { this.maxResponses = maxResponses; }
 

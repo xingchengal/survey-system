@@ -12,6 +12,26 @@
       </el-result>
     </div>
 
+    <!-- ★ 已收满：**进页面就告知**，不再让人填完才在提交时吃 400 -->
+    <div v-else-if="surveyFull" style="max-width: 600px; margin: 60px auto;">
+      <el-card>
+        <h2 style="margin: 0 0 8px 0;">{{ survey.title }}</h2>
+        <p v-if="survey.description" style="color: #666; margin: 0 0 16px;">{{ survey.description }}</p>
+        <el-alert type="warning" show-icon :closable="false"
+                  :title="`该问卷已收满 ${survey.maxResponses} 份答卷，无法继续填写`">
+          收集上限由作者在「设置」里设定，达到上限后提交一律会被拒收 —— 所以这里直接拦住，不用白填一遍。
+        </el-alert>
+        <div style="margin-top: 16px;">
+          <el-button v-if="survey.publicResult === 1" type="primary" @click="goPublicResult">
+            查看统计结果
+          </el-button>
+          <p v-else style="margin: 8px 0 0; font-size: 12px; color: #909399;">
+            作者未开启公开结果，暂时看不到统计。
+          </p>
+        </div>
+      </el-card>
+    </div>
+
     <div v-else-if="submitted" style="max-width: 600px; margin: 80px auto;">
       <el-result icon="success" title="提交成功！" :sub-title="thankText">
         <template #extra>
@@ -20,7 +40,8 @@
               查看统计结果
             </el-button>
             <el-button v-if="redirectUrl" type="success" @click="goRedirect">立即前往</el-button>
-            <el-button @click="resetForm">再填一份</el-button>
+            <!-- ★ 已收满时不再给"再填一份"：点进去也只能白填一遍（提交必被拒） -->
+            <el-button v-if="survey.responsesFull !== true" @click="resetForm">再填一份</el-button>
           </div>
           <p v-if="redirectUrl" class="redirect-hint">{{ redirectSeconds }} 秒后自动前往…</p>
         </template>
@@ -42,11 +63,17 @@
           </el-tag>
         </div>
 
+        <!-- ★ 公开结果入口**填写前也可见**：以前只有"提交成功页"才有这个按钮，
+             填完关掉页面就再也找不到路（再打开链接还会被"已收满"挡住）。 -->
+        <div v-if="survey.publicResult === 1" style="margin-top: 10px;">
+          <el-link type="primary" @click="goPublicResult">📊 查看统计结果（作者已公开）</el-link>
+        </div>
+
         <!-- 进度条 -->
-        <div v-if="passwordVerified && !allDone" style="margin-top: 16px;">
+        <div v-if="passwordVerified" style="margin-top: 16px;">
           <div style="display: flex; justify-content: space-between; font-size: 12px; color: #909399; margin-bottom: 6px;">
             <span>填写进度</span>
-            <span>{{ answeredCount }} / {{ totalSteps }}</span>
+            <span>{{ completedSteps }} / {{ totalSteps }}</span>
           </div>
           <el-progress :percentage="progressPercent" :stroke-width="6" />
         </div>
@@ -81,13 +108,24 @@
           <span v-if="currentQuestion.required === 1" style="color: red;">*</span>
         </div>
 
+        <!-- ★ 选项题但没有任何"有内容"的选项（历史脏数据 / 作者没填选项就发布了）：
+             绝不能把这题渲染成"看不见的选项" —— 多个空 value 会让点一个就整组选中，
+             下拉则是空面板，必填时访客会被永远卡在这一题。这里给出明确提示，并允许跳过。 -->
+        <div
+          v-if="optionsBroken"
+          class="option-broken"
+        >
+          ⚠️ 该题的选项未配置完整（内容为空），暂时无法作答。请联系问卷发布者补充选项后再填。
+        </div>
+
         <!-- 单选题 -->
         <el-radio-group
-          v-if="currentQuestion.type === 1"
+          v-if="currentQuestion.type === 1 && usableOptions.length"
           v-model="answers[currentQuestion.id]"
+          class="fill-options"
         >
           <el-radio
-            v-for="opt in currentQuestion.options"
+            v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
             style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid #ebeef5; border-radius: 8px; width: 100%; box-sizing: border-box;"
@@ -98,11 +136,12 @@
 
         <!-- 多选题 -->
         <el-checkbox-group
-          v-else-if="currentQuestion.type === 2"
+          v-else-if="currentQuestion.type === 2 && usableOptions.length"
           v-model="answers[currentQuestion.id]"
+          class="fill-options"
         >
           <el-checkbox
-            v-for="opt in currentQuestion.options"
+            v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
             style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid #ebeef5; border-radius: 8px; width: 100%; box-sizing: border-box;"
@@ -113,14 +152,14 @@
 
         <!-- 下拉选择 -->
         <el-select
-          v-else-if="currentQuestion.type === 5"
+          v-else-if="currentQuestion.type === 5 && usableOptions.length"
           v-model="answers[currentQuestion.id]"
           placeholder="请选择…"
           size="large"
           style="width: 100%;"
         >
           <el-option
-            v-for="opt in currentQuestion.options"
+            v-for="opt in usableOptions"
             :key="opt.id"
             :label="opt.content"
             :value="opt.content"
@@ -233,7 +272,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue'
 //     /api/question/list/、/api/answer/submit-share/），根本不会返回 401，
 //     所以去掉 silent 也不会触发跳转。
 import api from '../api'
-import { RATING_LABELS } from '../utils/questionTypes'
+import { RATING_LABELS, hasOptions as hasOptionType } from '../utils/questionTypes'
 
 export default {
   components: { CircleCheckFilled },
@@ -247,6 +286,8 @@ export default {
       history: [],
       answers: {},
       submitted: false,
+      /** 已经收满（后端 /share/{code} 给的 responsesFull）—— 此时不进答题流程 */
+      surveyFull: false,
       allDone: false,
       countdown: '',
       countdownTimer: null,
@@ -280,19 +321,51 @@ export default {
     currentQuestion() {
       return this.questions.find(q => q._order === this.currentOrder) || null
     },
-    answeredCount() {
-      return Object.keys(this.answers).filter(k => {
-        const v = this.answers[k]
-        return v !== undefined && v !== '' && (!Array.isArray(v) || v.length > 0)
-      }).length
-    },
     totalSteps() {
       return this.computeTotalSteps()
     },
+    /** 当前题是不是"有选项"的题型（单选 / 多选 / 下拉） */
+    currentHasOptions() {
+      return hasOptionType(this.currentQuestion && this.currentQuestion.type)
+    },
+    /**
+     * 当前题**可用**的选项：过滤掉内容为空的脏选项。
+     * ★ 空内容必须滤掉而不是原样渲染 —— 空字符串当 value 时整组选项的值都相同。
+     */
+    usableOptions() {
+      const opts = (this.currentQuestion && this.currentQuestion.options) || []
+      return opts.filter(o => typeof o.content === 'string' && o.content.trim() !== '')
+    },
+    /** 选项题却一个可用选项都没有：页面提示"配置不完整"，且不拦"下一题"（否则必填会卡死） */
+    optionsBroken() {
+      return this.currentHasOptions && this.usableOptions.length === 0
+    },
+    /**
+     * 进度分子 = "当前答题路径上已经走过的题数"：
+     *   · 已经推进到后面的题 → 前面那些题（含被跳过的非必填题）都算完成；
+     *   · 当前题已作答 → 算完成；
+     *   · 全部答完 → 等于 totalSteps（100%）。
+     * ★ 原来用的是"已答题目数 / 总步数"：只要用户跳过一道非必填题，进度就再也不动
+     *   （报障"进度条一直没变"）；空选项的脏数据更是让任何答案都算不进去。
+     */
+    completedSteps() {
+      if (this.totalSteps === 0) return 0
+      if (this.allDone) return this.totalSteps
+      const { path } = this.previewPath(1, this.answers[this.questions[0] && this.questions[0].id])
+      let done = 0
+      for (const order of path) {
+        if (order < this.currentOrder) {
+          done++
+        } else if (order === this.currentOrder) {
+          const q = this.questions.find(item => item._order === order)
+          if (q && this.hasAnswer(q.id)) done++
+        }
+      }
+      return done
+    },
     progressPercent() {
       if (this.totalSteps === 0) return 0
-      const percent = Math.round(this.answeredCount / this.totalSteps * 100)
-      return Math.min(100, percent)
+      return Math.min(100, Math.round(this.completedSteps / this.totalSteps * 100))
     },
     /** 提交成功页的感谢语：作者自定义优先，否则用默认文案 */
     thankText() {
@@ -329,9 +402,17 @@ export default {
         }
         this.survey = data
         // ★ 记一次访问量：api.survey.view() 在 api 层已内置 { silent: true }
+        //   （放在"收满"判断之前：页面确实被打开了，浏览数照记，不因满额而漏统计。）
         //   （失败不弹提示、不跳登录）；
         //   ★ 绝不【加 await】：访问量统计不该拖慢问卷首屏渲染。
         api.survey.view(this.shareCode).catch(() => {})
+        // ★★ 已收满 → 直接给"收满"页（含结果入口），不再加载题目、不再让访客白填一遍。
+        //   放在密码门之前：都已经不能交了，没必要先让人输密码。
+        if (data.responsesFull === true) {
+          this.surveyFull = true
+          this.loading = false
+          return
+        }
         // ★ 有答题密码时先不加载题目：后端会按请求头校验，前端只是把密码门提前。
         if (data.hasPassword) {
           this.loading = false
@@ -560,7 +641,12 @@ export default {
       if (!q) return
 
       const ans = this.answers[q.id]
-      if (q.required === 1) {
+      // ★ 选项题但一个可用选项都没有（历史脏数据）→ 这道题物理上没法答，
+      //   再做必填拦截只会把访客永久停在这一页（正是"下拉无选项、必填卡死"的报障）。
+      //   这种题按"跳过"处理并给出提示，让访客能继续往下填。
+      if (this.optionsBroken) {
+        ElMessage.warning('该题选项未配置，已跳过这道题')
+      } else if (q.required === 1) {
         if (ans === undefined || ans === '' || (Array.isArray(ans) && ans.length === 0)) {
           ElMessage.warning('此题必填')
           return
@@ -599,6 +685,18 @@ export default {
       const prev = this.history.pop()
       this.currentOrder = prev
       this.allDone = false
+    },
+
+    /** 空答案口径：undefined / null / 纯空白字符串都不算作答 */
+    isBlankAnswer(v) {
+      return v === undefined || v === null || (typeof v === 'string' && v.trim() === '')
+    },
+
+    /** 某题是否已作答（多选里只要有**一个非空**选项就算答过） */
+    hasAnswer(questionId) {
+      const v = this.answers[questionId]
+      if (Array.isArray(v)) return v.some(item => !this.isBlankAnswer(item))
+      return !this.isBlankAnswer(v)
     },
 
     startCountdown() {
@@ -669,9 +767,25 @@ export default {
         await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
         this.submitted = true
         this.startRedirectTimer()
+        // ★ 提交成功后静默刷新一次分享信息：限量问卷往往"你交完就满了"，
+        //   刷新后"再填一份"会自动消失，而不是点进去再吃一次 400。
+        this.refreshShareInfo()
       } catch {
         // 失败红字已由 http.js 弹出；这里只做流程控制：
         // 保持当前页面，访客可以改完再点一次"提交问卷"。
+      }
+    },
+
+    /**
+     * 静默刷新问卷的公开信息（只为拿到最新的 responsesFull）。
+     * ★ 失败不影响任何流程：这是"锦上添花"的一次刷新，错了也不该打扰访客。
+     */
+    async refreshShareInfo() {
+      try {
+        const data = await api.survey.byShareCode(this.shareCode, { silent: true })
+        if (data && data.id) this.survey = data
+      } catch {
+        // 忽略：拿不到就用旧数据，页面照常
       }
     },
 
@@ -754,5 +868,30 @@ export default {
   margin: 14px 0 0;
   font-size: 12px;
   color: #909399;
+}
+
+/* ==================== 选项组 ==================== */
+/* ★ el-radio-group / el-checkbox-group 默认是 inline-flex，宽度会收缩到内容宽度；
+   而每个选项写的是 width:100%（相对父级），于是选项框只有"文字那么宽"。
+   这里把组撑成块级满宽，选项框才是一条整行。 */
+.fill-options {
+  display: block;
+  width: 100%;
+}
+.fill-options :deep(.el-radio),
+.fill-options :deep(.el-checkbox) {
+  margin-right: 0;
+}
+
+/* 选项配置不完整时的提示条（历史脏数据兜底） */
+.option-broken {
+  margin: 4px 0 2px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
 }
 </style>

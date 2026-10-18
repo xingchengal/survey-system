@@ -256,7 +256,12 @@ export default {
       this.currentSurvey = row
       this.dialogVisible = true
       try {
-        this.currentQuestions = await api.question.list(row.id)
+        // ★ 带 X-Survey-Editor：这是「管理/编辑视角」的读取，不是填写人视角。
+        //   不带的话，管理员查看一份**设了答题密码**的问卷会被 400 拦住（后端只对
+        //   编辑器/管理视角豁免口令，填写页必须输对密码）。
+        this.currentQuestions = await api.question.list(row.id, {
+          headers: { 'X-Survey-Editor': '1' }
+        })
       } catch {
         // 提示已在 http.js 弹过；这里做流程控制：拿不到题目就显示空状态，不阻断弹窗
         this.currentQuestions = []

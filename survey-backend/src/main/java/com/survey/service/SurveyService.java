@@ -10,6 +10,7 @@ import com.survey.common.BizException;
 import com.survey.common.PageParams;
 import com.survey.common.SqlLikeEscaper;
 import com.survey.common.PageResult;
+import com.survey.common.Role;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
@@ -350,6 +351,56 @@ public class SurveyService {
         if (submitted == null || !survey.getAccessPassword().equals(submitted.trim())) {
             throw new BizException("该问卷需要答题密码（或密码不正确）");
         }
+    }
+
+    /**
+     * **编辑器专用**：作者本人 / 管理员读**自己**的问卷题目时不看答题密码。
+     *
+     * ★★ 为什么需要这条豁免（2026-10-18 实测事故）：
+     *   答题密码是**给填写人**的准入口令，不是作者对自己数据的授权。
+     *   若连作者也拦，作者一在「设置」里加上密码，编辑器的
+     *   {@code GET /api/question/list/{id}} 就会 400 —— 编辑器拿不到题目 →
+     *   显示"还没有题目"；此时点一下「保存」（全量覆盖语义）会把题目**全部删掉**
+     *   （实测留下了"删除 7 题"的历史版本）。
+     *
+     * ★★ 但豁免**只能限定在编辑器这条路径**（由 QuestionController 依据
+     *   {@code X-Survey-Editor} 请求头判定），不能按"是不是作者"一刀切 ——
+     *   一刀切的后果是：填写页判断"密码对不对"的方式就是"能不能读到题目"，
+     *   作者随便输个错口令也能过门（因为后端根本不看口令），
+     *   到了提交答卷（匿名入口，没有身份）才 400。用户实测到的
+     *   "发布后密码失效、谁都能进，提交却要密码"正是这个原因。
+     *
+     * ★ 判定顺序：先放行管理员与作者，再比口令 —— 与
+     *   {@link OwnershipGuard#requireVisible} 的"管理员 → 本人 → 已发布"口径一致。
+     *
+     * @param userId 当前登录用户 id（匿名/未登录为 null）
+     * @param role   当前登录角色（来自 JwtAuthFilter 注入的 X-User-Role）
+     */
+    public void requireAccessPasswordForEditor(Survey survey, Integer userId, String role, String submitted) {
+        if (survey == null || !survey.passwordRequired()) {
+            return;
+        }
+        if (Role.isAdmin(role)) {
+            return;   // 管理员：全站数据可见
+        }
+        Integer ownerId = survey.getUserId();
+        if (ownerId != null && ownerId.equals(userId)) {
+            return;   // 作者本人：这是他自己的问卷
+        }
+        requireAccessPassword(survey, submitted);
+    }
+
+    /**
+     * 把「最后更新时间」推到当前时刻。
+     *
+     * ★ 为什么需要它：{@code t_survey.updated_time} 是
+     *   {@code ON UPDATE CURRENT_TIMESTAMP}，只有真的改动了 t_survey 那一行才会走。
+     *   而"保存题目" / "版本回滚"改的是 t_question / t_option，t_survey 一行都没动 ——
+     *   于是编辑器的"已保存 · X 分钟前"一直显示很久以前的时间（用户实测报障）。
+     *   这两个入口在成功后显式调一次即可。
+     */
+    public void touchUpdatedTime(Integer surveyId) {
+        surveyMapper.touchUpdatedTime(surveyId);
     }
 
     /**

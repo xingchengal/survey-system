@@ -21,6 +21,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -203,5 +204,39 @@ class QuestionServiceTest {
         BizException ex = assertThrows(BizException.class,
                 () -> questionService.saveQuestions(SURVEY_ID, payload));
         assertTrue(ex.getMessage().contains("最多"), "实际文案：" + ex.getMessage());
+    }
+
+    /**
+     * ★★ 空选项必须拒绝。
+     *
+     * 答题页把 opt.content 当 el-radio / el-checkbox 的 value：两个空选项的 value 都是 ""，
+     * 于是"点一个 → 整组同时显示为选中"；下拉则变成空白面板、选不出东西，
+     * 必填时把这个访客永久卡在该题（第三十三轮交付后由用户手测发现）。
+     * 校验必须发生在**任何写库动作之前**，否则会留下"题目插了、选项没了"的半成品。
+     */
+    @Test
+    @DisplayName("★★ 选项内容为空 → 400，且一条 SQL 都不执行")
+    void saveQuestions_shouldRejectBlankOptionContent() {
+        Question q = single(null, "带空选项的题", null);
+        q.getOptions().get(0).setContent("   ");      // 纯空白也算空
+        List<Question> payload = new ArrayList<>(List.of(q));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, payload));
+        assertTrue(ex.getMessage().contains("选项内容不能为空"), "实际文案：" + ex.getMessage());
+        verifyNoInteractions(questionMapper, optionMapper);
+    }
+
+    @Test
+    @DisplayName("★ 选项题一个选项都没有 → 400（否则答题页是一道点不动的空题）")
+    void saveQuestions_shouldRejectOptionQuestionWithoutOptions() {
+        Question q = single(null, "没有选项的单选题", null);
+        q.setOptions(new ArrayList<>());
+        List<Question> payload = new ArrayList<>(List.of(q));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, payload));
+        assertTrue(ex.getMessage().contains("至少需要一个选项"), "实际文案：" + ex.getMessage());
+        verifyNoInteractions(questionMapper, optionMapper);
     }
 }

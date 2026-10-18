@@ -245,6 +245,12 @@ public class SurveyController {
         //   校验密码走 X-Survey-Password 请求头，在「加载题目」「提交答卷」两个入口各判一次。
         survey.setHasPassword(survey.passwordRequired());
         survey.setAccessPassword(null);
+        // ★ 告诉填写页"是不是已经收满了"：口径与 AnswerService.submit 的第六道守卫完全一致
+        //   （maxResponses 为 null 或 ≤ 0 = 不限量）。
+        //   不这么做的话，填写人只有点提交那一刻才知道已经满了（白填一遍）。
+        survey.setResponsesFull(
+                survey.getMaxResponses() != null && survey.getMaxResponses() > 0
+                        && answerService.countResponses(survey.getId()) >= survey.getMaxResponses());
         return survey;
     }
 

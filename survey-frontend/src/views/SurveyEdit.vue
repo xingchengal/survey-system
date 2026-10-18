@@ -19,6 +19,26 @@
       </template>
     </el-alert>
 
+    <!-- ★ 题目加载失败：既不是"没有题目"，也不能让用户在这里保存（会把题目删光） -->
+    <el-alert
+      v-if="questionsLoadFailed"
+      class="mb-16"
+      type="error"
+      show-icon
+      :closable="false"
+      :title="'题目加载失败：' + questionsLoadError"
+    >
+      <template #default>
+        <div class="mt-8">
+          已有题目没能读出来，此时保存会把题目全部删掉，所以<strong>已阻止保存</strong>。
+          <el-button size="small" type="primary" plain class="ml-10" :loading="reloadingQuestions" @click="retryLoadQuestions">
+            重新加载题目
+          </el-button>
+          <span class="ml-10">若仍失败，请确认后端已重启，并把浏览器控制台里的报错发给我。</span>
+        </div>
+      </template>
+    </el-alert>
+
     <!-- 顶部操作栏 -->
     <div class="edit-header">
       <div>
@@ -32,6 +52,9 @@
         <el-button @click="goBack">返回</el-button>
         <!-- ★ 回收站里禁止保存/发布（点了必 400），按钮直接禁用并把原因写在标题里。
              ★ `saving` 门控：保存首次是"预存 + 正式提交"两次往返，期间禁用以免连点触发第二次全量覆盖。 -->
+        <!-- ★ 注意：这里**不**因为 questionsLoadFailed 而禁用按钮。
+             禁用会让点击"完全没反应"，用户根本不知道发生了什么（实测就是这么被卡住的）。
+             现在改成：按钮可点，点下去由 saveQuestions 统一说明"为什么不能保存"。 -->
         <el-button type="primary" :disabled="inRecycleBin || saving" :loading="saving" @click="saveQuestions">保存</el-button>
         <!-- ★ status 为 0 或 2 都要给发布按钮：后端支持"延长（或清空）结束时间后重新发布"。
               已结束但结束时间仍在过去时，按钮变成"重新发布"并禁用（否则用户点了只吃 400），
@@ -600,7 +623,19 @@ export default {
       /** 对比结果（后端 SurveyVersionDiff） */
       versionDiff: null,
       /** 正在回滚的版本 id（用于按钮 loading，避免连点两次回滚） */
-      rollingBack: null
+      rollingBack: null,
+      /**
+       * 题目是否**加载失败**（不是"这份问卷没有题目"）。
+       * ★★ 两者必须分开：题目数组在加载失败时也是 []，而保存接口是**全量覆盖**语义 ——
+       *   分不清就会在"没读到题目"的情况下点保存，把库里已有题目全部删掉。
+       *   实测事故（2026-10-18）：作者给自己的问卷设了答题密码，编辑器读题目时被 400 拦下，
+       *   页面显示"还没有题目"，一保存就留下"删除 7 题"的历史版本。
+       */
+      questionsLoadFailed: false,
+      /** 题目加载失败的具体原因（直接显示给用户，别再让他去猜） */
+      questionsLoadError: '',
+      /** "重新加载题目"按钮的 loading */
+      reloadingQuestions: false
     }
   },
   computed: {
@@ -680,6 +715,12 @@ export default {
       // 等 watch 的 flush 跑完再解除 hydrating，否则回填会被当成用户修改
       await this.$nextTick()
       this.hydrating = false
+      // ★ 首次加载失败时**自动重试一次**：后端刚重启/网络抖一下是常见场景，
+      //   让人手点 F5 重来一遍很冤；真失败的话顶部会给红条并带上原因。
+      if (this.questionsLoadFailed) {
+        await new Promise(resolve => setTimeout(resolve, 800))
+        await this.loadQuestions()
+      }
       this.offerDraftRestore()
     },
 
@@ -713,10 +754,35 @@ export default {
 
     async loadQuestions() {
       try {
-        const data = await api.question.list(this.surveyId)
+        // ★ 带 X-Survey-Editor：声明"这是编辑器在读题目"。
+        //   后端只在校验来源是编辑器时才允许"作者/管理员免答题密码"；
+        //   填写页不带这个头，所以作者自己打开分享链接仍然要输对密码。
+        const data = await api.question.list(this.surveyId, {
+          headers: { 'X-Survey-Editor': '1' }
+        })
         this.questions = this.normalizeQuestions(data)
-      } catch {
-        // 失败提示由 src/api/http.js 统一弹出
+        this.questionsLoadFailed = false
+        this.questionsLoadError = ''
+        return true
+      } catch (e) {
+        // 失败提示由 src/api/http.js 统一弹出（这里只做流程控制）
+        // ★★ 必须留下标记：此时 questions 仍是 []，而"保存"是全量覆盖 ——
+        //   不拦的话用户点一下保存就把库里已有题目全删了（实测发生过）。
+        this.questionsLoadFailed = true
+        this.questionsLoadError = (e && e.message) || '未知错误（请查看浏览器控制台）'
+        return false
+      }
+    },
+
+    /** 顶部提示条上的"重新加载题目"：后端重启/网络恢复后不用整页刷新 */
+    async retryLoadQuestions() {
+      this.reloadingQuestions = true
+      try {
+        const ok = await this.loadQuestions()
+        if (ok) ElMessage.success('题目已重新加载')
+        else ElMessage.error('仍然加载失败：' + this.questionsLoadError)
+      } finally {
+        this.reloadingQuestions = false
       }
     },
 
@@ -769,6 +835,9 @@ export default {
 
     saveDraft() {
       this.draftTimer = null
+      // ★ 题目没加载出来时**不写草稿**：否则会存下一份 questions=[] 的草稿，
+      //   下次进页面选"恢复草稿"就等于把已有题目清空（保存是全量覆盖语义）。
+      if (this.questionsLoadFailed) return
       if (!this.surveyId || !this.dirty) return
       try {
         // ★ 答题密码**不写进本地草稿**：localStorage 是明文、且可能多人共用同一台机器。
@@ -803,6 +872,12 @@ export default {
         return
       }
       if (!draft || !draft.savedAt || !Array.isArray(draft.questions)) return
+      // ★ 草稿里 0 题、而服务端这次读到了题目：这份草稿多半是"上次读题目失败"时留下的，
+      //   恢复它等于把已有题目清空 —— 直接丢弃，不拿它去覆盖真实数据。
+      if (draft.questions.length === 0 && this.questions.length > 0) {
+        this.clearDraft()
+        return
+      }
       const serverTime = this.toTimestamp(this.surveyInfo.updatedTime)
       if (serverTime && draft.savedAt <= serverTime) {
         // 服务端已经是更新的版本：草稿过期，直接丢弃
@@ -831,6 +906,10 @@ export default {
         endTime: info.endTime || null
       }
       this.questions = this.normalizeQuestions(draft.questions)
+      // ★ 题目来自本地草稿（比服务端新），此时保存是安全的 —— 解除"加载失败"标记，
+      //   否则用户会一直卡在"点了保存没反应/被禁用"的状态里。
+      this.questionsLoadFailed = false
+      this.questionsLoadError = ''
       await this.$nextTick()
       this.hydrating = false
       this.dirty = true
@@ -972,6 +1051,17 @@ export default {
      *   后端失败时 `catch` 吞掉，调用方无从得知）。
      */
     async saveQuestions() {
+      // ★★ 题目没加载出来时**禁止保存**：此时 questions=[]，而保存是全量覆盖语义，
+      //   提交空数组 = 把这份问卷的题目全部删掉（用户实测踩到过，历史版本里留下"删除 7 题"）。
+      //   要恢复：刷新页面重新加载题目（或先排查后端为什么拒绝返回题目）。
+      if (this.questionsLoadFailed) {
+        // ★ 必须把**原因**说出来：用户看到的是"点了没反应"，实际是题目根本没读到。
+        ElMessage.error(
+          '题目没加载出来（' + (this.questionsLoadError || '原因未知') +
+          '），保存会把题目全部删掉，已阻止。请点页面上方的「重新加载题目」，或刷新页面重试。'
+        )
+        return false
+      }
       if (!this.surveyInfo.title.trim()) {
         ElMessage.warning('请输入问卷标题')
         return false
@@ -982,7 +1072,35 @@ export default {
           return false
         }
       }
-      if (this.saving) return false    // 门控：上一次保存还没走完
+      // ★★ "有选项"的题型（单选/多选/下拉）不允许保存空选项。
+      //   为什么必须拦在这里：答题页拿 opt.content 当 el-radio / el-checkbox 的 value，
+      //   多个空选项的 value 全是 "" —— 点其中一个，整组会**同时显示为选中**（"一点全点"）；
+      //   下拉则渲染成空白面板、选不出任何东西，一旦必填就把访客永久卡在该题。
+      //   这类问卷发布出去就是废卷，所以保存这一步直接拒绝（后端 doSaveQuestions 还有同口径兜底）。
+      for (let i = 0; i < this.questions.length; i++) {
+        const q = this.questions[i]
+        if (!this.qHasOptions(q.type)) continue
+        const opts = q.options || []
+        if (opts.length === 0) {
+          ElMessage.warning(`第 ${i + 1} 题的选项不能为空，请至少添加一个选项`)
+          return false
+        }
+        for (let j = 0; j < opts.length; j++) {
+          const text = typeof opts[j].content === 'string' ? opts[j].content.trim() : ''
+          if (!text) {
+            ElMessage.warning(`第 ${i + 1} 题的选项 ${j + 1} 内容不能为空`)
+            return false
+          }
+          // 顺手去首尾空白：避免 "A" 与 "A " 在统计里被算成两个不同选项
+          opts[j].content = text
+        }
+      }
+      // ★ 门控不能静默：上一次保存还卡着（网络挂了/请求没返回）时，
+      //   用户再点会像"按钮坏了"——这里必须说清楚。
+      if (this.saving) {
+        ElMessage.warning('上一次保存还没结束，请稍等；若一直转圈，请刷新页面后重试')
+        return false
+      }
 
       this.saving = true
       try {
@@ -1038,8 +1156,14 @@ export default {
         this.markSaved()
         ElMessage.success('保存成功')
         return true
-      } catch {
-        // 失败提示由 src/api/http.js 统一弹出
+      } catch (e) {
+        // ★ HTTP 错误（400/401/429/5xx）已由 src/api/http.js 弹过红字，这里不重复；
+        //   但**非 HTTP 异常**（TypeError / 代码 bug）以前会被这一行静默吞掉 ——
+        //   表现就是"点保存毫无反应"。这类错误必须说出来，否则根本没法排查。
+        if (!e || typeof e.status !== 'number') {
+          console.error('[保存失败]', e)
+          ElMessage.error('保存失败：' + ((e && e.message) || '未知错误') + '（先按 F5 刷新页面再试）')
+        }
         return false
       } finally {
         this.saving = false
@@ -1258,6 +1382,10 @@ export default {
         await this.loadVersions()
         // ★ 必须重新加载题目：编辑器里还是回滚前的数组，此时直接点保存会把回滚结果覆盖掉
         await this.loadQuestions()
+        if (this.questionsLoadFailed) {
+          // 回滚其实成功了（后端已生成新版本），只是刷新题目失败 —— 别让用户以为白点了
+          ElMessage.warning('版本回滚已完成，但题目没能重新加载，请刷新页面查看结果')
+        }
       } finally {
         this.rollingBack = null
       }
@@ -1340,19 +1468,45 @@ export default {
   margin: 6px 0 0 15px;
   font-size: 13px;
   color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 窄屏才允许换行，否则按钮会被压出视口 */
+@media (max-width: 1100px) {
+  .edit-header {
+    flex-wrap: wrap;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+  }
+  .page-subtitle {
+    white-space: normal;
+  }
 }
 .edit-header {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
+  /* ★ 按钮区不许被挤到第二行：它的位置必须稳定（两次截图的按钮分布不一致就是这里换行导致的） */
+  flex-wrap: nowrap;
+}
+
+/* ★ 左侧标题区允许收缩（min-width:0 + 省略号），把宽度让给右侧按钮区：
+   "已保存 · 45 分钟前" 比 "已保存 · 刚刚" 宽，以前会把按钮挤到下一行。 */
+.edit-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .header-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;      /* 不参与伸缩：副标题长短不再影响按钮排布 */
+  flex-wrap: nowrap;
 }
 .card-title {
   font-weight: 600;
