@@ -596,6 +596,28 @@ const SCENE_TEMPLATES = [
     ]
   },
   {
+    code: 'relay', emoji: '🔗', name: '接龙', desc: '姓名 + 联系方式 + 人数',
+    title: '活动接龙',
+    description: '按顺序接龙报名，填好信息即可；人数或备注有变请重新提交一份。',
+    questions: [
+      { type: 3, title: '姓名', required: 1 },
+      { type: 3, title: '手机号', required: 1 },
+      { type: 1, title: '报名人数', required: 1, options: ['1 人', '2 人', '3 人', '4 人及以上'] },
+      { type: 4, title: '备注（如携带物品 / 特殊需求，选填）', required: 0 }
+    ]
+  },
+  {
+    code: 'checkin', emoji: '🎟️', name: '报名签到', desc: '姓名 + 手机号 + 场次',
+    title: '活动报名签到',
+    description: '请先填写报名信息；到场后向工作人员报手机号完成签到。',
+    questions: [
+      { type: 3, title: '姓名', required: 1 },
+      { type: 3, title: '手机号', required: 1 },
+      { type: 1, title: '参加场次', required: 1, options: ['上午场', '下午场', '全天'] },
+      { type: 4, title: '备注（选填）', required: 0 }
+    ]
+  },
+  {
     code: 'satisfaction', emoji: '⭐', name: '满意度调查', desc: '评分 + 选项 + 建议',
     title: '满意度调查',
     description: '请根据你的真实体验打分，帮助我们持续改进。',
