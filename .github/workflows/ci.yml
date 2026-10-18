@@ -75,7 +75,7 @@ jobs:
       # ★ 不需要再列类名：pom 里 maven-surefire-plugin 的 <excludes> 只排除了三个连库的测试
       #   （SurveyBackendApplicationTests / SurveyFlowIntegrationTest / WalletConcurrencyTest），
       #   其余测试类**全部自动纳入**。
-      #   当前应为 **343 个用例 / 42 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
+      #   当前应为 **359 个用例 / 43 个测试类**（★ 数量变化时只需更新这行注释，不用改命令）。
       #
       # ★ why `-Pcoverage`：jacoco 放在 pom 的 **coverage profile** 里（默认不启用）。
       #   本地日常是离线构建（`-o test`），把 jacoco 无条件挂上去会让 `-o` 直接失败
@@ -109,7 +109,7 @@ jobs:
           print(f"| 指令 | {pct('INSTRUCTION_MISSED','INSTRUCTION_COVERED'):.1f}% |")
           print(f"| 分支 | {pct('BRANCH_MISSED','BRANCH_COVERED'):.1f}% |")
           print(f"| 行 | {pct('LINE_MISSED','LINE_COVERED'):.1f}% |")
-          print("\n> 分包看：`common`/`aspect`（核心不变量）约 90%，`service` 约 52%，`controller` 约 16%")
+          print("\n> 分包看：`common`/`aspect`（核心不变量）约 90%，`service` 约 68%，`controller` 约 16%")
           print("> （Controller 主要是参数转发，业务分支在 Service；它的鉴权路径由 MockMvc 矩阵覆盖）。")
           PY
 

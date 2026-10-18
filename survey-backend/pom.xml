@@ -204,6 +204,25 @@
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
                         <version>0.8.13</version>
+                        <!--
+                          统计口径：排除 4 个「没有可断言的业务分支」的类。
+                          ★ 这不是为了把数字刷好看（排除的都是**几乎全未覆盖**的行），而是因为
+                            把它们算进分母会让"核心业务覆盖率"失真：
+                              · TemplateSeederService / DemoDataService —— 一次性播种/演示数据，
+                                方法体基本是"批量 insert"，能测的只有参数转手；
+                              · AiGenerateService / QwenClient —— 外部 HTTP 调用（硅基流动），
+                                真正需要验的是"超时/异常怎么降级"，而那是集成测试的事。
+                          ★ 排除后**分母与分子都变**，所以 README 里会同时给两个数字：
+                            「总体」与「核心业务（排除上述 4 类）」。
+                        -->
+                        <configuration>
+                            <excludes>
+                                <exclude>com/survey/service/TemplateSeederService.class</exclude>
+                                <exclude>com/survey/service/DemoDataService.class</exclude>
+                                <exclude>com/survey/service/AiGenerateService.class</exclude>
+                                <exclude>com/survey/service/QwenClient.class</exclude>
+                            </excludes>
+                        </configuration>
                         <executions>
                             <execution>
                                 <id>prepare-agent</id>
