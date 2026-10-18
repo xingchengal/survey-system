@@ -10,11 +10,12 @@
     <div class="toolbar-card">
       <!-- "显示模板"开关：打开后走 api.survey.templates()，能看到全部模板并取消它们。
            ★ 少了这个开关，管理员把问卷设为模板后它会从本页消失、再也无法在本页取消：
-           /api/survey/page 的 SQL 排除 is_template=1，而 /api/survey/templates 只提供读取。 -->
+           /api/survey/page 的 SQL 排除 is_template=1，而 /api/survey/templates 只提供读取。
+           ★ 不要加 inline-prompt：那会把文字塞进开关内部，实际宽度不够、标题被吞掉，
+             开关就成了一个"没有任何说明的灰色方块"（用户反馈过这一点）。 -->
       <el-switch
         v-model="showTemplates"
         active-text="显示模板"
-        inline-prompt
         @change="handleTemplateViewChange"
       />
       <el-select v-model="statusFilter" placeholder="全部状态" clearable :disabled="showTemplates" @change="handleSearch">
@@ -38,8 +39,11 @@
       />
       <el-input v-model="keyword" placeholder="搜索标题或描述..." clearable :prefix-icon="Search" @keyup.enter="handleSearch" @clear="handleSearch" />
       <el-button type="primary" @click="handleSearch">搜索</el-button>
-      <el-button @click="handleReset">重置</el-button>
-      <el-button :icon="Refresh" @click="loadSurveys">刷新</el-button>
+      <!-- 重置：没有任何筛选条件时置灰。否则点了之后界面毫无变化，
+           "按钮点了没反应"和"按钮不该点"看起来一模一样 —— 用户会以为功能坏了。 -->
+      <el-button :disabled="!hasFilter" @click="handleReset">重置</el-button>
+      <!-- 刷新：带 loading 转圈。本地请求往往 <100ms，不加这个反馈就完全看不出点过 -->
+      <el-button :icon="Refresh" :loading="loading" @click="loadSurveys">刷新</el-button>
       <!-- 导出（G3）：导的是**当前筛选结果**（不是当前页），后端上限 10000 份。
            模板视图没有对应口径（导出 SQL 与 /page 一致、不含模板），所以禁用。 -->
       <el-button type="success" plain :icon="Download" :loading="exporting" :disabled="showTemplates" @click="handleExport">
@@ -280,6 +284,12 @@ export default {
       exporting: false,
       visibleColumns: readVisibleColumns(),
       columnOptions: COLUMN_OPTIONS,
+      // ===== 并发保护（修「重置/刷新点了没反应」）=====
+      // 每次发请求自增；响应回来时若 seq 已不是最新的，就**丢弃这份结果**。
+      // ★ 为什么必须要它：点「重置」会连发两次请求 —— 日期控件的 @change 一次 + handleReset 自己一次；
+      //   快速点搜索/翻页同理。两个请求的**返回顺序不保证**，慢的那个后到就会把新结果覆盖成旧数据，
+      //   界面上看就是"点了重置，列表却还是筛选前的样子"（或反之）。这不是错觉，是真 bug。
+      loadSeq: 0,
       // ===== 设为/取消模板 =====
       templateDialogVisible: false,
       templateSubmitting: false,
@@ -293,6 +303,19 @@ export default {
       Download: markRaw(Download),
       Setting: markRaw(Setting),
       Delete: markRaw(Delete)
+    }
+  },
+  computed: {
+    /**
+     * 当前是否有任何筛选条件（用于「重置」按钮的置灰）。
+     * ★ 为什么要它：没有筛选条件时点「重置」，界面不会有任何变化 ——
+     *   用户会把它当成"按钮坏了"。置灰等于把"现在没东西可重置"这件事显式说出来。
+     * ★ statusFilter 的 0（草稿）是**有效值**，不能用真值判断（`!this.statusFilter` 会把它当空）。
+     */
+    hasFilter() {
+      return Boolean(
+        this.keyword.trim() || this.statusFilter !== '' || this.dateRange
+      )
     }
   },
   watch: {
@@ -318,13 +341,16 @@ export default {
     // 关联：surveys 喂给表格；total 喂给 el-pagination；statusFilter / keyword / dateRange 来自顶部筛选栏。
     // ★ showTemplates 为真时必须走 api.survey.templates()（模板列表）：
     //   api.survey.page 的 SQL 排除 is_template = 1，不切数据源就看不到模板、也就无法取消它。
+    // ★ **并发保护**：见 data.loadSeq 的注释。只有最后一次请求的响应允许写回界面。
     async loadSurveys() {
+      const seq = ++this.loadSeq
       this.loading = true
       this.error = false
       try {
         if (this.showTemplates) {
           // 模板列表接口**不分页**（模板广场一次全给），所以这里本地分页，语义与 page 视图保持一致
           const all = await api.survey.templates({ keyword: this.keyword.trim() })
+          if (seq !== this.loadSeq) return       // 已被更新的请求取代，丢弃
           const list = Array.isArray(all) ? all : []
           this.total = list.length
           const start = (this.pageNum - 1) * this.pageSize
@@ -343,13 +369,15 @@ export default {
           startDate: this.dateRange && this.dateRange[0],
           endDate: this.dateRange && this.dateRange[1]
         })
+        if (seq !== this.loadSeq) return       // 同上：慢请求不许覆盖新结果
         this.surveys = data.list || []
         this.total = data.total || 0
       } catch {
         // 错误提示已由 src/api/http.js 统一弹出，这里只置 error 让 PageState 显示重试入口
-        this.error = true
+        // ★ 同样只在"这次仍是最新请求"时才置错，否则一次早已被取代的失败会把界面打成错误态
+        if (seq === this.loadSeq) this.error = true
       } finally {
-        this.loading = false
+        if (seq === this.loadSeq) this.loading = false
       }
     },
 

@@ -201,6 +201,8 @@ export default {
       selectedRows: [],
       batchWorking: false,
       exporting: false,
+      // 并发保护：只认最后一次请求的响应（见 loadUsers 的注释）
+      loadSeq: 0,
       // 自己的 id：禁用/删除自己会被后端拒绝，前端先把按钮置灰
       currentUserId: (getUser() && getUser().id) || null,
       Search: markRaw(Search),
@@ -246,7 +248,11 @@ export default {
     this.loadUsers()
   },
   methods: {
+    // ★ 并发保护：切换分类/点重置会连发多次请求，返回顺序不保证 ——
+    //   慢的那个后到会把新结果覆盖成旧数据（表现为"切了 tab，列表还是上一个分类的人"）。
+    //   只认最后一次请求的响应。
     async loadUsers() {
+      const seq = ++this.loadSeq
       this.loading = true
       this.error = false
       try {
@@ -264,18 +270,20 @@ export default {
         //            三个分类就名不副实了）
         if (this.view === 'deleted') {
           const data = await api.user.pageDeleted(params)
+          if (seq !== this.loadSeq) return
           this.users = data.list || []
           this.total = data.total || 0
         } else {
           const data = await api.user.page({ ...params, disabled: this.view === 'disabled' ? 1 : 0 })
+          if (seq !== this.loadSeq) return
           this.users = data.list || []
           this.total = data.total || 0
         }
       } catch {
         // ★ 接口层已统一提示，这里只保留流程控制；error 交给 PageState 显示重试入口
-        this.error = true
+        if (seq === this.loadSeq) this.error = true
       } finally {
-        this.loading = false
+        if (seq === this.loadSeq) this.loading = false
       }
     },
 

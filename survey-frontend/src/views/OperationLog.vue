@@ -250,6 +250,8 @@ export default {
       // 时间范围（G3）：['2026-10-01', '2026-10-02'] 或 null
       opDateRange: null,
       opExporting: false,
+      // 并发保护：只认最后一次请求的响应（见 loadOperations 的注释）
+      opSeq: 0,
       opPageNum: 1,
       opPageSize: 10,
       opTotal: 0,
@@ -323,7 +325,11 @@ export default {
     },
 
     // ==================== 操作日志 ====================
+    // ★ 并发保护：点「重置」会连发两次（时间控件的 @change + 自己调用），
+    //   两个响应的返回顺序不保证 —— 慢的那个后到会把新结果覆盖成旧数据，
+    //   界面上就是"点了重置，日志还是筛选前那批"。只认最后一次请求。
     async loadOperations() {
+      const seq = ++this.opSeq
       this.opLoading = true
       this.opError = false
       try {
@@ -338,13 +344,14 @@ export default {
           startDate: this.opDateRange && this.opDateRange[0],
           endDate: this.opDateRange && this.opDateRange[1]
         })
+        if (seq !== this.opSeq) return
         this.operations = data.list || []
         this.opTotal = data.total || 0
       } catch {
         // ★ 接口层已按 HTTP 状态码统一提示，这里只留 catch 做流程控制，loading 由 finally 复位
-        this.opError = true
+        if (seq === this.opSeq) this.opError = true
       } finally {
-        this.opLoading = false
+        if (seq === this.opSeq) this.opLoading = false
       }
     },
 
