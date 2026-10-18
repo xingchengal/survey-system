@@ -220,10 +220,19 @@ public class QuestionService {
                 } else if (q.getOptions() == null || q.getOptions().isEmpty()) {
                     throw new BizException("第 " + (i + 1) + " 题至少需要一个选项");
                 }
+                // ★★ 选项内容必须互不相同。
+                //   答题页把选项原文当 radio/checkbox 的 value，两个同名选项的值相同 ——
+                //   点一个会**同时选中两个**（历史实测报障）；统计又按 content 分组，
+                //   同名选项本来也分不开。所以这属于"存进去就是废数据"，保存时直接拒绝。
+                java.util.Set<String> seenOptions = new java.util.HashSet<>();
                 for (int j = 0; j < q.getOptions().size(); j++) {
                     String content = q.getOptions().get(j).getContent();
                     if (content == null || content.isBlank()) {
                         throw new BizException("第 " + (i + 1) + " 题的第 " + (j + 1) + " 个选项内容不能为空");
+                    }
+                    String trimmed = content.trim();
+                    if (!seenOptions.add(trimmed)) {
+                        throw new BizException("第 " + (i + 1) + " 题有两个内容相同的选项：" + trimmed);
                     }
                 }
             }

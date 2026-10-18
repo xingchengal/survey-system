@@ -162,9 +162,15 @@
           ⚠️ 该矩阵题的行列未配置完整，暂时无法作答。请联系问卷发布者补充行列后再填。
         </div>
 
+        <!-- ★ 重复选项：两个同名选项当 radio/checkbox 的 value 会"点一个选中两个"，
+             在"点一次送一次"的表象下用户会以为系统坏了。这里不渲染选项、直接说明原因。 -->
+        <div v-if="optionsDuplicated" class="option-broken">
+          ⚠️ 该题有重复选项（{{ duplicateOptions.join('、') }}），暂时无法作答。请联系问卷发布者把选项改成不同内容后再填。
+        </div>
+
         <!-- 单选题 -->
         <el-radio-group
-          v-if="currentQuestion.type === 1 && usableOptions.length"
+          v-if="currentQuestion.type === 1 && usableOptions.length && !optionsDuplicated"
           v-model="answers[currentQuestion.id]"
           class="fill-options"
         >
@@ -180,7 +186,7 @@
 
         <!-- 多选题 -->
         <el-checkbox-group
-          v-else-if="currentQuestion.type === 2 && usableOptions.length"
+          v-else-if="currentQuestion.type === 2 && usableOptions.length && !optionsDuplicated"
           v-model="answers[currentQuestion.id]"
           class="fill-options"
         >
@@ -196,7 +202,7 @@
 
         <!-- 下拉选择 -->
         <el-select
-          v-else-if="currentQuestion.type === 5 && usableOptions.length"
+          v-else-if="currentQuestion.type === 5 && usableOptions.length && !optionsDuplicated"
           v-model="answers[currentQuestion.id]"
           placeholder="请选择…"
           size="large"
@@ -261,7 +267,7 @@
         </div>
 
         <!-- 排序题：数组顺序就是名次，上下移动调整 -->
-        <div v-else-if="currentQuestion.type === 9 && usableOptions.length" class="fill-ranking">
+        <div v-else-if="currentQuestion.type === 9 && usableOptions.length && !optionsDuplicated" class="fill-ranking">
           <div v-for="(item, ri) in rankingAnswers" :key="'rk' + ri" class="fill-rank-row">
             <span class="fill-rank-no">{{ ri + 1 }}</span>
             <span class="fill-rank-text">{{ item }}</span>
@@ -449,6 +455,29 @@ export default {
     /** 选项题却一个可用选项都没有：页面提示"配置不完整"，且不拦"下一题"（否则必填会卡死） */
     optionsBroken() {
       return this.currentHasOptions && this.usableOptions.length === 0
+    },
+    /**
+     * 当前题的**重复选项**（去首尾空白后同名）。
+     * ★ 为什么必须拦：答题页把选项原文当 radio / checkbox 的 value，两个同名选项的 value 相同 ——
+     *   点一个会**同时选中两个**（用户实测报障："点一个相当于同时点"）。
+     *   正常数据在保存时已被后端拒绝（QuestionService），这里兜的是"校验上线前已入库"的历史问卷。
+     */
+    duplicateOptions() {
+      const seen = new Set()
+      const dups = []
+      for (const o of this.usableOptions) {
+        const key = o.content.trim()
+        if (seen.has(key)) {
+          if (!dups.includes(key)) dups.push(key)
+        } else {
+          seen.add(key)
+        }
+      }
+      return dups
+    },
+    /** 有重复选项 → 不渲染选项控件（否则"点一送一"），改为提示联系作者 */
+    optionsDuplicated() {
+      return this.currentHasOptions && this.duplicateOptions.length > 0
     },
     /** 矩阵题的行/列标题（后端给 JSON 文本，这里解析成数组） */
     matrixRows() {
@@ -872,9 +901,11 @@ export default {
       const ans = this.answers[q.id]
       // ★ 选项题但一个可用选项都没有（历史脏数据）→ 这道题物理上没法答，
       //   再做必填拦截只会把访客永久停在这一页（正是"下拉无选项、必填卡死"的报障）。
-      //   这种题按"跳过"处理并给出提示，让访客能继续往下填。
-      if (this.optionsBroken) {
-        ElMessage.warning('该题选项未配置，已跳过这道题')
+      //   ★ 重复选项同理：控件被隐藏，拦必填会让访客永远过不去。两种都按"跳过 + 说明"处理。
+      if (this.optionsBroken || this.optionsDuplicated) {
+        ElMessage.warning(this.optionsDuplicated
+          ? '该题有重复选项，已跳过这道题'
+          : '该题选项未配置，已跳过这道题')
       } else if (this.matrixBroken) {
         ElMessage.warning('该矩阵题行列未配置，已跳过这道题')
       } else if (q.required === 1) {

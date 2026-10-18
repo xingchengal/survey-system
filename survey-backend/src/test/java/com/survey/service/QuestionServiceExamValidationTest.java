@@ -176,6 +176,24 @@ class QuestionServiceExamValidationTest {
     }
 
     @Test
+    @DisplayName("同一题两个内容相同的选项 → 400（否则答题页点一个会同时选中两个）")
+    void duplicateOptionContents_rejected() {
+        Question q = question(1, 0, new String[]{"111", "111"}, new int[]{});
+        BizException e = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, List.of(q)));
+        assertTrue(e.getMessage().contains("内容相同的选项"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("重复判定按去空白后比较：\"A\" 与 \" A \" 也算重复")
+    void duplicateOptionContents_trimmedComparison() {
+        Question q = question(1, 0, new String[]{"A", " A "}, new int[]{});
+        BizException e = assertThrows(BizException.class,
+                () -> questionService.saveQuestions(SURVEY_ID, List.of(q)));
+        assertTrue(e.getMessage().contains("内容相同的选项"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("考试模式已开启、却没有任何计分题 → 400（避免出 0/0 分的成绩卡）")
     void examSurveyWithoutScoredQuestion_rejected() {
         Survey survey = new Survey();

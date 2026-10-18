@@ -234,15 +234,19 @@
       :key="qIndex"
       class="q-card mb-16"
       :class="{ 'is-dragging': dragQIndex === qIndex, 'is-drag-over': dragOverQIndex === qIndex }"
-      draggable="true"
-      @dragstart="onQuestionDragStart(qIndex, $event)"
       @dragover.prevent="onQuestionDragOver(qIndex)"
       @dragleave="onQuestionDragLeave(qIndex)"
       @drop.prevent="onQuestionDrop(qIndex)"
-      @dragend="onDragEnd"
     >
       <div class="q-head">
-        <span class="drag-handle" title="拖动调整题目顺序"><el-icon><Rank /></el-icon></span>
+        <!-- ★ 只有把手可拖（整卡 draggable 会让选中文字/点空白处都误触发拖拽） -->
+        <span
+          class="drag-handle"
+          title="拖动调整题目顺序"
+          draggable="true"
+          @dragstart="onQuestionDragStart(qIndex, $event)"
+          @dragend="onDragEnd"
+        ><el-icon><Rank /></el-icon></span>
         <div class="q-index">{{ qIndex + 1 }}</div>
         <el-tag :type="qTypeTag(q.type)" effect="light" round size="small">
           {{ qTypeLabel(q.type) }}
@@ -337,12 +341,15 @@
         <div v-for="(opt, oIndex) in q.options" :key="oIndex"
              class="option-row"
              :class="{ 'is-dragging': isDraggingOption(qIndex, oIndex), 'is-drag-over': dragOverOption === qIndex + '-' + oIndex }"
-             draggable="true"
-             @dragstart.stop="onOptionDragStart(qIndex, oIndex, $event)"
              @dragover.stop.prevent="onOptionDragOver(qIndex, oIndex)"
-             @drop.stop.prevent="onOptionDrop(qIndex, oIndex)"
-             @dragend.stop="onDragEnd">
-          <span class="drag-handle" title="拖动调整选项顺序"><el-icon><Rank /></el-icon></span>
+             @drop.stop.prevent="onOptionDrop(qIndex, oIndex)">
+          <span
+            class="drag-handle"
+            title="拖动调整选项顺序"
+            draggable="true"
+            @dragstart.stop="onOptionDragStart(qIndex, oIndex, $event)"
+            @dragend.stop="onDragEnd"
+          ><el-icon><Rank /></el-icon></span>
           <span class="option-mark">
             <el-icon><component :is="qOptionIcon(q.type)" /></el-icon>
           </span>
@@ -1351,19 +1358,14 @@ export default {
     // ==================== 拖拽排序（题目 / 选项） ====================
 
     /**
-     * 从输入框里按下鼠标时不要开始拖拽，否则没法正常选中文字/拖选内容。
-     * （卡片整体 draggable="true"，这一步是必须的护栏）
+     * 只有**拖拽把手**（.drag-handle）可拖，卡片本体不再是 draggable。
+     *
+     * ★ 为什么改（第四十五轮用户实测反馈）：整卡可拖时，在题干/选项输入框里选中文字、
+     *   或只是点一下卡片空白处，都会误触发拖拽，"点哪儿都能拖"体感很差。
+     *   把手只有图标大小，误触概率趋近于零，也让"哪里能拖"一目了然。
+     * ★ 因此这里不再需要"是否点在输入框上"的护栏 —— 把手本身不是输入控件。
      */
-    isTextEditing(e) {
-      const el = e && e.target
-      return Boolean(el && el.closest && el.closest('input, textarea, .el-select, .el-input'))
-    },
-
     onQuestionDragStart(index, e) {
-      if (this.isTextEditing(e)) {
-        e.preventDefault()
-        return
-      }
       this.dragQIndex = index
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move'
@@ -1391,10 +1393,6 @@ export default {
     },
 
     onOptionDragStart(qIndex, oIndex, e) {
-      if (this.isTextEditing(e)) {
-        e.preventDefault()
-        return
-      }
       this.dragOption = `${qIndex}-${oIndex}`
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move'
@@ -1510,12 +1508,21 @@ export default {
           ElMessage.warning(`第 ${i + 1} 题（排序题）至少需要 2 个选项才能排序`)
           return false
         }
+        // ★ 选项内容必须**互不相同**：答题页把选项原文当 radio/checkbox 的值，
+        //   两个同名选项的值相同 —— 点一个会**同时选中两个**（用户实测报障："点一个相当于同时点"）。
+        //   统计也按 content 分组，同名选项本来就没法区分。
+        const seenOptions = new Set()
         for (let j = 0; j < opts.length; j++) {
           const text = typeof opts[j].content === 'string' ? opts[j].content.trim() : ''
           if (!text) {
             ElMessage.warning(`第 ${i + 1} 题的选项 ${j + 1} 内容不能为空`)
             return false
           }
+          if (seenOptions.has(text)) {
+            ElMessage.warning(`第 ${i + 1} 题有两个相同的选项「${text}」，请改成不同内容`)
+            return false
+          }
+          seenOptions.add(text)
           // 顺手去首尾空白：避免 "A" 与 "A " 在统计里被算成两个不同选项
           opts[j].content = text
         }
