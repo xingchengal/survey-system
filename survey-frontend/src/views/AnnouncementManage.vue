@@ -1,10 +1,23 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="m-0">📢 公告管理</h2>
-      <el-button type="primary" :icon="Plus" @click="openDialog">发布公告</el-button>
+      <div>
+        <h2 class="page-title">公告管理</h2>
+        <p class="page-subtitle">发布、下架与删除站内公告</p>
+      </div>
+      <div class="header-actions">
+        <el-button type="primary" :icon="Plus" @click="openDialog">发布公告</el-button>
+      </div>
     </div>
 
+    <div class="table-card">
+    <PageState
+      :loading="loading"
+      :error="error"
+      :empty="list.length === 0"
+      empty-text="暂无公告，点右上角「发布公告」创建一条"
+      @retry="loadList"
+    >
     <el-table class="w-full" :data="list" stripe border>
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
@@ -42,7 +55,8 @@
       </el-table-column>
     </el-table>
 
-    <el-empty v-if="list.length === 0" description="暂无公告" />
+    </PageState>
+    </div>
 
     <!-- 发布对话框 -->
     <el-dialog v-model="dialogVisible" title="发布公告" width="600px">
@@ -73,12 +87,18 @@ import { Plus } from '@element-plus/icons-vue'
 // ★ 统一接口层（src/api）：Authorization、query 拼接、非 2xx 抛错、错误提示、401 跳登录都在里面，
 //   本页只需关心「调哪个接口、拿到什么数据」
 import api from '../api'
+// 三态容器：骨架 / 空 / 错误（带重试）
+import PageState from '../components/PageState.vue'
 
 // 图标已在 main.js 全局注册；本页只有 Plus 需要按"属性变量"形式用（:icon="Plus"），所以单独 import
 export default {
+  components: { PageState },
   data() {
     return {
       list: [],
+      loading: false,
+      // 接口失败标记：由 PageState 渲染「加载失败 + 重试」
+      error: false,
       dialogVisible: false,
       form: { title: '', content: '', expireTime: null },
       // ★ 关键：模板里用 :icon="Plus" 就要在 data 里返回
@@ -90,12 +110,16 @@ export default {
   },
   methods: {
     async loadList() {
+      this.loading = true
+      this.error = false
       try {
         // 接口层已带登录凭证且会按 HTTP 状态码判成败，成功直接 resolve 响应体（数组）
         this.list = await api.announcement.list()
       } catch {
-        // ★ 接口层已统一 ElMessage.error，这里保留 catch 只为挡住 rejection，
-        //   列表维持上一次的数据
+        // ★ 接口层已统一 ElMessage.error，这里置 error 交 PageState 显示重试入口
+        this.error = true
+      } finally {
+        this.loading = false
       }
     },
 

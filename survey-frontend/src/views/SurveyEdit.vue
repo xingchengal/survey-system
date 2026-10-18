@@ -1,5 +1,5 @@
 <template>
-  <div style="padding: 20px; max-width: 900px; margin: 0 auto;">
+  <div class="edit-page">
     <!-- ★ 回收站里的问卷禁止保存/发布：点下去**必然 400**（后端 OwnershipGuard.requireNotInRecycleBin /
           SurveyController.update / QuestionController.save 三处都会拦），所以这里明确告知并给恢复入口。 -->
     <el-alert
@@ -20,9 +20,15 @@
     </el-alert>
 
     <!-- 顶部操作栏 -->
-    <div class="page-header">
-      <h2 class="m-0">📝 问卷编辑器 (ID: {{ surveyId }})</h2>
+    <div class="edit-header">
       <div>
+        <h2 class="page-title">问卷编辑器</h2>
+        <p class="page-subtitle">
+          ID #{{ surveyId }} · 题目结构变化会自动生成历史版本
+          <span class="save-state" :class="saveStateClass">{{ saveStateText }}</span>
+        </p>
+      </div>
+      <div class="header-actions">
         <el-button @click="goBack">返回</el-button>
         <!-- ★ 回收站里禁止保存/发布（点了必 400），按钮直接禁用并把原因写在标题里。
              ★ `saving` 门控：保存首次是"预存 + 正式提交"两次往返，期间禁用以免连点触发第二次全量覆盖。 -->
@@ -36,9 +42,13 @@
           :disabled="inRecycleBin || saving || (surveyInfo.status === 2 && !endExtended)"
           @click="publishSurvey"
         >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
-        <el-tag class="ml-10" v-else-if="surveyInfo.status === 1" type="success">已发布（可继续修改）</el-tag>
+        <el-tag v-else-if="surveyInfo.status === 1" type="success" effect="light" round>已发布（可继续修改）</el-tag>
+        <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
+        <el-button :disabled="inRecycleBin" @click="settingsVisible = true">设置</el-button>
+        <!-- 预览：按填写者视角看当前编辑态（不保存、不产生答卷） -->
+        <el-button :disabled="questions.length === 0" @click="openPreview">预览</el-button>
         <!-- 历史版本：回收站里禁用（回滚走的是"全量覆盖式保存"，在回收站问卷上执行会让历史答卷的 question_id 悬空） -->
-        <el-button class="ml-10" :disabled="inRecycleBin" @click="openVersions">历史版本</el-button>
+        <el-button :disabled="inRecycleBin" @click="openVersions">历史版本</el-button>
       </div>
     </div>
 
@@ -53,12 +63,15 @@
     />
 
     <!-- 问卷基础信息 -->
-    <el-card class="mb-20">
-      <el-form label-width="100px">
+    <el-card class="meta-card mb-20">
+      <template #header>
+        <span class="card-title">🗂 基础信息</span>
+      </template>
+      <el-form label-width="90px">
         <el-form-item label="问卷标题">
           <!-- ★ maxlength 必须与后端 TextLimits.SURVEY_TITLE(200) / 数据库 varchar(200) 对齐，
                否则用户写超长只有提交后吃 400。 -->
-          <el-input v-model="surveyInfo.title" placeholder="请输入问卷标题" maxlength="200" show-word-limit />
+          <el-input v-model="surveyInfo.title" placeholder="请输入问卷标题" maxlength="200" show-word-limit size="large" />
         </el-form-item>
         <el-form-item label="问卷描述">
           <el-input v-model="surveyInfo.description" type="textarea" :rows="2" placeholder="请输入问卷描述" maxlength="500" show-word-limit />
@@ -73,75 +86,124 @@
     </el-card>
 
     <!-- 题目列表 -->
-    <div v-if="questions.length === 0" style="text-align: center; color: #999; padding: 40px 0; background: #fff; border-radius: 8px;">
-      还没有题目，点击下方按钮添加第一道题
+    <div v-if="questions.length === 0" class="empty-questions">
+      <div class="empty-emoji">🧩</div>
+      <div class="empty-title">还没有题目</div>
+      <div class="empty-desc">从下方选择题型，添加第一道题</div>
     </div>
 
-    <el-card class="mb-16" v-for="(q, qIndex) in questions" :key="qIndex">
-      <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-        <div style="flex: 1;">
-          <el-tag :type="q.type === 1 ? 'primary' : q.type === 2 ? 'success' : 'warning'" style="margin-bottom: 8px;">
-            {{ q.type === 1 ? '单选题' : q.type === 2 ? '多选题' : '单行输入' }}
-          </el-tag>
-          <el-checkbox class="ml-10" v-model="q.required" :true-value="1" :false-value="0">必填</el-checkbox>
+    <el-card
+      v-for="(q, qIndex) in questions"
+      :key="qIndex"
+      class="q-card mb-16"
+      :class="{ 'is-dragging': dragQIndex === qIndex, 'is-drag-over': dragOverQIndex === qIndex }"
+      draggable="true"
+      @dragstart="onQuestionDragStart(qIndex, $event)"
+      @dragover.prevent="onQuestionDragOver(qIndex)"
+      @dragleave="onQuestionDragLeave(qIndex)"
+      @drop.prevent="onQuestionDrop(qIndex)"
+      @dragend="onDragEnd"
+    >
+      <div class="q-head">
+        <span class="drag-handle" title="拖动调整题目顺序"><el-icon><Rank /></el-icon></span>
+        <div class="q-index">{{ qIndex + 1 }}</div>
+        <el-tag :type="qTypeTag(q.type)" effect="light" round size="small">
+          {{ qTypeLabel(q.type) }}
+        </el-tag>
+        <el-checkbox class="ml-10" v-model="q.required" :true-value="1" :false-value="0">必填</el-checkbox>
+        <div class="q-spacer"></div>
+        <el-button type="danger" link size="small" @click="removeQuestion(qIndex)">删除题目</el-button>
+      </div>
 
-          <el-input v-model="q.title" placeholder="请输入题目内容" maxlength="500" show-word-limit style="margin-top: 10px;" />
+      <el-input v-model="q.title" class="q-title-input" placeholder="请输入题目内容" maxlength="500" show-word-limit />
 
-          <!-- 选项区域 -->
-          <div v-if="q.type === 1 || q.type === 2" style="margin-top: 12px; padding-left: 20px;">
-            <div v-for="(opt, oIndex) in q.options" :key="oIndex" style="display: flex; align-items: center; margin-bottom: 8px;">
-              <el-icon style="margin-right: 8px; color: #999;">
-                <component :is="q.type === 1 ? 'CircleCheck' : 'Select'" />
-              </el-icon>
-              <el-input v-model="opt.content" placeholder="请输入选项内容" maxlength="500" style="width: 220px; margin-right: 8px;" />
+      <!-- 选项区域：单选 / 多选 / 下拉 -->
+      <div v-if="qHasOptions(q.type)" class="q-options">
+        <div v-for="(opt, oIndex) in q.options" :key="oIndex"
+             class="option-row"
+             :class="{ 'is-dragging': isDraggingOption(qIndex, oIndex), 'is-drag-over': dragOverOption === qIndex + '-' + oIndex }"
+             draggable="true"
+             @dragstart.stop="onOptionDragStart(qIndex, oIndex, $event)"
+             @dragover.stop.prevent="onOptionDragOver(qIndex, oIndex)"
+             @drop.stop.prevent="onOptionDrop(qIndex, oIndex)"
+             @dragend.stop="onDragEnd">
+          <span class="drag-handle" title="拖动调整选项顺序"><el-icon><Rank /></el-icon></span>
+          <span class="option-mark">
+            <el-icon><component :is="qOptionIcon(q.type)" /></el-icon>
+          </span>
+          <el-input v-model="opt.content" class="option-input" placeholder="请输入选项内容" maxlength="500" />
 
-              <!-- 跳转设置：单选和多选都支持 -->
-              <!-- ★ `:value` 必须是 question.id：保存时后端会按数组重排 sort_order、并删掉本次没传的题，
-                   若这里存"第几题"的序号，删题/调序之后已存的规则就会**静默指向错的题**。
-                   ★ 新建的题在保存前没有数据库 id，所以由前端先发一个**负数的临时 id**（见 data.tempQuestionId），
-                     保存成功后替换成真实 id —— 否则新建问卷的每一道题都会因为 `!target.id` 而被禁用，根本设不了跳转。
-                   ★ 只允许往后跳（ti <= qIndex 的禁用）：反向跳会破坏答题页的"路径推进"模型
-                     （那里靠"目标必须在当前题之后"来防环）。 -->
-              <el-select
-                v-model="opt.nextQuestionId"
-                placeholder="下一题"
-                clearable
-                size="small"
-                style="width: 130px; margin-right: 8px;"
-              >
-                <el-option
-                  v-for="(target, ti) in questions"
-                  :key="ti"
-                  :label="`跳到第 ${ti + 1} 题`"
-                  :value="target.id"
-                  :disabled="ti <= qIndex"
-                />
-                <el-option label="结束问卷" :value="-1" />
-              </el-select>
+          <!-- 跳转设置：单选和多选都支持 -->
+          <!-- ★ `:value` 必须是 question.id：保存时后端会按数组重排 sort_order、并删掉本次没传的题，
+               若这里存"第几题"的序号，删题/调序之后已存的规则就会**静默指向错的题**。
+               ★ 新建的题在保存前没有数据库 id，所以由前端先发一个**负数的临时 id**（见 data.tempQuestionId），
+                 保存成功后替换成真实 id —— 否则新建问卷的每一道题都会因为 `!target.id` 而被禁用，根本设不了跳转。
+               ★ 只允许往后跳（ti <= qIndex 的禁用）：反向跳会破坏答题页的"路径推进"模型
+                 （那里靠"目标必须在当前题之后"来防环）。 -->
+          <el-select
+            v-model="opt.nextQuestionId"
+            class="option-jump"
+            placeholder="跳转：下一题"
+            clearable
+            size="small"
+          >
+            <el-option
+              v-for="(target, ti) in questions"
+              :key="ti"
+              :label="`跳到第 ${ti + 1} 题`"
+              :value="target.id"
+              :disabled="ti <= qIndex"
+            />
+            <el-option label="结束问卷" :value="-1" />
+          </el-select>
 
-              <el-button type="danger" link size="small" @click="removeOption(qIndex, oIndex)">删除</el-button>
-            </div>
-
-            <!-- 多选跳转规则提示 -->
-            <div v-if="q.type === 2" style="font-size: 12px; color: #909399; margin-top: 4px; padding-left: 24px;">
-              💡 多选跳转规则：勾选的多个选项中，按选项顺序取第一个命中的跳转
-            </div>
-
-            <el-button type="primary" link size="small" @click="addOption(qIndex)">+ 添加选项</el-button>
-          </div>
+          <el-button type="danger" link size="small" @click="removeOption(qIndex, oIndex)">删除</el-button>
         </div>
 
-        <el-button class="ml-10" type="danger" link @click="removeQuestion(qIndex)">删除题目</el-button>
+        <!-- 多选跳转规则提示 -->
+        <div v-if="qIsMulti(q.type)" class="option-hint">
+          💡 多选跳转规则：勾选的多个选项中，按选项顺序取第一个命中的跳转
+        </div>
+
+        <el-button class="add-option" type="primary" plain size="small" @click="addOption(qIndex)">＋ 添加选项</el-button>
       </div>
     </el-card>
 
     <!-- 底部添加题目 -->
-    <div style="text-align: center; margin-top: 20px; padding: 20px; background: #fff; border-radius: 8px;">
-      <span style="margin-right: 10px; color: #666;">添加题目：</span>
-      <el-button type="primary" plain @click="addQuestion(1)">单选题</el-button>
-      <el-button type="success" plain @click="addQuestion(2)">多选题</el-button>
-      <el-button type="warning" plain @click="addQuestion(3)">单行输入</el-button>
+    <div class="add-bar">
+      <div class="add-bar-title">添加题目</div>
+      <div class="add-actions">
+        <button type="button" class="add-tile add-single" @click="addQuestion(1)">
+          <span class="add-ico"><el-icon><CircleCheck /></el-icon></span>
+          <span class="add-text"><b>单选题</b><i>只能选一个</i></span>
+        </button>
+        <button type="button" class="add-tile add-multi" @click="addQuestion(2)">
+          <span class="add-ico"><el-icon><Select /></el-icon></span>
+          <span class="add-text"><b>多选题</b><i>可选多个</i></span>
+        </button>
+        <button type="button" class="add-tile add-select" @click="addQuestion(5)">
+          <span class="add-ico"><el-icon><ArrowDown /></el-icon></span>
+          <span class="add-text"><b>下拉选择</b><i>选项多时更清爽</i></span>
+        </button>
+        <button type="button" class="add-tile add-text-tile" @click="addQuestion(3)">
+          <span class="add-ico"><el-icon><EditPen /></el-icon></span>
+          <span class="add-text"><b>单行文本</b><i>一句话回答</i></span>
+        </button>
+        <button type="button" class="add-tile add-textarea" @click="addQuestion(4)">
+          <span class="add-ico"><el-icon><Memo /></el-icon></span>
+          <span class="add-text"><b>多行文本</b><i>建议与意见</i></span>
+        </button>
+        <button type="button" class="add-tile add-rating" @click="addQuestion(6)">
+          <span class="add-ico"><el-icon><Star /></el-icon></span>
+          <span class="add-text"><b>评分题</b><i>1~5 星打分</i></span>
+        </button>
+        <button type="button" class="add-tile add-date" @click="addQuestion(7)">
+          <span class="add-ico"><el-icon><Calendar /></el-icon></span>
+          <span class="add-text"><b>日期</b><i>选择年月日</i></span>
+        </button>
+      </div>
     </div>
+
     <!-- ===== 历史版本对话框 ===== -->
     <el-dialog v-model="versionVisible" title="历史版本" width="820px">
       <div style="color:#666; font-size:13px; margin-bottom:12px;">
@@ -206,19 +268,248 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- ===== 问卷设置（答题密码 / 限收份数 / 提交后展示 / 公开结果） ===== -->
+    <el-dialog v-model="settingsVisible" title="问卷设置" width="560px">
+      <el-form label-width="110px" class="settings-form">
+        <el-form-item label="答题密码">
+          <el-input
+            v-model="surveyInfo.accessPassword"
+            placeholder="留空表示不需要密码"
+            maxlength="20"
+            show-word-limit
+            clearable
+          />
+          <div class="setting-hint">设置后，填写人必须先输入密码才能看到题目。</div>
+        </el-form-item>
+
+        <el-form-item label="限收份数">
+          <el-input-number
+            v-model="surveyInfo.maxResponses"
+            :min="1"
+            :max="1000000"
+            :step="10"
+            controls-position="right"
+            placeholder="留空不限"
+            style="width: 200px;"
+          />
+          <span class="setting-inline">留空表示不限；收满后自动拒绝新答卷</span>
+        </el-form-item>
+
+        <el-form-item label="提交后感谢语">
+          <el-input
+            v-model="surveyInfo.thankText"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            show-word-limit
+            placeholder="留空用默认「提交成功，感谢您的参与」"
+          />
+        </el-form-item>
+
+        <el-form-item label="提交后跳转">
+          <el-input
+            v-model="surveyInfo.redirectUrl"
+            placeholder="https://…（留空则不跳转）"
+            maxlength="500"
+            clearable
+          />
+          <div class="setting-hint">只支持 http / https 链接。</div>
+        </el-form-item>
+
+        <el-form-item label="公开结果">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.publicResult" :active-value="1" :inactive-value="0" />
+            <el-button
+              v-if="surveyInfo.publicResult === 1 && surveyInfo.shareCode"
+              link
+              type="primary"
+              @click="openPublicResult"
+            >预览公开结果页 →</el-button>
+          </div>
+          <div class="setting-hint">
+            开启后，任何拿到分享链接的人都能查看汇总图表（**不含**填空原文）。
+            需要先点「保存」再预览。
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <div class="settings-footer">
+          <span>设置随「保存」一起提交</span>
+          <el-button @click="settingsVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- ===== 预览：按填写者视角查看当前编辑态（不保存、不产生答卷） ===== -->
+    <el-dialog v-model="previewVisible" width="720px" top="5vh">
+      <template #header>
+        <div class="pv-header">
+          <span class="pv-header-title">问卷预览</span>
+          <el-tag size="small" type="info" effect="plain" round>填写者视角</el-tag>
+        </div>
+      </template>
+
+      <div class="pv-body">
+        <h2 class="pv-title">{{ surveyInfo.title || '（还没有填写标题）' }}</h2>
+        <p v-if="surveyInfo.description" class="pv-desc">{{ surveyInfo.description }}</p>
+        <p v-else class="pv-desc pv-desc-empty">（未填写问卷描述）</p>
+
+        <div v-if="questions.length === 0" class="pv-empty">还没有题目，先在编辑器里添加几道</div>
+
+        <div v-for="(q, i) in questions" :key="i" class="pv-question">
+          <div class="pv-q-title">
+            <span class="pv-index">{{ i + 1 }}.</span>
+            <span class="pv-q-text">{{ q.title || '（还没有填写题目内容）' }}</span>
+            <span v-if="q.required" class="pv-required">*</span>
+          </div>
+
+          <!-- 单选 -->
+          <div v-if="q.type === 1" class="pv-options">
+            <label v-for="(opt, oi) in q.options" :key="oi" class="pv-option">
+              <input
+                v-model="previewAnswers[q.id]"
+                type="radio"
+                :name="'pv-' + i"
+                :value="opt.content"
+              />
+              <span class="pv-option-text">{{ opt.content || `选项 ${oi + 1}` }}</span>
+            </label>
+          </div>
+
+          <!-- 多选 -->
+          <div v-else-if="q.type === 2" class="pv-options">
+            <label v-for="(opt, oi) in q.options" :key="oi" class="pv-option">
+              <input
+                v-model="previewAnswers[q.id]"
+                type="checkbox"
+                :value="opt.content"
+              />
+              <span class="pv-option-text">{{ opt.content || `选项 ${oi + 1}` }}</span>
+            </label>
+          </div>
+
+          <!-- 下拉选择 -->
+          <el-select
+            v-else-if="q.type === 5"
+            v-model="previewAnswers[q.id]"
+            class="pv-select"
+            placeholder="请选择…"
+            clearable
+          >
+            <el-option
+              v-for="(opt, oi) in q.options"
+              :key="oi"
+              :label="opt.content || `选项 ${oi + 1}`"
+              :value="opt.content"
+            />
+          </el-select>
+
+          <!-- 评分 -->
+          <div v-else-if="q.type === 6" class="pv-rating">
+            <span
+              v-for="score in 5"
+              :key="score"
+              class="pv-star"
+              :class="{ on: Number(previewAnswers[q.id]) >= score }"
+              @click="previewAnswers[q.id] = String(score)"
+            >★</span>
+            <span class="pv-rating-text">
+              {{ previewAnswers[q.id] ? `${previewAnswers[q.id]} 分 · ${ratingLabels[Number(previewAnswers[q.id]) - 1]}` : '点击星星评分' }}
+            </span>
+          </div>
+
+          <!-- 日期 -->
+          <el-date-picker
+            v-else-if="q.type === 7"
+            v-model="previewAnswers[q.id]"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择日期"
+            class="pv-date"
+          />
+
+          <!-- 多行文本 -->
+          <el-input
+            v-else-if="q.type === 4"
+            v-model="previewTexts[q.id]"
+            type="textarea"
+            :rows="3"
+            placeholder="填写者会在这里输入…"
+            maxlength="1000"
+          />
+
+          <!-- 单行文本 -->
+          <el-input
+            v-else
+            v-model="previewTexts[q.id]"
+            class="pv-input"
+            placeholder="填写者会在这里输入…"
+            maxlength="1000"
+          />
+        </div>
+
+        <p class="pv-footer-tip">预览只展示题面与选项；正式填写时的跳转、必填校验以发布后的页面为准。</p>
+      </div>
+    </el-dialog>
+
+    <!-- ===== 发布成功分享卡（替代单条 toast：链接 + 二维码 + 复制） ===== -->
+    <el-dialog v-model="shareVisible" title="🎉 发布成功" width="560px">
+      <p class="text-secondary">把下面的链接或二维码发给填写人，他们无需登录即可作答：</p>
+      <el-input v-model="shareLink" readonly class="share-link">
+        <template #append>
+          <el-button @click="copyShareLink">复制链接</el-button>
+        </template>
+      </el-input>
+      <div class="share-qr">
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="问卷二维码" />
+        <div v-else class="sk-block share-qr-sk"></div>
+        <p class="text-secondary">手机扫一扫直接填写</p>
+      </div>
+      <template #footer>
+        <el-button @click="shareVisible = false">关闭</el-button>
+        <el-button type="primary" @click="openSharePage">打开填写页</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import { ElMessage } from 'element-plus'
+// 发布成功后的分享卡用二维码（qrcode 已在依赖里，与 MySurveys 分享弹窗同一套用法）
+import QRCode from 'qrcode'
 // ★ 统一接口层：本页请求全部走 src/api/ ——
 //   接口路径、Authorization、成败判断、错误提示都收敛在 src/api/http.js，
 //   页面只关心"调哪个接口、拿到什么数据"。
 import api from '../api'
 // ★ 判断角色/读用户统一走 utils/auth（不要裸 JSON.parse localStorage）
 import { getUser } from '../utils/auth'
+// 题型元数据：数字必须与后端 common/QuestionType 一致（只追加、不复用）
+import {
+  RATING_LABELS, typeLabel, typeMeta, hasOptions, isMulti, isSingle
+} from '../utils/questionTypes'
+
+/** 自动草稿在 localStorage 里的键前缀（键 = 前缀 + 问卷 id） */
+const DRAFT_PREFIX = 'survey_draft_'
+/** 自动草稿的防抖间隔（毫秒）：连续输入时只在停下来后写一次 */
+const DRAFT_DEBOUNCE = 2000
 
 export default {
+  // ★ 必须用组件内的 beforeRouteLeave（Options API 支持）：watch '$route' 拿不到"即将离开"的时机。
+  //   dirty 只在"保存成功"后清掉，所以这里判断它是安全的。
+  //   （eslint 的 vue/order-in-components 要求路由守卫写在 data 之前）
+  beforeRouteLeave(to, from, next) {
+    if (!this.dirty) {
+      next()
+      return
+    }
+    this.$confirm('当前修改还没有保存，确定离开吗？', '有未保存的修改', {
+      confirmButtonText: '离开',
+      cancelButtonText: '留下',
+      type: 'warning'
+    }).then(() => next()).catch(() => next(false))
+  },
   data() {
     return {
       surveyId: null,
@@ -231,9 +522,54 @@ export default {
         endTime: null,
         // ★ 后端 findById **不过滤 deleted**，所以详情里带得回来；
         //   用来判断"这份问卷是不是在回收站里"（回收站里禁止编辑/保存/发布）
-        deleted: 0
+        deleted: 0,
+        // 服务端最后更新时间：用来判断自动草稿是否比服务端版本更新
+        updatedTime: null,
+        // ===== 问卷设置（设置弹窗里编辑，随「保存」一起提交）=====
+        accessPassword: '',
+        maxResponses: null,
+        thankText: '',
+        redirectUrl: '',
+        publicResult: 0
       },
       questions: [],
+
+      // ===== 设置弹窗 =====
+      settingsVisible: false,
+      /** 评分题的 5 档文案，模板里做「N 分 · 满意」的提示 */
+      ratingLabels: RATING_LABELS,
+
+      // ===== 未保存提示 / 保存状态 =====
+      /** 是否有未保存修改（标题、描述、题目、选项任意变化都会置 true，保存成功后清 false） */
+      dirty: false,
+      /** 正在用接口数据回填编辑器：期间不把变化算成"用户修改"，避免一进页面就显示未保存 */
+      hydrating: false,
+      /** 最近一次成功保存（或服务端更新时间）的时间戳 */
+      lastSavedAt: null,
+      /** 30 秒一跳的当前时间：让"已保存 · N 分钟前"能自己走 */
+      nowTick: Date.now(),
+      nowTimer: null,
+      /** 自动草稿定时器 / 自动草稿最后写入时间 */
+      draftTimer: null,
+
+      // ===== 拖拽排序 =====
+      /** 正在拖的题目下标 / 悬停到的题目下标 */
+      dragQIndex: null,
+      dragOverQIndex: null,
+      /** 正在拖的选项（'题下标-选项下标'）与悬停到的选项 */
+      dragOption: null,
+      dragOverOption: null,
+
+      // ===== 预览（填写者视角） =====
+      previewVisible: false,
+      /** 预览里的作答状态：只存在于本页内存，不会提交、也不会污染编辑态 */
+      previewAnswers: {},
+      previewTexts: {},
+
+      // ===== 发布成功分享卡 =====
+      shareVisible: false,
+      shareLink: '',
+      qrDataUrl: '',
       /**
        * 是否正在保存（门控）。
        * 保存首次是"预存 + 正式提交"两次往返，期间按钮若还可点，用户很容易连点出第二次保存 ——
@@ -284,16 +620,69 @@ export default {
     endExtended() {
       if (!this.surveyInfo.endTime) return true
       return new Date(String(this.surveyInfo.endTime).replace(/-/g, '/')).getTime() > Date.now()
+    },
+    /** 标题下方那行保存状态：保存中 / 有未保存修改 / 已保存 · 相对时间 */
+    saveStateText() {
+      if (this.saving) return '保存中…'
+      if (this.dirty) return '有未保存修改'
+      if (!this.lastSavedAt) return '尚未修改'
+      const diff = Math.max(0, this.nowTick - this.lastSavedAt)
+      if (diff < 60 * 1000) return '已保存 · 刚刚'
+      if (diff < 60 * 60 * 1000) return `已保存 · ${Math.floor(diff / 60000)} 分钟前`
+      if (diff < 24 * 60 * 60 * 1000) return `已保存 · ${Math.floor(diff / 3600000)} 小时前`
+      return `已保存 · ${new Date(this.lastSavedAt).toLocaleDateString('zh-CN')}`
+    },
+    saveStateClass() {
+      return {
+        'is-dirty': this.dirty && !this.saving,
+        'is-saving': this.saving
+      }
+    }
+  },
+  watch: {
+    // ★ 深度监听整份编辑态：标题 / 描述 / 时间 / 题目 / 选项任意一处变化都算"有未保存修改"，
+    //   同时触发自动草稿（2 秒防抖）。hydrating 期间（接口回填）不算修改。
+    surveyInfo: {
+      deep: true,
+      handler() {
+        this.markDirty()
+      }
+    },
+    questions: {
+      deep: true,
+      handler() {
+        this.markDirty()
+      }
     }
   },
   mounted() {
     this.surveyId = this.$route.params.id
+    // 刷新/关标签页前拦一下（浏览器只认返回字符串，提示文案由浏览器自己出）
+    window.addEventListener('beforeunload', this.handleBeforeUnload)
+    // 每 30 秒让"已保存 · N 分钟前"自己走字
+    this.nowTimer = setInterval(() => {
+      this.nowTick = Date.now()
+    }, 30000)
     if (this.surveyId) {
-      this.loadSurveyInfo()
-      this.loadQuestions()
+      this.init()
     }
   },
+  beforeUnmount() {
+    window.removeEventListener('beforeunload', this.handleBeforeUnload)
+    if (this.nowTimer) clearInterval(this.nowTimer)
+    if (this.draftTimer) clearTimeout(this.draftTimer)
+  },
   methods: {
+    /** 首次进入：并行拉问卷信息与题目 → 再问"要不要恢复草稿" */
+    async init() {
+      this.hydrating = true
+      await Promise.all([this.loadSurveyInfo(), this.loadQuestions()])
+      // 等 watch 的 flush 跑完再解除 hydrating，否则回填会被当成用户修改
+      await this.$nextTick()
+      this.hydrating = false
+      this.offerDraftRestore()
+    },
+
     async loadSurveyInfo() {
       try {
         const data = await api.survey.detail(this.surveyId)
@@ -305,8 +694,17 @@ export default {
           startTime: data.startTime,
           endTime: data.endTime,
           // ★ 带上 deleted —— 回收站里的问卷禁止保存/发布，页面要能判断并给出提示
-          deleted: data.deleted == null ? 0 : data.deleted
+          deleted: data.deleted == null ? 0 : data.deleted,
+          updatedTime: data.updatedTime || null,
+          // ===== 问卷设置（GET /api/survey/{id} 是作者接口，会带回真实密码）=====
+          accessPassword: data.accessPassword || '',
+          maxResponses: data.maxResponses == null ? null : data.maxResponses,
+          thankText: data.thankText || '',
+          redirectUrl: data.redirectUrl || '',
+          publicResult: data.publicResult === 1 ? 1 : 0
         }
+        // 服务端最后更新时间就是"上次保存时间"，进页面即可显示"已保存 · X"
+        this.lastSavedAt = this.toTimestamp(data.updatedTime) || null
       } catch {
         // ★ 失败提示已由 src/api/http.js 统一弹出（ElMessage.error），
         //   catch 只保留流程控制的位置（本场景无需额外处理，保持页面不变）。
@@ -334,7 +732,8 @@ export default {
     addQuestion(type) {
       // ★ 草稿阶段的题没有数据库 id，先发一个临时 id（负数），否则"跳转目标"下拉框无值可用。
       const newQ = { id: this.tempQuestionId--, type, title: '', required: 0, options: [] }
-      if (type === 1 || type === 2) {
+      // 单选 / 多选 / 下拉：都给两个空选项起步；评分 / 日期 / 文本类不需要选项
+      if (hasOptions(type)) {
         newQ.options = [{ content: '' }, { content: '' }]
       }
       this.questions.push(newQ)
@@ -350,6 +749,218 @@ export default {
 
     removeOption(qIndex, oIndex) {
       this.questions[qIndex].options.splice(oIndex, 1)
+    },
+
+    // ==================== 未保存状态 / 自动草稿 ====================
+
+    /** 任何编辑动作都会走到这里：标记 dirty + 排一次自动草稿 */
+    markDirty() {
+      if (this.hydrating) return
+      this.dirty = true
+      this.scheduleDraftSave()
+    },
+
+    /** 自动草稿：2 秒防抖（连续输入只在停下来后写一次，避免每敲一个字读一次 localStorage） */
+    scheduleDraftSave() {
+      if (!this.surveyId) return
+      if (this.draftTimer) clearTimeout(this.draftTimer)
+      this.draftTimer = setTimeout(this.saveDraft, DRAFT_DEBOUNCE)
+    },
+
+    saveDraft() {
+      this.draftTimer = null
+      if (!this.surveyId || !this.dirty) return
+      try {
+        // ★ 答题密码**不写进本地草稿**：localStorage 是明文、且可能多人共用同一台机器。
+        //   草稿恢复时本来就只回填标题/描述/起止时间（见 offerDraftRestore），
+        //   即使不存密码也不会丢"设置"（设置随保存走服务端）。
+        const info = { ...this.surveyInfo }
+        delete info.accessPassword
+        const payload = {
+          savedAt: Date.now(),
+          surveyInfo: info,
+          questions: this.questions
+        }
+        localStorage.setItem(DRAFT_PREFIX + this.surveyId, JSON.stringify(payload))
+      } catch {
+        // 本地存储被禁用/写满：自动草稿失效，但编辑与保存不受影响（不打扰用户）
+      }
+    },
+
+    /**
+     * 进页面时问一次"要不要恢复上次没保存的草稿"。
+     * 只有草稿比服务端版本更新才问 —— 否则在别的设备上保存过之后，
+     * 旧草稿会把新内容覆盖回去。
+     */
+    async offerDraftRestore() {
+      const key = DRAFT_PREFIX + this.surveyId
+      let draft
+      try {
+        const raw = localStorage.getItem(key)
+        draft = raw ? JSON.parse(raw) : null
+      } catch {
+        localStorage.removeItem(key)
+        return
+      }
+      if (!draft || !draft.savedAt || !Array.isArray(draft.questions)) return
+      const serverTime = this.toTimestamp(this.surveyInfo.updatedTime)
+      if (serverTime && draft.savedAt <= serverTime) {
+        // 服务端已经是更新的版本：草稿过期，直接丢弃
+        this.clearDraft()
+        return
+      }
+      try {
+        await this.$confirm(
+          `检测到上次未保存的草稿（${this.formatDraftTime(draft.savedAt)}），要恢复吗？` +
+          '恢复后请记得点「保存」；选择"丢弃草稿"则会删掉它。',
+          '恢复草稿',
+          { confirmButtonText: '恢复草稿', cancelButtonText: '丢弃草稿', type: 'info' }
+        )
+      } catch {
+        this.clearDraft()
+        return
+      }
+      // 只恢复可编辑字段：status / shareCode / deleted 必须以后端为准
+      const info = draft.surveyInfo || {}
+      this.hydrating = true
+      this.surveyInfo = {
+        ...this.surveyInfo,
+        title: info.title || '',
+        description: info.description || '',
+        startTime: info.startTime || null,
+        endTime: info.endTime || null
+      }
+      this.questions = this.normalizeQuestions(draft.questions)
+      await this.$nextTick()
+      this.hydrating = false
+      this.dirty = true
+      ElMessage.success('草稿已恢复，记得点「保存」')
+    },
+
+    clearDraft() {
+      try {
+        localStorage.removeItem(DRAFT_PREFIX + this.surveyId)
+      } catch {
+        // 忽略：清不掉也不影响功能
+      }
+    },
+
+    /** 保存成功后：清 dirty、记时间、丢掉本地草稿 */
+    markSaved() {
+      this.dirty = false
+      this.lastSavedAt = Date.now()
+      this.nowTick = this.lastSavedAt
+      // 本次提交会触发 watch（id/sortOrder 变化），用 hydrating 挡掉，避免又变成"有未保存修改"
+      this.hydrating = true
+      this.$nextTick(() => {
+        this.hydrating = false
+      })
+      this.clearDraft()
+    },
+
+    /** "YYYY-MM-DD HH:mm:ss" → 时间戳（Safari 不认带 '-' 的格式，统一换成 '/'） */
+    toTimestamp(value) {
+      if (!value) return 0
+      if (typeof value === 'number') return value
+      const t = new Date(String(value).replace(/-/g, '/')).getTime()
+      return Number.isNaN(t) ? 0 : t
+    },
+
+    formatDraftTime(ts) {
+      return new Date(ts).toLocaleString('zh-CN', { hour12: false })
+    },
+
+    /** 刷新/关标签页前的兜底提示（浏览器不允许自定义文案） */
+    handleBeforeUnload(e) {
+      if (!this.dirty) return
+      e.preventDefault()
+      e.returnValue = ''
+    },
+
+    // ==================== 拖拽排序（题目 / 选项） ====================
+
+    /**
+     * 从输入框里按下鼠标时不要开始拖拽，否则没法正常选中文字/拖选内容。
+     * （卡片整体 draggable="true"，这一步是必须的护栏）
+     */
+    isTextEditing(e) {
+      const el = e && e.target
+      return Boolean(el && el.closest && el.closest('input, textarea, .el-select, .el-input'))
+    },
+
+    onQuestionDragStart(index, e) {
+      if (this.isTextEditing(e)) {
+        e.preventDefault()
+        return
+      }
+      this.dragQIndex = index
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        // Firefox 必须 setData 才会真正开始拖拽
+        e.dataTransfer.setData('text/plain', String(index))
+      }
+    },
+
+    onQuestionDragOver(index) {
+      if (this.dragQIndex === null) return
+      this.dragOverQIndex = index
+    },
+
+    onQuestionDragLeave(index) {
+      if (this.dragOverQIndex === index) this.dragOverQIndex = null
+    },
+
+    onQuestionDrop(index) {
+      const from = this.dragQIndex
+      this.resetDragState()
+      if (from === null || from === index) return
+      const moved = this.questions.splice(from, 1)[0]
+      this.questions.splice(index, 0, moved)
+      // 保存时 saveQuestions 按数组顺序写 sortOrder，所以这里不需要碰后端
+    },
+
+    onOptionDragStart(qIndex, oIndex, e) {
+      if (this.isTextEditing(e)) {
+        e.preventDefault()
+        return
+      }
+      this.dragOption = `${qIndex}-${oIndex}`
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move'
+        e.dataTransfer.setData('text/plain', `${qIndex}-${oIndex}`)
+      }
+    },
+
+    onOptionDragOver(qIndex, oIndex) {
+      if (!this.dragOption) return
+      this.dragOverOption = `${qIndex}-${oIndex}`
+    },
+
+    onOptionDrop(qIndex, oIndex) {
+      const from = this.dragOption
+      this.resetDragState()
+      if (!from) return
+      const [fromQ, fromO] = from.split('-').map(Number)
+      // 只允许同一题内部排序：跨题拖动会把选项"搬"到另一题，语义不明确
+      if (fromQ !== qIndex || fromO === oIndex) return
+      const opts = this.questions[qIndex].options
+      const moved = opts.splice(fromO, 1)[0]
+      opts.splice(oIndex, 0, moved)
+    },
+
+    onDragEnd() {
+      this.resetDragState()
+    },
+
+    resetDragState() {
+      this.dragQIndex = null
+      this.dragOverQIndex = null
+      this.dragOption = null
+      this.dragOverOption = null
+    },
+
+    isDraggingOption(qIndex, oIndex) {
+      return this.dragOption === `${qIndex}-${oIndex}`
     },
 
     /**
@@ -393,7 +1004,14 @@ export default {
           title: this.surveyInfo.title,
           description: this.surveyInfo.description,
           startTime: this.surveyInfo.startTime,
-          endTime: this.surveyInfo.endTime
+          endTime: this.surveyInfo.endTime,
+          // ★ 问卷设置：后端 update 是**静态 SQL**，没传的字段会被写成 NULL。
+          //   所以这里必须每次带上全量设置（留空 = 关闭该功能，是后端的既定语义）。
+          accessPassword: this.surveyInfo.accessPassword || null,
+          maxResponses: this.surveyInfo.maxResponses ?? null,
+          thankText: this.surveyInfo.thankText || null,
+          redirectUrl: this.surveyInfo.redirectUrl || null,
+          publicResult: this.surveyInfo.publicResult === 1 ? 1 : 0
         })
 
         // 2. 保存题目
@@ -416,6 +1034,8 @@ export default {
         // 重发一次就能救回来 —— 否则用户以为没保存，再点一次反而要走完整流程。
         const idItems = await this.saveWithRetry()
         this.applyServerIdOrder(idItems)
+        // ★ 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿
+        this.markSaved()
         ElMessage.success('保存成功')
         return true
       } catch {
@@ -481,8 +1101,6 @@ export default {
       }
       throw lastError
     },
-
-    /**
 
     /**
      * 让**所有题目**都拥有真实的数据库 id（草稿阶段只有前端发的临时 id，从 -1000 递减）。
@@ -558,6 +1176,54 @@ export default {
       }
     },
 
+    // ===== 预览（填写者视角） =====
+
+    /**
+     * 打开预览：把当前编辑态初始化成一份可点选的"假答卷"。
+     * ★ 每次打开都重置：题号/题目会变，残留上次的选择会让人以为"数据串了"。
+     * ★ 预览只是把题面渲染一遍，跳转逻辑不模拟 —— 那要跑真实的答题路径，
+     *   弹窗里做既容易和填写页逻辑不一致，也会误导用户"预览里这样，发布后就一定这样"。
+     */
+    openPreview() {
+      const answers = {}
+      const texts = {}
+      this.questions.forEach(q => {
+        if (q.type === 2) answers[q.id] = []
+        else if (q.type === 1 || q.type === 5 || q.type === 6 || q.type === 7) answers[q.id] = ''
+        else texts[q.id] = ''
+      })
+      this.previewAnswers = answers
+      this.previewTexts = texts
+      this.previewVisible = true
+    },
+
+    // ===== 题型展示（模板里不写 type === 1 这类魔数）=====
+    qTypeLabel(type) {
+      return typeLabel(type)
+    },
+    qTypeTag(type) {
+      return typeMeta(type).tag
+    },
+    /** 选项行左侧的小图标：单选✓、多选▣、下拉⌄ */
+    qOptionIcon(type) {
+      if (type === 2) return 'Select'
+      if (type === 5) return 'ArrowDown'
+      return 'CircleCheck'
+    },
+    qHasOptions(type) {
+      return hasOptions(type)
+    },
+    qIsMulti(type) {
+      return isMulti(type)
+    },
+    qIsSingle(type) {
+      return isSingle(type)
+    },
+    openPublicResult() {
+      if (!this.surveyInfo.shareCode) return
+      window.open(`/r/${this.surveyInfo.shareCode}`, '_blank')
+    },
+
     // ===== 历史版本 =====
 
     async openVersions() {
@@ -615,13 +1281,42 @@ export default {
         if (data && data.shareCode) {
           this.surveyInfo.status = 1
           this.surveyInfo.shareCode = data.shareCode
-          ElMessage.success((wasEnded ? '已重新发布' : '发布成功') + '！分享码：' + data.shareCode)
+          // ★ 发布前已保存成功：状态是干净的（不弹"未保存"提示），并显示分享卡而不是单条 toast
+          this.markSaved()
+          this.showShareCard()
+          ElMessage.success(wasEnded ? '已重新发布' : '发布成功')
         } else {
           ElMessage.error('发布失败')
         }
       } catch {
         // 失败提示由 src/api/http.js 统一弹出
       }
+    },
+
+    /** 发布成功后的分享卡：链接 + 二维码（生成失败只少一张图，不影响复制链接） */
+    async showShareCard() {
+      this.shareLink = `${window.location.origin}/s/${this.surveyInfo.shareCode}`
+      this.qrDataUrl = ''
+      this.shareVisible = true
+      try {
+        this.qrDataUrl = await QRCode.toDataURL(this.shareLink, { width: 360, margin: 1 })
+      } catch {
+        this.qrDataUrl = ''
+      }
+    },
+
+    copyShareLink() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(this.shareLink)
+          .then(() => ElMessage.success('链接已复制'))
+          .catch(() => ElMessage.warning('复制失败，请手动选择复制'))
+      } else {
+        ElMessage.warning('复制失败，请手动选择复制')
+      }
+    },
+
+    openSharePage() {
+      window.open(this.shareLink, '_blank')
     },
 
     goBack() {
@@ -635,3 +1330,544 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.edit-page {
+  max-width: 960px;
+  margin: 0 auto;
+}
+.page-subtitle {
+  margin: 6px 0 0 15px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.edit-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.card-title {
+  font-weight: 600;
+}
+.meta-card :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+.meta-card :deep(.el-form-item:last-child) {
+  margin-bottom: 4px;
+}
+
+/* ==================== 空态 ==================== */
+.empty-questions {
+  text-align: center;
+  padding: 48px 20px;
+  background: #fff;
+  border: 1px dashed var(--stroke-strong);
+  border-radius: var(--r-lg);
+}
+.empty-emoji {
+  font-size: 40px;
+  line-height: 1;
+}
+.empty-title {
+  margin-top: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.empty-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* ==================== 题目卡 ==================== */
+.q-card {
+  border-radius: var(--r-lg);
+}
+.q-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.q-index {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--brand-gradient);
+  box-shadow: 0 6px 14px rgba(47, 128, 237, 0.25);
+  flex-shrink: 0;
+}
+.q-spacer {
+  flex: 1;
+}
+.q-title-input :deep(.el-input__wrapper) {
+  background: #f8fbff;
+  border: 1px solid #eef4fd;
+  border-radius: 12px;
+  box-shadow: none;
+}
+.q-title-input :deep(.el-input__inner) {
+  height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ==================== 选项 ==================== */
+.q-options {
+  margin-top: 16px;
+}
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  transition: background 0.18s var(--ease);
+}
+.option-row:hover {
+  background: #f7fbff;
+}
+.option-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sky-50);
+  color: var(--sky-600);
+  flex-shrink: 0;
+}
+.option-input {
+  flex: 1;
+  max-width: 420px;
+}
+.option-jump {
+  width: 158px;
+  flex-shrink: 0;
+}
+.option-hint {
+  margin: 6px 0 0 36px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.add-option {
+  margin: 12px 0 0 36px;
+}
+
+/* ==================== 底部添加题目 ==================== */
+.add-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+.add-bar-title {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+/* 7 种题型：网格自动换行，不再挤成一行小方块 */
+.add-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.add-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 0.2s var(--ease),
+    box-shadow 0.2s var(--ease);
+}
+.add-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.add-single {
+  background: #eaf3ff;
+  border-color: #d5e7ff;
+  color: #1d4ed8;
+}
+.add-multi {
+  background: #fff6e8;
+  border-color: #ffe6bf;
+  color: #b45309;
+}
+.add-text-tile {
+  background: #e9f9ef;
+  border-color: #cdf2dc;
+  color: #15803d;
+}
+/* 下拉：与单选同色系，靠图标区分 */
+.add-select {
+  background: #eaf3ff;
+  border-color: #d5e7ff;
+  color: #1d4ed8;
+}
+/* 多行文本：文本类绿色 */
+.add-textarea {
+  background: #e9f9ef;
+  border-color: #cdf2dc;
+  color: #15803d;
+}
+/* 评分：琥珀色（与"多选"同族，都是需要打分的题型） */
+.add-rating {
+  background: #fff6e8;
+  border-color: #ffe6bf;
+  color: #b45309;
+}
+/* 日期：中性青灰，避免和上面几类撞色 */
+.add-date {
+  background: #e7fbff;
+  border-color: #cdf0fa;
+  color: #0e7490;
+}
+.add-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.add-text b {
+  display: block;
+  font-size: 14px;
+}
+.add-text i {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+/* ==================== 保存状态 / 拖拽 ==================== */
+.save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--ink-3);
+  background: #f1f5fb;
+}
+.save-state::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #16a34a;
+}
+.save-state.is-dirty {
+  color: #b45309;
+  background: #fff6e8;
+}
+.save-state.is-dirty::before {
+  background: #f59e0b;
+}
+.save-state.is-saving {
+  color: var(--sky-600);
+  background: var(--sky-50);
+}
+.save-state.is-saving::before {
+  background: var(--sky-500);
+  animation: state-pulse 1s ease infinite;
+}
+@keyframes state-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  margin-left: -4px;
+  border-radius: 8px;
+  color: var(--ink-3);
+  cursor: grab;
+  transition:
+    color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+.drag-handle:hover {
+  color: var(--sky-600);
+  background: var(--sky-50);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.q-card.is-dragging,
+.option-row.is-dragging {
+  opacity: 0.5;
+}
+.q-card.is-drag-over {
+  border-color: var(--sky-400);
+  box-shadow: 0 0 0 2px var(--sky-100);
+}
+.option-row.is-drag-over {
+  background: var(--sky-50);
+  box-shadow: inset 0 2px 0 var(--sky-400);
+}
+
+html[data-theme="dark"] .save-state {
+  background: #16243a;
+  color: #8fa0b8;
+}
+html[data-theme="dark"] .save-state.is-dirty {
+  background: #2a2113;
+  color: #fbbf24;
+}
+html[data-theme="dark"] .save-state.is-saving {
+  background: #12233c;
+  color: #8ab8f7;
+}
+html[data-theme="dark"] .drag-handle:hover {
+  background: #16243a;
+}
+html[data-theme="dark"] .option-row.is-drag-over {
+  background: #16263f;
+}
+
+/* ==================== 发布成功分享卡 ==================== */
+.share-link {
+  margin-top: 10px;
+}
+.share-qr {
+  margin-top: 18px;
+  text-align: center;
+}
+.share-qr img {
+  width: 180px;
+  height: 180px;
+  padding: 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: #fff;
+}
+.share-qr-sk {
+  width: 180px;
+  height: 180px;
+  margin: 0 auto;
+}
+.share-qr p {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+/* ==================== 问卷设置 ==================== */
+.settings-form :deep(.el-form-item__content) {
+  flex-wrap: wrap;
+}
+.setting-hint {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+.setting-inline {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.setting-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* ==================== 预览（填写者视角） ==================== */
+.pv-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pv-header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pv-body {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 2px 4px 6px;
+}
+.pv-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.2px;
+}
+.pv-desc {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.pv-desc-empty {
+  opacity: 0.7;
+}
+.pv-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--ink-3);
+}
+.pv-question {
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  background: #fff;
+}
+.pv-q-title {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.pv-index {
+  color: var(--sky-600);
+  flex-shrink: 0;
+}
+.pv-required {
+  color: #ef4444;
+}
+.pv-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pv-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.16s var(--ease);
+}
+.pv-option:hover {
+  background: #f6faff;
+}
+.pv-option input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: var(--sky-500);
+  cursor: pointer;
+}
+.pv-option-text {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.pv-input {
+  max-width: 420px;
+}
+.pv-select {
+  max-width: 320px;
+}
+.pv-date {
+  max-width: 220px;
+}
+.pv-rating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pv-star {
+  font-size: 26px;
+  line-height: 1;
+  color: #d8e3f3;
+  cursor: pointer;
+  transition:
+    color 0.16s var(--ease),
+    transform 0.16s var(--ease);
+}
+.pv-star:hover {
+  transform: scale(1.12);
+}
+.pv-star.on {
+  color: #f59e0b;
+}
+.pv-rating-text {
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.pv-footer-tip {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+html[data-theme="dark"] .pv-question {
+  background: #101d31;
+  border-color: #1d2c44;
+}
+html[data-theme="dark"] .pv-option:hover {
+  background: #16263f;
+}
+
+@media (max-width: 900px) {
+  .edit-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .add-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .add-actions {
+    flex-wrap: wrap;
+  }
+  .option-row {
+    flex-wrap: wrap;
+  }
+}
+</style>

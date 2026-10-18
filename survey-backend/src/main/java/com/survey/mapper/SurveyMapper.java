@@ -42,12 +42,17 @@ public interface SurveyMapper {
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Survey survey);
 
-    /** 移入回收站（逻辑删除）：deleted=1 并记下操作人，回收站页面据此显示"谁删的"。 */
-    @Update("UPDATE t_survey SET deleted = 1, deleted_by = #{userId} WHERE id = #{id}")
+    /**
+     * 移入回收站（逻辑删除）：deleted=1，记下操作人和删除时间。
+     * ★ deleted_at 是回收站列表要展示的"什么时候删的"；显式写 NOW()，
+     *   不依赖 updated_time 的 ON UPDATE 推断（虽然此刻两者相等）。
+     */
+    @Update("UPDATE t_survey SET deleted = 1, deleted_by = #{userId}, deleted_at = NOW() " +
+            "WHERE id = #{id}")
     int moveToRecycle(@Param("id") Integer id, @Param("userId") Integer userId);
 
-    /** 从回收站恢复：deleted=0 并清掉操作人信息。 */
-    @Update("UPDATE t_survey SET deleted = 0, deleted_by = NULL WHERE id = #{id}")
+    /** 从回收站恢复：deleted=0，清掉操作人信息与删除时间。 */
+    @Update("UPDATE t_survey SET deleted = 0, deleted_by = NULL, deleted_at = NULL WHERE id = #{id}")
     int restoreFromRecycle(Integer id);
 
     /** 物理删除。★ 不级联删题目/答卷，优先走回收站那条路径。 */
@@ -55,7 +60,8 @@ public interface SurveyMapper {
     int deleteById(Integer id);
 
     /**
-     * 更新问卷的**可编辑字段**：标题 / 描述 / 开始时间 / 结束时间。
+     * 更新问卷的**可编辑字段**：标题 / 描述 / 开始时间 / 结束时间 + 问卷设置
+     * （答题密码 / 限量 / 感谢语 / 跳转链接 / 公开结果）。
      *
      * ★★ SET 列表里**故意不含**这些字段（不变量由 SQL 本身保证）：
      *     · user_id    → 归属只在创建时确定，任何更新都不该改它（连"转移问卷"都不提供）
@@ -69,12 +75,16 @@ public interface SurveyMapper {
      *   那条约束只写在注释里，谁忘了写、或以后新加一个调用方，就会重演一次事故。
      *   现在从 SQL 层就碰不到这几个字段 —— **忘了回填也不会出错**，约束由代码保证，不再依赖谁记得看注释。
      *
-     * ★ 它仍是静态 SQL（不是动态更新）：标题/描述/起止时间传 null 会写成 NULL。
+     * ★ 它仍是静态 SQL（不是动态更新）：标题/描述/起止时间/设置传 null 会写成 NULL。
      *   这是**有意保留**的语义 —— 起止时间需要能被清空（前端把时间输入框清掉时传 null）；
-     *   如果改成"只更新非 null"，反而会丢掉"清空截止时间"的能力。
+     *   答题密码 / 限量 / 感谢语 / 跳转链接同理（清空 = 关闭该功能）。
+     *   public_result 用 IFNULL 兜底成 0，避免旧客户端不传时把"公开结果"写成 NULL。
      */
     @Update("UPDATE t_survey SET title=#{title}, description=#{description}, " +
-            "start_time=#{startTime}, end_time=#{endTime} WHERE id=#{id}")
+            "start_time=#{startTime}, end_time=#{endTime}, " +
+            "access_password=#{accessPassword}, max_responses=#{maxResponses}, " +
+            "thank_text=#{thankText}, redirect_url=#{redirectUrl}, " +
+            "public_result=IFNULL(#{publicResult}, 0) WHERE id=#{id}")
     int update(Survey survey);
 
     /**
@@ -261,6 +271,7 @@ public interface SurveyMapper {
             @Result(property = "startTime", column = "start_time"),
             @Result(property = "endTime", column = "end_time"),
             @Result(property = "viewCount", column = "view_count"),
+            @Result(property = "deletedAt", column = "deleted_at"),
             @Result(property = "createdTime", column = "created_time"),
             @Result(property = "updatedTime", column = "updated_time")
     })
@@ -285,6 +296,7 @@ public interface SurveyMapper {
             @Result(property = "startTime", column = "start_time"),
             @Result(property = "endTime", column = "end_time"),
             @Result(property = "viewCount", column = "view_count"),
+            @Result(property = "deletedAt", column = "deleted_at"),
             @Result(property = "createdTime", column = "created_time"),
             @Result(property = "updatedTime", column = "updated_time")
     })

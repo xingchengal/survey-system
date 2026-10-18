@@ -77,7 +77,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   {@code mock-maker-subclass}（沙箱禁 Attach API）。Mapper 全是接口，不受影响。
  *
  * ── 维护口径 ───────────────────────────────────────────
- *   ALL_ENDPOINTS 是"73"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
+ *   ALL_ENDPOINTS 是"74"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
  *   docs/问卷系统-端点权限审计表.md 与《交接文档》的端点数。
  */
@@ -96,9 +96,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EndpointAuthMatrixTest {
 
-    // ==================== 一、73 个端点的三档分类（与审计表逐条对应） ====================
+    // ==================== 一、74 个端点的三档分类（与审计表逐条对应） ====================
 
-    /** 公开档 11 条（JwtAuthFilter 白名单）。 */
+    /** 公开档 12 条（JwtAuthFilter 白名单）。 */
     private static final Set<String> PUBLIC = Set.of(
             "POST /api/user/register",
             "POST /api/user/login",
@@ -106,6 +106,7 @@ class EndpointAuthMatrixTest {
             "GET /api/captcha/slider",
             "POST /api/captcha/verify",
             "GET /api/survey/share/{shareCode}",
+            "GET /api/survey/result/{shareCode}",
             "POST /api/survey/view/{shareCode}",
             "GET /api/question/list/{surveyId}",
             "POST /api/answer/submit-share/{shareCode}",
@@ -137,7 +138,7 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 73 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 74 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
             "DELETE /api/announcement/delete/{id}",
             "DELETE /api/demo/reset",
@@ -171,6 +172,7 @@ class EndpointAuthMatrixTest {
             "GET /api/survey/my-statistics",
             "GET /api/survey/page",
             "GET /api/survey/recycle/page",
+            "GET /api/survey/result/{shareCode}",
             "GET /api/survey/share/{shareCode}",
             "GET /api/survey/system-overview",
             "GET /api/survey/templates",
@@ -327,18 +329,18 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 73；且公开 11 + 管理 20 + 其余 42")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 74；且公开 12 + 管理 20 + 其余 42")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(73, registered.size(),
+        assertEquals(74, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
-        assertEquals(11, PUBLIC.size(), "公开档固定 11 条（JwtAuthFilter 白名单 10 分支 / 11 端点）");
+        assertEquals(12, PUBLIC.size(), "公开档固定 12 条（新增 GET /api/survey/result/{shareCode}）");
         assertEquals(20, ADMIN.size(), "管理档固定 20 条（@RequireAdmin 方法级 + 类级）");
-        assertEquals(73 - 11 - 20, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
+        assertEquals(74 - 12 - 20, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
         // 两档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");

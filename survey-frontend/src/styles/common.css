@@ -134,10 +134,15 @@
   max-width: 500px;
 }
 
-/** 表格下方的分页行（原来内联 display:flex; justify-content:flex-end; margin-top:16px） */
+/** 表格下方的分页行（原来内联 display:flex; justify-content:flex-end; margin-top:16px）
+    ★ 一定要允许换行：el-pagination 自己 `display:flex; white-space:nowrap` 且**不换行**，
+      窄屏（768）上"共 N 条 + 条/页 + 页码 + 前往"会顶出一整页横向滚动条。 */
 .pager-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px 12px;
   margin-top: 16px;
 }
 

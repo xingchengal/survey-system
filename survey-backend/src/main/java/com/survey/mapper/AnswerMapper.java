@@ -58,6 +58,25 @@ public interface AnswerMapper {
     List<Map<String, Object>> countBySurveyIds(@Param("ids") List<Integer> ids);
 
     /**
+     * 某个用户**近 7 天**每天的答卷数（个人看板的迷你趋势）。
+     *
+     * ★ 口径：只算这个用户名下、非模板的问卷收到的答卷；按 t_answer.submit_time 的自然日聚合。
+     * ★ 返回：List<Map>，每个 Map 形如 { d: '2026-10-18', cnt: 3 }。
+     *   日期用 DATE_FORMAT 直接格式化成字符串，避免 JDBC 把 DATE 映射成 java.sql.Date /
+     *   LocalDate 时不同驱动返回类型不一致（调用方只需 toString）。
+     * ★ 没有答卷的那天不会出现在结果里 —— 补齐 7 天由调用方（Service）负责。
+     *
+     * @param userId 当前登录用户 id（问卷归属）
+     */
+    @Select("SELECT DATE_FORMAT(a.submit_time, '%Y-%m-%d') AS d, COUNT(*) AS cnt " +
+            "FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
+            "WHERE s.user_id = #{userId} AND (s.is_template IS NULL OR s.is_template = 0) " +
+            "AND s.deleted = 0 " +
+            "AND a.submit_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) " +
+            "GROUP BY DATE_FORMAT(a.submit_time, '%Y-%m-%d')")
+    List<Map<String, Object>> countDailyByUserId(@Param("userId") Integer userId);
+
+    /**
      * 写入质控标记（提交那一刻算好，在**同一事务**里回写）。
      *
      * ★ 只算一次、不重算历史：规则以后调整（比如把"每题 1.5 秒"改成 2 秒）时，

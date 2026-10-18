@@ -1,5 +1,5 @@
 <template>
-  <div style="max-width: 800px; margin: 0 auto;">
+  <div class="demo-page">
     <el-card>
       <template #header>
         <div class="flex-center">
@@ -16,7 +16,7 @@
         「重置」按钮会<strong>清空所有演示数据</strong>。
       </el-alert>
 
-      <div style="padding: 16px; background: #fafbfc; border-radius: 8px; margin-bottom: 16px;">
+      <div class="demo-info-box">
         <h4 style="margin: 0 0 12px 0;">📦 每次生成将添加：</h4>
         <el-descriptions :column="1" border>
           <el-descriptions-item label="测试用户">20 个（demo_userN，密码 123456）</el-descriptions-item>
@@ -34,7 +34,7 @@
         </el-button>
       </div>
 
-      <el-card v-if="initResult" shadow="never" style="margin-top: 20px; background: #f0f9eb; border-color: #67c23a;">
+      <el-card v-if="initResult" shadow="never" class="demo-result">
         <div style="display: flex; align-items: center; margin-bottom: 12px;">
           <el-icon style="color: #67c23a; font-size: 20px; margin-right: 8px;"><SuccessFilled /></el-icon>
           <span style="font-weight: bold; color: #67c23a;">{{ initResult.message }}</span>
@@ -142,3 +142,29 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+.demo-page {
+  max-width: 800px;
+  margin: 0 auto;
+}
+.demo-info-box {
+  padding: 16px;
+  margin-bottom: 16px;
+  background: #fafbfc;
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+}
+.demo-result {
+  margin-top: 20px;
+  background: #f0f9eb;
+  border-color: #67c23a;
+}
+html[data-theme="dark"] .demo-info-box {
+  background: #13223a;
+}
+html[data-theme="dark"] .demo-result {
+  background: #102a21;
+  border-color: #1f5c3d;
+}
+</style>

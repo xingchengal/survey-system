@@ -44,4 +44,19 @@ public record SurveyStatisticsDTO(
             List<Map<String, Object>> chartData,
             List<String> textAnswers) {
     }
+
+    /**
+     * 公开结果页用的**脱敏副本**：丢掉所有填空题/多行文本的原文。
+     *
+     * ★ 为什么必须脱敏：填空题里经常有手机号、姓名、住址。作者开启"公开结果"时
+     *   想公开的是**汇总分布**，不是每一份原始回答。选项分布本身不含个人信息，保留。
+     */
+    public SurveyStatisticsDTO withoutTextAnswers() {
+        List<QuestionStats> sanitized = questions == null
+                ? List.of()
+                : questions.stream()
+                        .map(q -> new QuestionStats(q.question(), q.chartData(), null))
+                        .collect(java.util.stream.Collectors.toList());
+        return new SurveyStatisticsDTO(surveyId, title, answerCount, sanitized);
+    }
 }

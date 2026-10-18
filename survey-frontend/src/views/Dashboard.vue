@@ -2,7 +2,7 @@
   <div>
     <!-- 顶部 6 个数据卡片 -->
     <el-row :gutter="16">
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#ecf5ff;color:#409eff;">
             <el-icon :size="26"><UserFilled /></el-icon>
@@ -13,7 +13,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#f0f9eb;color:#67c23a;">
             <el-icon :size="26"><Document /></el-icon>
@@ -24,7 +24,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#fdf6ec;color:#e6a23c;">
             <el-icon :size="26"><Promotion /></el-icon>
@@ -35,7 +35,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#fef0f0;color:#f56c6c;">
             <el-icon :size="26"><ChatDotRound /></el-icon>
@@ -46,7 +46,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#f4f0ff;color:#8e44ad;">
             <el-icon :size="26"><View /></el-icon>
@@ -57,7 +57,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="4">
+      <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
           <div class="stat-icon" style="background:#e8f6ff;color:#12b0e8;">
             <el-icon :size="26"><PieChart /></el-icon>
@@ -72,7 +72,7 @@
 
     <!-- 中间：状态分布图 + 系统信息 -->
     <el-row class="mt-20 equal-height-row" :gutter="20">
-      <el-col :span="10">
+      <el-col :span="10" :xs="24" :sm="24" :md="10">
         <!-- ★ 两栏等高由 .equal-height-row 的 flex 拉伸保证（见 <style>）：
              原先两边都写死 500px，右侧技术栈 + 功能标签超出卡片高度、
              被 el-card 的 overflow:hidden 裁掉（"核心功能"只露一行） -->
@@ -85,7 +85,7 @@
         </el-card>
       </el-col>
 
-      <el-col :span="14">
+      <el-col :span="14" :xs="24" :sm="24" :md="14">
         <!-- ★ 不写死高度：内容有多长卡片就多长，避免新加的技术栈/功能标签被裁掉 -->
         <el-card>
           <template #header>
@@ -177,28 +177,28 @@
         <span class="text-bold">⚡ 快捷操作</span>
       </template>
       <el-row :gutter="16">
-        <el-col :span="6">
+        <el-col :span="6" :xs="12" :sm="12" :md="6">
           <div class="quick-action" @click="$router.push('/users')">
             <el-icon :size="32" color="#409eff"><UserFilled /></el-icon>
             <div class="text-subtitle">用户管理</div>
             <div class="text-hint">查看 / 删除用户</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="6" :xs="12" :sm="12" :md="6">
           <div class="quick-action" @click="$router.push('/admin/surveys')">
             <el-icon :size="32" color="#67c23a"><Document /></el-icon>
             <div class="text-subtitle">全部问卷</div>
             <div class="text-hint">查看 / 删除违规</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="6" :xs="12" :sm="12" :md="6">
           <div class="quick-action" @click="$router.push('/statistics')">
             <el-icon :size="32" color="#e6a23c"><PieChart /></el-icon>
             <div class="text-subtitle">系统统计</div>
             <div class="text-hint">图表 / 排行</div>
           </div>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="6" :xs="12" :sm="12" :md="6">
           <div class="quick-action" @click="$router.push('/admin/logs')">
             <el-icon :size="32" color="#f56c6c"><Memo /></el-icon>
             <div class="text-subtitle">系统监控</div>
@@ -219,6 +219,10 @@ import echarts from '../utils/echarts'
 //   `misc` 命名导出提升到了顶层（与 operationLog/errorLog 同款），本项目的约定是扁平写法。
 //   （写法约定见 src/api/index.js 顶部"命名约定"那段。）
 import api from '../api'
+import {
+  chartText, chartTooltip, THEME_EVENT,
+  chartPalette, chartColor, chartNum, chartPct
+} from '../utils/chartTheme'
 // ★ 失败提示由 src/api/http.js 统一弹出，所以本文件不需要 import ElMessage
 //   （不需要的 import 会触发 no-unused-vars 警告）。
 //   ⚠️ 判断依据（别只看注释）：模板标签 <Xxx /> 或 <component :is="'Xxx'"> 走全局注册；
@@ -257,12 +261,15 @@ export default {
     this.loadStats()
     this.checkHealth()
     this.healthTimer = setInterval(this.checkHealth, 5000)
+    // 深/浅色切换后重画饼图（canvas 读不到 CSS 变量）
+    window.addEventListener(THEME_EVENT, this.handleThemeChange)
   },
   beforeUnmount() {
     if (this.pieChart) this.pieChart.dispose()
     // ★ resize 监听必须成对移除（否则每进一次本页就永久多一个监听，
     //   还会对已 dispose 的实例调 resize）。写法与 SystemStatistics.vue 一致。
     window.removeEventListener('resize', this.handleResize)
+    window.removeEventListener(THEME_EVENT, this.handleThemeChange)
     if (this.healthTimer) clearInterval(this.healthTimer)
   },
   methods: {
@@ -308,6 +315,11 @@ export default {
       }
     },
 
+    /** 主题切换：用新配色重画（canvas 读不到 CSS 变量） */
+    handleThemeChange() {
+      this.initPie()
+    },
+
     initPie() {
       if (this.stats.total === 0 || !this.$refs.pieRef) return
       if (this.pieChart) this.pieChart.dispose()
@@ -315,23 +327,29 @@ export default {
       this.pieChart = echarts.init(this.$refs.pieRef)
 
       const data = []
-      if (this.stats.published > 0) data.push({ name: '已发布', value: this.stats.published, itemStyle: { color: '#67c23a' } })
-      if (this.stats.draft > 0) data.push({ name: '草稿', value: this.stats.draft, itemStyle: { color: '#e6a23c' } })
-      if (this.stats.ended > 0) data.push({ name: '已结束', value: this.stats.ended, itemStyle: { color: '#f56c6c' } })
+      if (this.stats.published > 0) data.push({ name: '已发布', value: this.stats.published, itemStyle: { color: chartColor(1) } })
+      if (this.stats.draft > 0) data.push({ name: '草稿', value: this.stats.draft, itemStyle: { color: chartColor(2) } })
+      if (this.stats.ended > 0) data.push({ name: '已结束', value: this.stats.ended, itemStyle: { color: chartColor(5) } })
 
       // ★ 只在首次初始化时注册一次监听（initPie 会被重复调用，重复注册会叠加）
       window.removeEventListener('resize', this.handleResize)
       window.addEventListener('resize', this.handleResize)
 
       this.pieChart.setOption({
-        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-        legend: { bottom: 0 },
+        color: chartPalette(),
+        tooltip: {
+          trigger: 'item',
+          // 单位统一「份 / %」，百分比取整
+          formatter: p => `${p.name}：${chartNum(p.value)} 份（${chartPct(p.percent)}%）`,
+          ...chartTooltip()
+        },
+        legend: { bottom: 0, textStyle: { color: chartText() } },
         series: [
           {
             type: 'pie',
             radius: ['45%', '70%'],
             center: ['50%', '45%'],
-            label: { formatter: '{b}\n{c}份' },
+            label: { formatter: '{b}\n{c}份', color: chartText() },
             data
           }
         ]

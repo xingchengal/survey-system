@@ -1,10 +1,11 @@
 <template>
-  <div style="max-width: 1200px; margin: 0 auto;">
+  <div class="profile-page">
     <el-row :gutter="20">
       <!-- 左侧：管理员信息卡 -->
-      <el-col :span="8">
-        <el-card :body-style="{ padding: '24px' }">
-          <div style="display: flex; justify-content: center;">
+      <el-col :span="8" :xs="24" :sm="24" :md="8">
+        <el-card :body-style="{ padding: '24px' }" class="profile-card">
+          <div class="profile-cover"></div>
+          <div class="avatar-wrap">
             <div class="avatar-container" @click="triggerUpload" @mouseenter="avatarHover = true" @mouseleave="avatarHover = false">
               <el-avatar :size="110" :src="user.avatar" class="avatar-img">
                 {{ avatarText }}
@@ -17,9 +18,9 @@
             <input ref="fileInput" type="file" accept="image/*" style="display: none;" @change="handleFileChange" />
           </div>
 
-          <h2 style="margin: 12px 0 6px 0; text-align: center;">{{ user.nickname || user.username }}</h2>
+          <h2 class="profile-name">{{ user.nickname || user.username }}</h2>
           <div class="text-center">
-            <el-tag type="danger" effect="dark">管理员</el-tag>
+            <el-tag type="danger" effect="light" round>管理员</el-tag>
           </div>
 
           <el-divider />
@@ -66,7 +67,7 @@
       </el-col>
 
       <!-- 右侧：管理员内容 -->
-      <el-col :span="16">
+      <el-col :span="16" :xs="24" :sm="24" :md="16">
         <!-- 系统管理视图 -->
         <el-card class="mb-20">
           <template #header>
@@ -76,30 +77,30 @@
             </div>
           </template>
           <el-row :gutter="12">
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#409eff"><UserFilled /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-blue">
+                <el-icon :size="22" color="#2f80ed"><UserFilled /></el-icon>
                 <div class="mini-value color-primary">{{ sysStats.users }}</div>
                 <div class="mini-label">普通用户</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#67c23a"><Document /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-green">
+                <el-icon :size="22" color="#16a34a"><Document /></el-icon>
                 <div class="mini-value color-success">{{ sysStats.total }}</div>
                 <div class="mini-label">总问卷数</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#f56c6c"><ChatDotRound /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-amber">
+                <el-icon :size="22" color="#d97706"><ChatDotRound /></el-icon>
                 <div class="mini-value color-danger">{{ sysStats.responses }}</div>
                 <div class="mini-label">总答卷数</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#8e44ad"><View /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-violet">
+                <el-icon :size="22" color="#7c3aed"><View /></el-icon>
                 <div class="mini-value color-purple">{{ sysStats.views }}</div>
                 <div class="mini-label">访客次数</div>
               </div>
@@ -113,35 +114,78 @@
             <span class="text-bold">⚡ 管理快捷入口</span>
           </template>
           <el-row :gutter="12">
-            <el-col :span="6">
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
               <div class="quick-action" @click="$router.push('/users')">
                 <el-icon :size="26" color="#409eff"><UserFilled /></el-icon>
                 <div class="qa-title">用户管理</div>
                 <div class="qa-desc">查看 / 删除</div>
               </div>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
               <div class="quick-action" @click="$router.push('/admin/surveys')">
                 <el-icon :size="26" color="#67c23a"><Document /></el-icon>
                 <div class="qa-title">全部问卷</div>
                 <div class="qa-desc">违规处理</div>
               </div>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
               <div class="quick-action" @click="$router.push('/statistics')">
                 <el-icon :size="26" color="#e6a23c"><PieChart /></el-icon>
                 <div class="qa-title">系统统计</div>
                 <div class="qa-desc">图表 / 排行</div>
               </div>
             </el-col>
-            <el-col :span="6">
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
               <div class="quick-action" @click="$router.push('/admin/logs')">
                 <el-icon :size="26" color="#f56c6c"><Memo /></el-icon>
                 <div class="qa-title">操作日志</div>
                 <div class="qa-desc">操作追溯</div>
               </div>
             </el-col>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="quick-action" @click="$router.push('/admin/recycle')">
+                <el-icon :size="26" color="#ef4444"><Delete /></el-icon>
+                <div class="qa-title">违规问卷</div>
+                <div class="qa-desc">回收站处理</div>
+              </div>
+            </el-col>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="quick-action" @click="$router.push('/admin/announcements')">
+                <el-icon :size="26" color="#e6a23c"><Bell /></el-icon>
+                <div class="qa-title">公告管理</div>
+                <div class="qa-desc">发布 / 下架</div>
+              </div>
+            </el-col>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="quick-action" @click="$router.push('/admin/demo')">
+                <el-icon :size="26" color="#8e44ad"><MagicStick /></el-icon>
+                <div class="qa-title">演示数据</div>
+                <div class="qa-desc">生成 / 重置</div>
+              </div>
+            </el-col>
           </el-row>
+        </el-card>
+
+        <!-- 最近操作（管理员向：看最近谁动了什么） -->
+        <el-card class="mb-20">
+          <template #header>
+            <div class="flex-between">
+              <span class="text-bold">📋 最近操作</span>
+              <el-button link type="primary" size="small" @click="$router.push('/admin/logs')">
+                查看全部 →
+              </el-button>
+            </div>
+          </template>
+          <div v-if="recentLogs.length" class="op-list">
+            <div v-for="log in recentLogs" :key="log.id" class="op-row">
+              <el-tag size="small" effect="light" round :type="log.role === 'admin' ? 'danger' : 'info'">
+                {{ log.username || '匿名' }}
+              </el-tag>
+              <span class="op-action">{{ log.operation }}</span>
+              <span class="op-time">{{ log.createTime }}</span>
+            </div>
+          </div>
+          <el-empty v-else description="暂无操作记录" :image-size="70" />
         </el-card>
 
         <!-- 账号设置 -->
@@ -352,7 +396,9 @@ export default {
         password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
       },
       deletingAccount: false,
-      sysStats: { users: 0, total: 0, responses: 0, views: 0 }
+      sysStats: { users: 0, total: 0, responses: 0, views: 0 },
+      /** 最近操作（管理员向） */
+      recentLogs: []
     }
   },
   computed: {
@@ -381,6 +427,7 @@ export default {
         this.contactForm.email = this.user.email || ''
         this.loadSysStats()
         this.loadLoginLogs()
+        this.loadRecentLogs()
       } catch {
         // 请求失败的提示（含 401 自动清登录态并跳 /login）已由接口层统一处理，这里不再重复弹
       }
@@ -399,6 +446,16 @@ export default {
     },
 
     // ===== 系统总览（右侧「系统管理视图」4 个迷你卡片）=====
+    /** 最近操作日志（管理员）：失败静默，它只是辅助信息 */
+    async loadRecentLogs() {
+      try {
+        const res = await api.operationLog.page({ pageNum: 1, pageSize: 6 })
+        this.recentLogs = (res && res.list) || []
+      } catch {
+        this.recentLogs = []
+      }
+    },
+
     // 关联：与 Dashboard.vue 用的是同一个接口（api.survey.systemOverview）。
     async loadSysStats() {
       try {
@@ -639,4 +696,113 @@ export default {
 .quick-action:hover { background: #fef0f0; border-color: #f56c6c; transform: translateY(-2px); }
 .qa-title { font-size: 13px; font-weight: 500; color: #303133; margin-top: 8px; }
 .qa-desc { font-size: 11px; color: #909399; margin-top: 2px; }
+
+/* ==================== 与用户个人中心统一的视觉 ==================== */
+.profile-page {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.profile-card {
+  overflow: hidden;
+}
+.profile-cover {
+  height: 104px;
+  margin: -24px -24px 0;
+  background:
+    radial-gradient(140% 180% at 85% -30%, rgba(255, 255, 255, 0.35) 0%, transparent 55%),
+    linear-gradient(135deg, #ff8a7a 0%, #e0473f 55%, #b91c1c 100%);
+  position: relative;
+  overflow: hidden;
+}
+.profile-cover::after {
+  content: '';
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -60px;
+  bottom: -110px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.avatar-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: -62px;
+  position: relative;
+  z-index: 1;
+}
+.avatar-img {
+  border: 4px solid #fff;
+  box-shadow: 0 10px 24px rgba(15, 61, 145, 0.2);
+}
+.profile-name {
+  margin: 14px 0 8px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mini-card {
+  text-align: center;
+  padding: 16px 6px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--stroke);
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease);
+}
+.mini-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-sm);
+}
+.mini-blue { background: linear-gradient(160deg, #f2f8ff, #e6f1ff); }
+.mini-green { background: linear-gradient(160deg, #f2fdf6, #e4f8ec); }
+.mini-amber { background: linear-gradient(160deg, #fffaf0, #fff2db); }
+.mini-violet { background: linear-gradient(160deg, #f8f5ff, #efe8ff); }
+.mini-value { font-size: 24px; font-weight: 700; line-height: 1.2; margin-top: 6px; }
+.mini-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+
+.quick-action {
+  text-align: center;
+  padding: 20px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--stroke);
+  background: #fff;
+  cursor: pointer;
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease),
+    border-color 0.22s var(--ease);
+}
+.quick-action:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--sky-200);
+}
+.qa-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 8px; }
+.qa-desc { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+
+/* 最近操作 */
+.op-list { display: flex; flex-direction: column; }
+.op-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 6px;
+  border-bottom: 1px dashed #eef3fb;
+  border-radius: 8px;
+  transition: background 0.18s var(--ease);
+}
+.op-row:last-child { border-bottom: none; }
+.op-row:hover { background: var(--sky-50); }
+.op-action {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.op-time { font-size: 12px; color: var(--ink-3); flex-shrink: 0; }
 </style>

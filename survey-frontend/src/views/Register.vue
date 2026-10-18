@@ -1,7 +1,7 @@
 <template>
   <div class="auth-page">
     <el-card class="auth-card">
-      <h2 class="auth-title">📝 问卷系统</h2>
+      <h2 class="auth-title"><BrandLogo :size="26" /> 问卷系统</h2>
       <p class="auth-subtitle">注册新账号</p>
 
       <!-- ★ 接口返回的错误信息在表单区域展示，不使用弹窗 alert。
@@ -137,6 +137,8 @@ import SlideVerify from 'vue3-slide-verify'
 // ★ 组件样式必须单独引（该库"只提供局部引用的方式，不再采用插件形式，方便按需加载"）
 import 'vue3-slide-verify/dist/style.css'
 import api from '../api'
+// 品牌标识（与登录页、侧栏 logo 同一图形，替换原来的 📝 emoji）
+import BrandLogo from '../components/BrandLogo.vue'
 
 /** 账号规则：字母+数字，4~20 位（与后端 RegisterRequest 的 @Pattern **必须**一致） */
 const ACCOUNT_RE = /^[A-Za-z0-9]{4,20}$/
@@ -145,7 +147,7 @@ const PHONE_RE = /^1[3-9]\d{9}$/
 
 export default {
   name: 'RegisterView',
-  components: { SlideVerify },
+  components: { SlideVerify, BrandLogo },
   data() {
     // 确认密码的校验依赖 form.password，所以写成函数形式（每次校验都读最新值）
     const validateConfirm = (rule, value, callback) => {
@@ -444,33 +446,69 @@ export default {
 
 <style scoped>
 .auth-page {
+  position: relative;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 24px 0;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 480px at 88% 6%, #eaf5ff 0%, transparent 60%),
+    radial-gradient(760px 420px at 8% 30%, #e7edff 0%, transparent 55%),
+    linear-gradient(160deg, #f7fbff 0%, #eef5ff 55%, #e9f1ff 100%);
+}
+.auth-page::before,
+.auth-page::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(10px);
+  pointer-events: none;
+}
+.auth-page::before {
+  width: 420px;
+  height: 420px;
+  right: -120px;
+  top: -140px;
+  background: radial-gradient(closest-side, rgba(86, 204, 242, 0.35), transparent);
+}
+.auth-page::after {
+  width: 380px;
+  height: 380px;
+  left: -100px;
+  bottom: -160px;
+  background: radial-gradient(closest-side, rgba(99, 102, 241, 0.24), transparent);
 }
 .auth-card {
+  position: relative;
+  z-index: 1;
   width: 440px;
-  padding: 8px 12px;
+  padding: 14px 18px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 24px 60px rgba(15, 61, 145, 0.14);
 }
 .auth-title {
   text-align: center;
-  margin: 0 0 4px 0;
+  margin: 0 0 6px 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: var(--ink);
 }
 .auth-subtitle {
   text-align: center;
-  margin: 0 0 20px 0;
-  color: #909399;
+  margin: 0 0 22px 0;
+  color: var(--ink-3);
   font-size: 14px;
 }
 .auth-footer {
   text-align: center;
   font-size: 14px;
-}
-.mb-16 {
-  margin-bottom: 16px;
 }
 .strength {
   display: flex;
@@ -479,7 +517,7 @@ export default {
   font-size: 12px;
 }
 .strength-label {
-  color: #909399;
+  color: var(--ink-3);
 }
 .strength-bar {
   display: flex;
@@ -491,7 +529,8 @@ export default {
   width: 28px;
   height: 6px;
   border-radius: 3px;
-  background: #e4e7ed;
+  background: #e4ecf9;
+  transition: background 0.2s var(--ease);
 }
 .strength-text {
   font-weight: 600;
@@ -502,10 +541,10 @@ export default {
 .slider-tip {
   margin: 8px 0 0 0;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-3);
 }
 .slider-tip .ok {
-  color: #67c23a;
+  color: #16a34a;
   font-weight: 600;
 }
 </style>

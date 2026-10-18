@@ -78,9 +78,11 @@ export default {
    * ★ 失败原因由后端 400 + message 给出，http.js 统一弹红字。
    * ★ durationMs：答题页从打开到提交的毫秒数，**只用于质控**（"答题过快"判定）。
    *   它是客户端值、可伪造 —— 后端也只当提示用，不当安全边界。
+   * ★ opts 可传 { headers }：有答题密码的问卷要带 X-Survey-Password，
+   *   由填写页从本地密码门拿到的值传进来（密码只放请求头，不进 query）。
    */
-  submitByShareCode: (shareCode, details, durationMs) => {
+  submitByShareCode: (shareCode, details, durationMs, opts) => {
     const query = durationMs == null ? '' : `?durationMs=${durationMs}`
-    return http.post(`/api/answer/submit-share/${shareCode}${query}`, details)
+    return http.post(`/api/answer/submit-share/${shareCode}${query}`, details, opts)
   }
 }

@@ -5,7 +5,9 @@ import com.survey.annotation.RequireAdmin;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
 import com.survey.common.PageResult;
+import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
+import com.survey.service.AnswerService;
 import com.survey.service.SurveyService;
 import com.survey.service.UserService;
 import com.survey.common.OwnershipGuard;
@@ -63,6 +65,10 @@ public class SurveyController {
 
     @Autowired
     private UserService userService;
+
+    /** 公开结果页要复用统计（只读），直接调 AnswerService */
+    @Autowired
+    private AnswerService answerService;
 
     // ==================== 基础 CRUD ====================
 
@@ -229,7 +235,42 @@ public class SurveyController {
     @Operation(summary = "根据分享码查询问卷（匿名访客）")
     @GetMapping("/share/{shareCode}")
     public Survey getByShareCode(@PathVariable String shareCode) {
-        return surveyService.getByShareCode(shareCode);
+        Survey survey = surveyService.getByShareCode(shareCode);
+        if (survey == null) {
+            throw new BizException("问卷不存在或已下线");
+        }
+        // ★ 答题密码**绝不**返回给前端：只暴露 hasPassword。
+        //   ★ hasPassword 必须在置空**之前**算好并存进独立字段 —— 它是派生值的话，
+        //     置空之后会跟着变成 false，前端就不弹密码框了（已实测踩过）。
+        //   校验密码走 X-Survey-Password 请求头，在「加载题目」「提交答卷」两个入口各判一次。
+        survey.setHasPassword(survey.passwordRequired());
+        survey.setAccessPassword(null);
+        return survey;
+    }
+
+    /**
+     * 公开结果页（匿名）：问卷作者在设置里开启「公开结果」后，任何人都能看汇总统计。
+     *
+     * ★ 三条安全口径：
+     *   1. 必须 public_result = 1，否则 400 —— 不能让"没开启"变成"藏起来但能猜到"；
+     *   2. 必须是已发布或已结束 —— 草稿的题目不该通过结果页泄露；
+     *   3. 返回前丢掉所有**填空题原文**（可能含个人信息），只留选项分布/评分分布，
+     *      脱敏逻辑在 DTO.withoutTextAnswers()。
+     */
+    @Operation(summary = "公开结果（匿名，需问卷开启公开结果）")
+    @GetMapping("/result/{shareCode}")
+    public SurveyStatisticsDTO publicResult(@PathVariable String shareCode) {
+        Survey survey = surveyService.getByShareCode(shareCode);
+        if (survey == null) {
+            throw new BizException("问卷不存在或已下线");
+        }
+        if (!SurveyStatus.isPublished(survey.getStatus()) && !SurveyStatus.isEnded(survey.getStatus())) {
+            throw new BizException("问卷尚未发布");
+        }
+        if (survey.getPublicResult() == null || survey.getPublicResult() != 1) {
+            throw new BizException("该问卷未开启公开结果");
+        }
+        return answerService.getSurveyStatistics(survey).withoutTextAnswers();
     }
 
     // ==================== 发布 / 复制 ====================

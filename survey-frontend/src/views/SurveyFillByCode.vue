@@ -13,9 +13,16 @@
     </div>
 
     <div v-else-if="submitted" style="max-width: 600px; margin: 80px auto;">
-      <el-result icon="success" title="提交成功！" sub-title="感谢您的参与">
+      <el-result icon="success" title="提交成功！" :sub-title="thankText">
         <template #extra>
-          <el-button type="primary" @click="resetForm">再填一份</el-button>
+          <div class="submit-actions">
+            <el-button v-if="survey.publicResult === 1" type="primary" @click="goPublicResult">
+              查看统计结果
+            </el-button>
+            <el-button v-if="redirectUrl" type="success" @click="goRedirect">立即前往</el-button>
+            <el-button @click="resetForm">再填一份</el-button>
+          </div>
+          <p v-if="redirectUrl" class="redirect-hint">{{ redirectSeconds }} 秒后自动前往…</p>
         </template>
       </el-result>
     </div>
@@ -36,7 +43,7 @@
         </div>
 
         <!-- 进度条 -->
-        <div v-if="!allDone" style="margin-top: 16px;">
+        <div v-if="passwordVerified && !allDone" style="margin-top: 16px;">
           <div style="display: flex; justify-content: space-between; font-size: 12px; color: #909399; margin-bottom: 6px;">
             <span>填写进度</span>
             <span>{{ answeredCount }} / {{ totalSteps }}</span>
@@ -45,6 +52,28 @@
         </div>
       </el-card>
 
+      <!-- 答题密码门：密码正确前不加载题目（题目由后端按请求头校验，前端只是体验层） -->
+      <el-card v-if="survey.hasPassword && !passwordVerified" class="mb-20 password-card">
+        <div class="password-title">🔒 该问卷需要答题密码</div>
+        <p class="password-hint">请向问卷发布者索取密码后填写</p>
+        <div class="password-row">
+          <el-input
+            v-model="passwordInput"
+            type="password"
+            show-password
+            placeholder="请输入答题密码"
+            maxlength="20"
+            size="large"
+            @keyup.enter="verifyPassword"
+          />
+          <el-button type="primary" size="large" :loading="verifying" @click="verifyPassword">
+            进入问卷
+          </el-button>
+        </div>
+        <p v-if="passwordError" class="password-error">{{ passwordError }}</p>
+      </el-card>
+
+      <template v-else>
       <!-- 单题显示区 -->
       <el-card class="mb-16" v-if="!allDone && currentQuestion">
         <div style="font-weight: bold; margin-bottom: 16px; font-size: 16px;">
@@ -81,6 +110,58 @@
             {{ opt.content }}
           </el-checkbox>
         </el-checkbox-group>
+
+        <!-- 下拉选择 -->
+        <el-select
+          v-else-if="currentQuestion.type === 5"
+          v-model="answers[currentQuestion.id]"
+          placeholder="请选择…"
+          size="large"
+          style="width: 100%;"
+        >
+          <el-option
+            v-for="opt in currentQuestion.options"
+            :key="opt.id"
+            :label="opt.content"
+            :value="opt.content"
+          />
+        </el-select>
+
+        <!-- 评分（1~5 星） -->
+        <div v-else-if="currentQuestion.type === 6" class="fill-rating">
+          <span
+            v-for="score in 5"
+            :key="score"
+            class="fill-star"
+            :class="{ on: Number(answers[currentQuestion.id]) >= score }"
+            @click="answers[currentQuestion.id] = String(score)"
+          >★</span>
+          <span class="fill-rating-text">
+            {{ answers[currentQuestion.id] ? `${answers[currentQuestion.id]} 分 · ${ratingLabels[Number(answers[currentQuestion.id]) - 1]}` : '点击星星打分' }}
+          </span>
+        </div>
+
+        <!-- 日期 -->
+        <el-date-picker
+          v-else-if="currentQuestion.type === 7"
+          v-model="answers[currentQuestion.id]"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="选择日期"
+          size="large"
+          style="width: 220px;"
+        />
+
+        <!-- 多行文本 -->
+        <el-input
+          v-else-if="currentQuestion.type === 4"
+          v-model="answers[currentQuestion.id]"
+          type="textarea"
+          :rows="4"
+          placeholder="请输入您的回答"
+          maxlength="1000"
+          show-word-limit
+        />
 
         <!-- 单行输入 -->
         <el-input
@@ -132,6 +213,7 @@
           </el-button>
         </div>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -151,6 +233,7 @@ import { CircleCheckFilled } from '@element-plus/icons-vue'
 //     /api/question/list/、/api/answer/submit-share/），根本不会返回 401，
 //     所以去掉 silent 也不会触发跳转。
 import api from '../api'
+import { RATING_LABELS } from '../utils/questionTypes'
 
 export default {
   components: { CircleCheckFilled },
@@ -167,6 +250,19 @@ export default {
       allDone: false,
       countdown: '',
       countdownTimer: null,
+      // ===== 答题密码 =====
+      /** 已验证通过的密码（提交时放请求头） */
+      password: '',
+      /** 密码输入框 */
+      passwordInput: '',
+      passwordVerified: false,
+      verifying: false,
+      passwordError: '',
+      // ===== 提交后跳转 =====
+      redirectSeconds: 3,
+      redirectTimer: null,
+      /** 评分题的 5 档文案（与后端 1~5 分对应） */
+      ratingLabels: RATING_LABELS,
       /**
        * 打开答题页的时间戳（毫秒）。
        * ★ 唯一用途：提交时上报"答题耗时"，给后端的"答题过快"质控判定。
@@ -197,6 +293,16 @@ export default {
       if (this.totalSteps === 0) return 0
       const percent = Math.round(this.answeredCount / this.totalSteps * 100)
       return Math.min(100, percent)
+    },
+    /** 提交成功页的感谢语：作者自定义优先，否则用默认文案 */
+    thankText() {
+      const text = this.survey && this.survey.thankText
+      return text && text.trim() ? text : '感谢您的参与'
+    },
+    /** 提交后跳转地址：后端已校验只允许 http/https，前端再挡一次（防脏数据/手动改库） */
+    redirectUrl() {
+      const url = this.survey && this.survey.redirectUrl
+      return url && /^https?:\/\//i.test(url) ? url : ''
     }
   },
   mounted() {
@@ -207,6 +313,7 @@ export default {
   },
   beforeUnmount() {
     if (this.countdownTimer) clearInterval(this.countdownTimer)
+    if (this.redirectTimer) clearInterval(this.redirectTimer)
   },
   methods: {
     async loadSurvey() {
@@ -225,11 +332,12 @@ export default {
         //   （失败不弹提示、不跳登录）；
         //   ★ 绝不【加 await】：访问量统计不该拖慢问卷首屏渲染。
         api.survey.view(this.shareCode).catch(() => {})
-        // ★ 加载题目用 api.question.list()（路径统一在 src/api/question.js）。
-        //   不登录也能读已发布问卷的题目 —— 后端 JwtAuthFilter 白名单已放行该路径，不会 401。
-        const list = await api.question.list(data.id)
-        this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
-        this.startCountdown()
+        // ★ 有答题密码时先不加载题目：后端会按请求头校验，前端只是把密码门提前。
+        if (data.hasPassword) {
+          this.loading = false
+          return
+        }
+        await this.loadQuestions()
       } catch {
         // ★ 加载失败（问卷不存在/已下线/网络异常）→ 走"问卷不存在"空态
         //   （this.survey = null）；错误提示由 src/api/http.js 统一负责，本页不再自己弹提示。
@@ -237,6 +345,75 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+
+    /**
+     * 加载题目。
+     * ★ 有密码时带 X-Survey-Password 请求头（密码只放请求头，不进 query/URL）。
+     */
+    async loadQuestions() {
+      const list = await api.question.list(this.survey.id, this.requestOpts())
+      this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
+      this.startCountdown()
+    },
+
+    /** 需要密码时返回请求选项，否则 undefined（不影响原有调用） */
+    requestOpts() {
+      return this.password
+        ? { headers: { 'X-Survey-Password': this.password } }
+        : undefined
+    },
+
+    /**
+     * 校验答题密码：直接用"带密码请求题目"来验证 —— 密码对了后端才会返回题目，
+     * 不需要额外开一个只判密码的端点（少一个端点就少一处要维护的口径）。
+     * ★ 这里传 silent：密码错误要在密码框下面内联提示，再弹一条红字会重复。
+     */
+    async verifyPassword() {
+      const pwd = this.passwordInput.trim()
+      if (!pwd) {
+        this.passwordError = '请输入答题密码'
+        return
+      }
+      this.verifying = true
+      this.passwordError = ''
+      try {
+        const list = await api.question.list(this.survey.id, {
+          silent: true,
+          headers: { 'X-Survey-Password': pwd }
+        })
+        this.password = pwd
+        this.passwordVerified = true
+        this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
+        this.startCountdown()
+      } catch (e) {
+        this.passwordError = (e && e.message) || '密码不正确，请重试'
+      } finally {
+        this.verifying = false
+      }
+    },
+
+    goPublicResult() {
+      this.$router.push(`/r/${this.shareCode}`)
+    },
+
+    goRedirect() {
+      if (this.redirectUrl) window.location.href = this.redirectUrl
+    },
+
+    /** 提交成功后：有跳转链接就倒计时 3 秒自动跳（也给"立即前往"按钮） */
+    startRedirectTimer() {
+      if (!this.redirectUrl) return
+      this.redirectSeconds = 3
+      if (this.redirectTimer) clearInterval(this.redirectTimer)
+      this.redirectTimer = setInterval(() => {
+        this.redirectSeconds -= 1
+        if (this.redirectSeconds <= 0) {
+          clearInterval(this.redirectTimer)
+          this.redirectTimer = null
+          this.goRedirect()
+        }
+      }, 1000)
     },
 
     /**
@@ -260,8 +437,8 @@ export default {
      * @returns {number} 目标题的 **id**；-1 = 结束问卷；正数但没有对应题（脏数据）时也按"结束"处理
      */
     calcNextQuestionId(q, ans) {
-      // 单选题
-      if (q.type === 1 && ans) {
+      // 单选 / 下拉：都是"一个答案对应一个选项"
+      if ((q.type === 1 || q.type === 5) && ans) {
         const matchedOpt = q.options.find(o => o.content === ans)
         if (matchedOpt && matchedOpt.nextQuestionId !== null && matchedOpt.nextQuestionId !== undefined) {
           return matchedOpt.nextQuestionId          // -1（结束）或目标题 id
@@ -357,7 +534,7 @@ export default {
       for (const item of this.questions) {
         if (item._order <= order) continue              // 只清"后面"的
         if (onPath.has(item._order)) continue            // 新路径仍然会走到
-        if (item.type !== 3) continue                    // 选择类保留（可回头再选）
+        if (item.type !== 3 && item.type !== 4) continue    // 选择类/评分/日期保留（可回头再选）
         if (this.answers[item.id] === undefined) continue
         delete this.answers[item.id]
         cleared++
@@ -489,8 +666,9 @@ export default {
         // ★ 上报答题耗时（毫秒）：后端的"答题过快"质控规则靠它。
         //   没打开计时（startedAt=0）就不传 —— 后端会当作"未上报"、不判这条规则。
         const durationMs = this.startedAt ? Math.max(0, Date.now() - this.startedAt) : null
-        await api.answer.submitByShareCode(this.shareCode, details, durationMs)
+        await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
         this.submitted = true
+        this.startRedirectTimer()
       } catch {
         // 失败红字已由 http.js 弹出；这里只做流程控制：
         // 保持当前页面，访客可以改完再点一次"提交问卷"。
@@ -498,6 +676,10 @@ export default {
     },
 
     resetForm() {
+      if (this.redirectTimer) {
+        clearInterval(this.redirectTimer)
+        this.redirectTimer = null
+      }
       this.submitted = false
       this.answers = {}
       this.currentOrder = 1
@@ -507,3 +689,70 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+/* ==================== 答题密码门 ==================== */
+.password-title {
+  margin-bottom: 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.password-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: #909399;
+}
+.password-row {
+  display: flex;
+  gap: 12px;
+}
+.password-row .el-input {
+  flex: 1;
+}
+.password-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #f56c6c;
+}
+
+/* ==================== 评分题 ==================== */
+.fill-rating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fill-star {
+  font-size: 34px;
+  line-height: 1;
+  color: #d8e3f3;
+  cursor: pointer;
+  transition:
+    color 0.16s var(--ease),
+    transform 0.16s var(--ease);
+}
+.fill-star:hover {
+  transform: scale(1.12);
+}
+.fill-star.on {
+  color: #f59e0b;
+}
+.fill-rating-text {
+  margin-left: 10px;
+  font-size: 14px;
+  color: #909399;
+}
+
+/* ==================== 提交成功页 ==================== */
+.submit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+.redirect-hint {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: #909399;
+}
+</style>

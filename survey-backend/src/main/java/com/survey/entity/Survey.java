@@ -38,7 +38,39 @@ public class Survey {
     private Integer deleted;         // 0=正常，1=在回收站
     private Integer deletedBy;       // 删除人 ID（移入回收站时记录）
     private String deletedByName;    // 删除人昵称（仅用于展示，不映射数据库列）
+
+    /**
+     * 移入回收站的时间：NULL = 不在回收站，非 NULL = 何时被删。
+     * ★ 回收站列表展示"什么时候删的"用它，而不是 created_time（创建时间可能是几周前）。
+     * ★ 由 SurveyMapper.moveToRecycle 写 NOW()、restoreFromRecycle 置回 NULL；
+     *   对历史上已删除的数据，migration-survey-deleted-at.sql 用 updated_time 做了回填。
+     */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime deletedAt;
+
     private Integer viewCount;       // 访问次数（访客打开分享链接时 +1）
+
+    // ===== 问卷设置（编辑页「设置」面板；问卷星「基本设置 / 提交后显示」的常用项）=====
+
+    /**
+     * 答题密码：NULL = 不需要密码。
+     * ★ 非空时，加载题目与提交答卷都必须带请求头 X-Survey-Password，
+     *   服务端在两个入口各校验一次（前端弹密码框只是体验层）。
+     * ★ 对外接口（/share/{code}）返回前会被置空，只暴露 hasPassword。
+     */
+    private String accessPassword;
+
+    /** 最多收集多少份答卷：NULL = 不限；达到后 submit 直接 400。 */
+    private Integer maxResponses;
+
+    /** 提交后的感谢语：NULL = 用系统默认文案。 */
+    private String thankText;
+
+    /** 提交后跳转的链接：NULL = 不跳转；只允许 http/https（防 javascript: 伪协议）。 */
+    private String redirectUrl;
+
+    /** 是否公开结果页：0 = 不公开，1 = 开启（匿名可访问 /api/survey/result/{shareCode}）。 */
+    private Integer publicResult;
 
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
@@ -80,6 +112,9 @@ public class Survey {
     public String getDeletedByName() { return deletedByName; }
     public void setDeletedByName(String deletedByName) { this.deletedByName = deletedByName; }
 
+    public LocalDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
+
     public LocalDateTime getCreatedTime() { return createdTime; }
     public void setCreatedTime(LocalDateTime createdTime) { this.createdTime = createdTime; }
 
@@ -88,6 +123,40 @@ public class Survey {
 
     public Integer getViewCount() { return viewCount; }
     public void setViewCount(Integer viewCount) { this.viewCount = viewCount; }
+
+    public String getAccessPassword() { return accessPassword; }
+    public void setAccessPassword(String accessPassword) { this.accessPassword = accessPassword; }
+
+    /**
+     * 前端据此决定要不要弹密码框（对外接口返回的字段）。
+     * ★ 必须是一个**独立字段**：/share/{code} 会先把 accessPassword 置空再返回，
+     *   如果这里是 `isHasPassword()` 这种从 accessPassword 现算的派生 getter，
+     *   置空之后 hasPassword 会跟着变成 false —— 前端就不会弹密码框了。
+     */
+    private Boolean hasPassword;
+
+    public Boolean getHasPassword() { return hasPassword; }
+    public void setHasPassword(Boolean hasPassword) { this.hasPassword = hasPassword; }
+
+    /**
+     * 内部判定：这份问卷是否设了答题密码。
+     * ★ 刻意**不是** getter 命名，避免 Jackson 把它也序列化成 hasPassword（与上面的字段撞名）。
+     */
+    public boolean passwordRequired() {
+        return accessPassword != null && !accessPassword.isBlank();
+    }
+
+    public Integer getMaxResponses() { return maxResponses; }
+    public void setMaxResponses(Integer maxResponses) { this.maxResponses = maxResponses; }
+
+    public String getThankText() { return thankText; }
+    public void setThankText(String thankText) { this.thankText = thankText; }
+
+    public String getRedirectUrl() { return redirectUrl; }
+    public void setRedirectUrl(String redirectUrl) { this.redirectUrl = redirectUrl; }
+
+    public Integer getPublicResult() { return publicResult; }
+    public void setPublicResult(Integer publicResult) { this.publicResult = publicResult; }
 
     private Integer isTemplate;       // 0=普通问卷，1=模板
     private String templateCategory;  // 模板分类

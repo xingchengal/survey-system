@@ -163,6 +163,7 @@ public class AnswerController {
     public String submit(@PathVariable Integer surveyId,
                          @RequestBody List<AnswerDetail> details,
                          @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                         @RequestHeader(value = "X-Survey-Password", required = false) String password,
                          @RequestParam(value = "durationMs", required = false) Long durationMs) {
         // ★ 与下面 submitByShareCode 保持一致：只有【已发布】(status=1) 的问卷才收答卷。
         //   （"回收站里的问卷不能收答卷"由 AnswerService.submit 的四道校验兜住 —— 不变量收口在 Service，
@@ -170,6 +171,8 @@ public class AnswerController {
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
+        // ★ 答题密码：提交同样要校验（不能只拦"加载题目"，否则直接 POST 就能塞答卷）
+        surveyService.requireAccessPassword(survey, password);
         answerService.submit(surveyId, userId, details, clampDuration(durationMs));
         return "提交成功";
     }
@@ -178,10 +181,12 @@ public class AnswerController {
     @PostMapping("/submit-share/{shareCode}")
     public String submitByShareCode(@PathVariable String shareCode,
                                     @RequestBody List<AnswerDetail> details,
+                                    @RequestHeader(value = "X-Survey-Password", required = false) String password,
                                     @RequestParam(value = "durationMs", required = false) Long durationMs) {
         Survey survey = surveyService.getByShareCode(shareCode);
         if (survey == null) throw new BizException("问卷不存在");
         if (!SurveyStatus.isPublished(survey.getStatus())) throw new BizException("问卷未发布");
+        surveyService.requireAccessPassword(survey, password);
         answerService.submit(survey.getId(), null, details, clampDuration(durationMs));
         return "提交成功";
     }

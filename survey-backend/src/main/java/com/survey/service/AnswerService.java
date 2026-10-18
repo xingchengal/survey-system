@@ -107,6 +107,13 @@ public class AnswerService {
      */
     private static final int MAX_TEXT_ANSWERS_PER_QUESTION = 2000;
 
+    /** 评分题的合法取值（前端渲染 5 颗星，1~5 分） */
+    private static final Set<String> RATING_VALUES = Set.of("1", "2", "3", "4", "5");
+
+    /** 日期题的格式（value-format 统一为 yyyy-MM-dd，避免客户端时区把日期差一天） */
+    private static final java.util.regex.Pattern DATE_PATTERN =
+            java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
+
     @Autowired
     private AnswerMapper answerMapper;
     @Autowired
@@ -217,6 +224,15 @@ public class AnswerService {
             throw new BizException("你已经提交过这份问卷，不能重复提交");
         }
 
+        // ★★ 第六道：**限量收集**（问卷设置里的 max_responses）。
+        //   达到上限后直接拒收，不等定时任务去改 status（改 status 会连带影响"重新发布"的语义）。
+        //   ★ 已知局限：这是 check-then-act，同一瞬间的并发提交可能多收 1~2 份。
+        //     对"限量"这种业务要求足够；彻底堵住要加计数行 + 行锁，收益不划算。
+        if (survey.getMaxResponses() != null && survey.getMaxResponses() > 0
+                && answerMapper.countBySurveyId(surveyId) >= survey.getMaxResponses()) {
+            throw new BizException("这份问卷已收满 " + survey.getMaxResponses() + " 份答卷，无法继续提交");
+        }
+
         // ★ 契约校验（见类注释）：
         //   ① questionId 必须属于本问卷；② 内容长度上限；③ 同题去重（★ 见下，多选题例外）。
         //   ★ 合法性用"一次批量查询"得到，不逐题查库 —— 答卷题量有限，也不会构成 N+1。
@@ -224,6 +240,10 @@ public class AnswerService {
         Set<Integer> validQuestionIds = surveyQuestions.stream()
                 .map(Question::getId)
                 .collect(Collectors.toSet());
+        // 题型取值校验要用到题型：id → Question（一次批量查询顺手建好，不额外查库）
+        Map<Integer, Question> questionById = surveyQuestions.stream()
+                .filter(q -> q.getId() != null)
+                .collect(Collectors.toMap(Question::getId, q -> q, (a, b) -> a));
         // ★★ 多选题的"一选项一行"：这类题的 questionId **允许**在一次提交里出现多行。
         //   为什么（务必看完再改）：
         //     · 前端答题页对多选的每个勾选项各生成一条明细（SurveyFillByCode.vue），
@@ -258,6 +278,9 @@ public class AnswerService {
             if (d.getContent() != null && d.getContent().length() > MAX_CONTENT_LENGTH) {
                 throw new BizException("单题回答不能超过 " + MAX_CONTENT_LENGTH + " 个字符");
             }
+            // ★ 新题型的取值校验：评分 / 日期。不校验的话，客户端可以往评分题里塞任意字符串，
+            //   统计图（按 content 分组）就会出现 "abc"、"6" 这种分数。
+            validateContentByType(questionById.get(d.getQuestionId()), d.getContent());
         }
 
         Answer answer = new Answer();
@@ -359,6 +382,29 @@ public class AnswerService {
             });
         } else {
             refresh.run();
+        }
+    }
+
+    /**
+     * 新题型的取值校验（评分 / 日期）。
+     * ★ 只做"值域"校验，不校验选项归属：选项归属由 AnswerQualityService 在提交后打
+     *   OPTION_MISMATCH 标记（单选/多选历史口径一致），这里不引入第二套判定。
+     */
+    private void validateContentByType(Question q, String content) {
+        if (q == null || content == null) return;
+        if (QuestionType.isRating(q.getType())) {
+            if (!RATING_VALUES.contains(content)) {
+                throw new BizException("评分题的答案必须是 1~5 分");
+            }
+        } else if (QuestionType.isDate(q.getType())) {
+            if (!DATE_PATTERN.matcher(content).matches()) {
+                throw new BizException("日期题的答案格式必须是 yyyy-MM-dd");
+            }
+            try {
+                java.time.LocalDate.parse(content);
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new BizException("日期题的答案不是合法日期");
+            }
         }
     }
 
@@ -503,7 +549,9 @@ public class AnswerService {
 
         // ① 先读缓存（excludeInvalid 时走"有效样本"口径）
         for (Question q : questions) {
-            if (QuestionType.hasOptions(q.getType())) {
+            // ★ 用 hasChart 而不是 hasOptions：评分题没有选项，但 1~5 分的分布同样是"分组计数"，
+            //   要跟选择题一样走 chartData，不能落到"填空原文列表"里。
+            if (QuestionType.hasChart(q.getType())) {
                 List<Map<String, Object>> cached = excludeInvalid
                         ? statsCacheService.getValidQuestionStats(q.getId())
                         : statsCacheService.getQuestionStats(q.getId());
@@ -565,7 +613,7 @@ public class AnswerService {
         // ③ 按题目原顺序组装（前端的渲染顺序完全依赖它）
         List<SurveyStatisticsDTO.QuestionStats> items = new ArrayList<>(questions.size());
         for (Question q : questions) {
-            if (QuestionType.hasOptions(q.getType())) {
+            if (QuestionType.hasChart(q.getType())) {
                 items.add(new SurveyStatisticsDTO.QuestionStats(q, chartByQuestion.get(q.getId()), null));
             } else {
                 items.add(new SurveyStatisticsDTO.QuestionStats(q, null, textByQuestion.get(q.getId())));

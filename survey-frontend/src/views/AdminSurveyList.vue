@@ -1,30 +1,43 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="m-0">📋 全部问卷</h2>
-      <div class="flex-gap-10">
-        <!-- "显示模板"开关：打开后走 api.survey.templates()，能看到全部模板并取消它们。
-             ★ 少了这个开关，管理员把问卷设为模板后它会从本页消失、再也无法在本页取消：
-             /api/survey/page 的 SQL 排除 is_template=1，而 /api/survey/templates 只提供读取。 -->
-        <el-switch
-          v-model="showTemplates"
-          active-text="显示模板"
-          inline-prompt
-          @change="handleTemplateViewChange"
-        />
-        <el-select v-model="statusFilter" placeholder="全部状态" clearable style="width: 130px;" :disabled="showTemplates" @change="handleSearch">
-          <el-option label="全部状态" value="" />
-          <el-option label="草稿" :value="0" /> 
-          <el-option label="已发布" :value="1" />
-          <el-option label="已结束" :value="2" />
-        </el-select>
-        <el-input v-model="keyword" placeholder="搜索标题或描述..." clearable :prefix-icon="Search" style="width: 260px;" @keyup.enter="handleSearch" @clear="handleSearch" />
-        <el-button type="primary" @click="handleSearch">搜索</el-button>
-        <el-button :icon="Refresh" @click="loadSurveys">刷新</el-button>
+      <div>
+        <h2 class="page-title">全部问卷</h2>
+        <p class="page-subtitle">共 {{ total }} 份 · 可查看、设为模板或删除违规问卷</p>
       </div>
     </div>
 
-    <el-table class="w-full" :data="surveys" stripe border v-loading="loading">
+    <div class="toolbar-card">
+      <!-- "显示模板"开关：打开后走 api.survey.templates()，能看到全部模板并取消它们。
+           ★ 少了这个开关，管理员把问卷设为模板后它会从本页消失、再也无法在本页取消：
+           /api/survey/page 的 SQL 排除 is_template=1，而 /api/survey/templates 只提供读取。 -->
+      <el-switch
+        v-model="showTemplates"
+        active-text="显示模板"
+        inline-prompt
+        @change="handleTemplateViewChange"
+      />
+      <el-select v-model="statusFilter" placeholder="全部状态" clearable :disabled="showTemplates" @change="handleSearch">
+        <el-option label="全部状态" value="" />
+        <el-option label="草稿" :value="0" />
+        <el-option label="已发布" :value="1" />
+        <el-option label="已结束" :value="2" />
+      </el-select>
+      <el-input v-model="keyword" placeholder="搜索标题或描述..." clearable :prefix-icon="Search" @keyup.enter="handleSearch" @clear="handleSearch" />
+      <el-button type="primary" @click="handleSearch">搜索</el-button>
+      <el-button :icon="Refresh" @click="loadSurveys">刷新</el-button>
+      <TableDensity />
+    </div>
+
+    <div class="table-card">
+    <PageState
+      :loading="loading"
+      :error="error"
+      :empty="surveys.length === 0"
+      empty-text="暂无问卷"
+      @retry="loadSurveys"
+    >
+    <el-table class="w-full" :data="surveys" stripe border max-height="560">
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="问卷标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
@@ -64,8 +77,8 @@
         @current-change="handlePageChange"
       />
     </div>
-
-    <el-empty v-if="surveys.length === 0 && !loading" description="暂无问卷" />
+    </PageState>
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="currentSurvey.title" width="600px">
       <p class="text-secondary">{{ currentSurvey.description }}</p>
@@ -124,15 +137,27 @@ import api from '../api'
 // 这种写法需要真实的变量，所以必须 import；
 // 若某图标只以模板标签形式出现（<Bell />），则由 main.js 全局注册即可，无需在这里 import。
 import { Refresh, Search } from '@element-plus/icons-vue'
+// 三态容器：骨架 / 空 / 错误（带重试）
+import PageState from '../components/PageState.vue'
+// 行密度切换（默认 / 紧凑）
+import TableDensity from '../components/TableDensity.vue'
+// 页码记忆（sessionStorage）
+import { readPageNum, savePageNum } from '../utils/pageMemory'
+
+/** 本页在 sessionStorage 里的页码键 */
+const PAGE_KEY = 'AdminSurveyList'
 
 // 图标已在 main.js 里全局注册，这里不再重复注册。
 // 说明：模板标签形式（<Bell />）和属性变量形式（:prefix-icon="Search"）都不受影响 ——
 //       前者走全局注册，后者走本文件顶部的 import。
 export default {
+  components: { PageState, TableDensity },
   data() {
     return {
       surveys: [],
       loading: false,
+      // 接口失败标记：由 PageState 渲染「加载失败 + 重试」
+      error: false,
       keyword: '',
       statusFilter: '',
       // false = 走 api.survey.page（排除模板，默认视图）
@@ -157,6 +182,8 @@ export default {
     }
   },
   mounted() {
+    // 恢复上次停留的页码
+    this.pageNum = readPageNum(PAGE_KEY)
     this.loadSurveys()
   },
   methods: {
@@ -166,6 +193,7 @@ export default {
     //   api.survey.page 的 SQL 排除 is_template = 1，不切数据源就看不到模板、也就无法取消它。
     async loadSurveys() {
       this.loading = true
+      this.error = false
       try {
         if (this.showTemplates) {
           // 模板列表接口**不分页**（模板广场一次全给），所以这里本地分页，语义与 page 视图保持一致
@@ -188,7 +216,8 @@ export default {
         this.surveys = data.list || []
         this.total = data.total || 0
       } catch {
-        // 错误提示已由 src/api/http.js 统一弹出，这里不再重复弹，只保留 loading 复位
+        // 错误提示已由 src/api/http.js 统一弹出，这里只置 error 让 PageState 显示重试入口
+        this.error = true
       } finally {
         this.loading = false
       }
@@ -196,6 +225,7 @@ export default {
 
     handleSearch() {
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadSurveys()
     },
 
@@ -203,17 +233,20 @@ export default {
     //   切换视图时把页码复位，否则在"全部问卷"翻到第 3 页再切"显示模板"会落到空页。
     handleTemplateViewChange() {
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadSurveys()
     },
 
     handleSizeChange(size) {
       this.pageSize = size
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadSurveys()
     },
 
     handlePageChange(page) {
       this.pageNum = page
+      savePageNum(PAGE_KEY, page)
       this.loadSurveys()
     },
 

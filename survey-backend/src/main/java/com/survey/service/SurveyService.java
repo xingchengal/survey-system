@@ -25,6 +25,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -253,7 +255,57 @@ public class SurveyService {
      */
     public int updateSurvey(Survey survey) {
         validateSurveyText(survey);
+        normalizeSurveySettings(survey);
         return surveyMapper.update(survey);
+    }
+
+    /**
+     * 问卷设置的归一化 + 校验（答题密码 / 限量 / 感谢语 / 跳转链接 / 公开结果）。
+     *
+     * ★ 空串一律归 NULL：前端把输入框清空时传的是 ""，直接存库会变成"有密码但密码是空串"
+     *   —— passwordRequired() 判的是 isBlank，虽然也能兜住，但库里留下空串会让
+     *   "清空密码"这件事在数据层面看不出来。归 NULL 后语义干净：NULL = 关闭。
+     * ★ 跳转链接只放行 http/https：`javascript:` 伪协议会被浏览器执行，
+     *   而这段 URL 是作者填的、要展示给所有答题人，必须当成不可信输入。
+     */
+    private void normalizeSurveySettings(Survey survey) {
+        String pwd = trimToNull(survey.getAccessPassword());
+        if (pwd != null && pwd.length() > 20) {
+            throw new BizException("答题密码不能超过 20 个字符");
+        }
+        survey.setAccessPassword(pwd);
+
+        String thank = trimToNull(survey.getThankText());
+        if (thank != null && thank.length() > 500) {
+            throw new BizException("感谢语不能超过 500 个字符");
+        }
+        survey.setThankText(thank);
+
+        String url = trimToNull(survey.getRedirectUrl());
+        if (url != null) {
+            if (url.length() > 500) {
+                throw new BizException("跳转链接不能超过 500 个字符");
+            }
+            String lower = url.toLowerCase(Locale.ROOT);
+            if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+                throw new BizException("跳转链接必须以 http:// 或 https:// 开头");
+            }
+        }
+        survey.setRedirectUrl(url);
+
+        Integer max = survey.getMaxResponses();
+        if (max != null && (max < 1 || max > 1_000_000)) {
+            throw new BizException("限收份数必须在 1 ~ 1000000 之间（留空表示不限）");
+        }
+
+        survey.setPublicResult(survey.getPublicResult() != null && survey.getPublicResult() == 1 ? 1 : 0);
+    }
+
+    /** 去空白；空串返回 null（"清空"在库里统一表示为 NULL） */
+    private String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**
@@ -280,6 +332,24 @@ public class SurveyService {
     /** 按分享码查问卷（匿名访客打开分享链接走这里）。 */
     public Survey getByShareCode(String shareCode) {
         return surveyMapper.findByShareCode(shareCode);
+    }
+
+    /**
+     * 校验答题密码（问卷设置里的 access_password）。
+     *
+     * ★ 没设密码直接通过（绝大多数问卷）。
+     * ★ 设了就要求请求头 X-Survey-Password 的值完全一致；"没填"和"填错"用**同一句文案**，
+     *   避免把"这份问卷有没有密码"变成可探测的信息。
+     * ★ 放在 Service 而不是 Controller：加载题目、提交答卷是两个入口，
+     *   判定口径只能有一份（同 createSurvey/updateSurvey 的收口思路）。
+     */
+    public void requireAccessPassword(Survey survey, String submitted) {
+        if (survey == null || !survey.passwordRequired()) {
+            return;
+        }
+        if (submitted == null || !survey.getAccessPassword().equals(submitted.trim())) {
+            throw new BizException("该问卷需要答题密码（或密码不正确）");
+        }
     }
 
     /**
@@ -687,10 +757,13 @@ public class SurveyService {
     }
 
     /**
-     * 个人统计（MyDashboard.vue）：我的问卷数、已发布/草稿/已结束、收到的答卷总数、最近 5 份。
+     * 个人统计（MyDashboard.vue）：我的问卷数、已发布/草稿/已结束、收到的答卷总数、最近 5 份，
+     * 以及近 7 天每天的答卷数（trendDates / trendCounts / recent7Answers）。
      *
      * ★ 会先过滤掉模板 —— 因为模板也可能挂在某个 userId 名下，但它不是"我的问卷"。
      * ★ 答卷数走批量查询 countResponsesBySurveyIds()，不是逐份 for 循环。
+     * ★ 趋势是**第二个聚合查询**（AnswerMapper.countDailyByUserId），SQL 条数恒为 2 ——
+     *   不再按问卷逐份计数。
      */
     public Map<String, Object> getUserStatistics(Integer userId) {
         List<Survey> surveys = surveyMapper.findByUserId(userId);
@@ -722,6 +795,34 @@ public class SurveyService {
         result.put("ended", c.ended());
         result.put("responses", responses);
         result.put("recent", recent);
+
+        // ===== 近 7 天答卷趋势 =====
+        // 数据库只会返回"有答卷的那几天"，这里补齐成连续的 7 天，
+        // 否则前端拿到的 x 轴会缺日子（曲线看起来像断了）。
+        Map<String, Integer> daily = new HashMap<>();
+        for (Map<String, Object> row : answerMapper.countDailyByUserId(userId)) {
+            Object d = row.get("d");
+            Object cnt = row.get("cnt");
+            if (d != null && cnt instanceof Number) {
+                daily.put(d.toString(), ((Number) cnt).intValue());
+            }
+        }
+        List<String> trendDates = new ArrayList<>(7);
+        List<Integer> trendCounts = new ArrayList<>(7);
+        LocalDate today = LocalDate.now();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        int recent7 = 0;
+        for (int i = 6; i >= 0; i--) {
+            String key = today.minusDays(i).format(fmt);
+            int cnt = daily.getOrDefault(key, 0);
+            trendDates.add(key);
+            trendCounts.add(cnt);
+            recent7 += cnt;
+        }
+        result.put("trendDates", trendDates);
+        result.put("trendCounts", trendCounts);
+        result.put("recent7Answers", recent7);
+
         return result;
     }
 

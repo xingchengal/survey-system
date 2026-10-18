@@ -2,8 +2,11 @@
   <div>
     <!-- 顶部栏 -->
     <div class="page-header">
-      <h2 class="m-0">📝 我的问卷</h2>
-      <div style="display: flex; gap: 12px;">
+      <div>
+        <h2 class="page-title">我的问卷</h2>
+        <p class="page-subtitle">共 {{ surveys.length }} 份 · 创建、发布、分享与查看数据</p>
+      </div>
+      <div class="header-actions">
         <el-button
           class="ai-btn"
           :icon="MagicStick"
@@ -23,9 +26,9 @@
     </div>
 
     <!-- 筛选工具栏 -->
-    <div style="display: flex; align-items: center; justify-content: flex-end; margin-bottom: 16px; padding: 12px 16px; background: #fff; border-radius: 8px;">
+    <div class="toolbar-card">
       <el-dropdown @command="handleSort">
-        <span style="cursor: pointer; color: #606266; display: flex; align-items: center; font-size: 14px;">
+        <span class="toolbar-trigger">
           {{ sortText }}
           <el-icon class="ml-4"><Sort /></el-icon>
         </span>
@@ -40,7 +43,7 @@
       <el-divider direction="vertical" />
 
       <el-dropdown @command="handleStatus">
-        <span style="cursor: pointer; color: #606266; display: flex; align-items: center; font-size: 14px;">
+        <span class="toolbar-trigger">
           {{ statusText }}
           <el-icon class="ml-4"><Sort /></el-icon>
         </span>
@@ -56,7 +59,7 @@
 
       <el-divider direction="vertical" />
 
-      <div style="width: 280px;">
+      <div class="toolbar-search">
         <el-input
           v-model="keyword"
           placeholder="请输入问卷名进行搜索..."
@@ -66,6 +69,13 @@
       </div>
     </div>
 
+    <!-- 骨架屏：首屏加载时占位，避免白屏闪烁 -->
+    <div v-if="loading" class="list-skeleton">
+      <div class="sk-block" style="height: 54px; margin-bottom: 12px;"></div>
+      <div v-for="i in 5" :key="i" class="sk-block" style="height: 80px; margin-bottom: 10px;"></div>
+    </div>
+
+    <template v-else>
     <!-- 美化后的列表 -->
     <div v-if="filteredSurveys.length > 0" class="survey-list">
       <div class="list-header">
@@ -77,7 +87,7 @@
       </div>
 
       <div
-        v-for="row in filteredSurveys"
+        v-for="row in pagedSurveys"
         :key="row.id"
         class="list-row"
       >
@@ -119,9 +129,9 @@
         </div>
 
         <div class="col-actions">
-          <el-tooltip content="编辑" placement="top">
-            <el-button type="primary" :icon="Edit" circle size="small" @click="handleEdit(row)" />
-          </el-tooltip>
+          <el-button class="row-btn rb-edit" :icon="Edit" @click="handleEdit(row)">
+            <span class="btn-label">编辑</span>
+          </el-button>
           <!-- ★ 只要不是"已发布"就给发布入口，否则会出现"后端能救、界面无路可走"的 UI 死路
                 （后端是允许"延长（或清空）截止时间后重新发布"的）：
                   · 草稿（含 status 为 NULL 的历史数据，后端一律视为草稿）→ 发布
@@ -129,25 +139,42 @@
                     「问卷已结束，如需重新开放请先延长结束时间」，由 http.js 弹出
                 status 的判定与上面徽标的口径一致（NULL 也算草稿）。 -->
           <el-tooltip v-if="row.status !== 1" :content="row.status === 2 ? '重新发布（需先延长截止时间）' : '发布'" placement="top">
-            <el-button type="success" :icon="Promotion" circle size="small" @click="handlePublish(row)" />
+            <el-button class="row-btn rb-publish" :icon="Promotion" @click="handlePublish(row)">
+              <span class="btn-label">{{ row.status === 2 ? '重新发布' : '发布' }}</span>
+            </el-button>
           </el-tooltip>
-          <el-tooltip v-if="row.status === 1 || row.status === 2" content="分享" placement="top">
-            <el-button type="warning" :icon="Share" circle size="small" @click="handleShare(row)" />
-          </el-tooltip>
-          <el-tooltip content="统计" placement="top">
-            <el-button type="info" :icon="DataAnalysis" circle size="small" @click="handleStatistics(row)" />
-          </el-tooltip>
-          <el-tooltip content="复制" placement="top">
-            <el-button color="#909399" :icon="CopyDocument" circle size="small" @click="handleCopy(row)" />
-          </el-tooltip>
-          <el-tooltip content="删除" placement="top">
-            <el-button type="danger" :icon="Delete" circle size="small" @click="handleDelete(row)" />
-          </el-tooltip>
+          <el-button v-if="row.status === 1 || row.status === 2" class="row-btn rb-share" :icon="Share" @click="handleShare(row)">
+            <span class="btn-label">分享</span>
+          </el-button>
+          <el-button class="row-btn rb-stats" :icon="DataAnalysis" @click="handleStatistics(row)">
+            <span class="btn-label">统计</span>
+          </el-button>
+          <el-button class="row-btn rb-copy" :icon="CopyDocument" @click="handleCopy(row)">
+            <span class="btn-label">复制</span>
+          </el-button>
+          <el-button class="row-btn rb-delete" :icon="Delete" @click="handleDelete(row)">
+            <span class="btn-label">删除</span>
+          </el-button>
         </div>
       </div>
     </div>
 
-    <el-empty v-else description="没有匹配的问卷" />
+    <!-- 分页：与表格页同一套 .pager-row + el-pagination 胶囊风格（数据是前端全量拿的，这里只切页） -->
+    <div v-if="filteredSurveys.length > 0" class="pager-row">
+      <el-pagination
+        :current-page="pageNum"
+        :page-size="pageSize"
+        :page-sizes="[10, 20, 50]"
+        :total="filteredSurveys.length"
+        layout="total, sizes, prev, pager, next, jumper"
+        background
+        @size-change="handleSizeChange"
+        @current-change="handlePageChange"
+      />
+    </div>
+
+    <el-empty v-if="filteredSurveys.length === 0" description="没有匹配的问卷" />
+    </template>
 
     <!-- ========== AI 创建问卷对话框 ========== -->
     <el-dialog
@@ -314,6 +341,11 @@ import QRCode from 'qrcode'
 //   页面只关心「调哪个接口、拿到什么数据」。
 //   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
 import api from '../api'
+// 页码记忆（sessionStorage）：从统计/编辑页返回时仍停在第 N 页
+import { readPageNum, savePageNum } from '../utils/pageMemory'
+
+/** 本页在 sessionStorage 里的页码键 */
+const PAGE_KEY = 'MySurveys'
 
 // 图标已在 main.js 里全局注册，这里不再重复注册
 // （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
@@ -321,6 +353,8 @@ export default {
   data() {
     return {
       surveys: [],
+      /** 首次加载骨架屏（数据回来即关，失败也关，避免一直闪） */
+      loading: true,
       // 新建对话框
       createDialogVisible: false,
       createTab: 'blank',
@@ -341,6 +375,10 @@ export default {
       keyword: '',
       sortOrder: 'desc',
       statusFilter: 'all',
+      // 列表分页：问卷是 api.survey.my() 一次性拿回来的，这里只做**前端分页**
+      // （不新增后端分页接口）；页码按 sessionStorage 记忆，与表格页同一套工具
+      pageNum: 1,
+      pageSize: 10,
 
       // ★ 所有在模板里通过 :icon / :prefix-icon 使用的图标，都要在这里 markRaw 暴露
       Plus: markRaw(Plus),
@@ -396,6 +434,11 @@ export default {
     filteredTemplates() {
       if (this.templateCategory === '全部') return this.templates
       return this.templates.filter(t => (t.templateCategory || '其他') === this.templateCategory)
+    },
+    /** 当前页要渲染的问卷（筛选 + 排序之后切片） */
+    pagedSurveys() {
+      const start = (this.pageNum - 1) * this.pageSize
+      return this.filteredSurveys.slice(start, start + this.pageSize)
     }
   },
   watch: {
@@ -403,10 +446,39 @@ export default {
       if (val === 'template' && this.templates.length === 0) {
         this.loadTemplates()
       }
+    },
+    // 搜索 / 筛选 / 排序一变就回第 1 页，否则会停在"第 3 页但只剩 1 页"的空页上
+    keyword() {
+      this.resetPage()
+    },
+    statusFilter() {
+      this.resetPage()
+    },
+    sortOrder() {
+      this.resetPage()
+    },
+    // 删除 / 刷新后列表变短：把页码夹回最后一页
+    'filteredSurveys.length'(len) {
+      const maxPage = Math.max(1, Math.ceil(len / this.pageSize))
+      if (this.pageNum > maxPage) {
+        this.pageNum = maxPage
+        savePageNum(PAGE_KEY, maxPage)
+      }
     }
   },
   mounted() {
+    // 恢复上次停留的页码（从统计/编辑页返回时不会被弹回第 1 页）
+    this.pageNum = readPageNum(PAGE_KEY)
     this.loadSurveys()
+    // 从看板快捷入口跳过来时直接打开对应弹窗：?ai=1 / ?create=1
+    // ★ 打开后把 query 清掉，避免刷新页面又弹一次
+    if (this.$route.query.ai) {
+      this.openAiDialog()
+      this.$router.replace({ path: this.$route.path })
+    } else if (this.$route.query.create) {
+      this.openCreateDialog()
+      this.$router.replace({ path: this.$route.path })
+    }
   },
   methods: {
     async loadSurveys() {
@@ -415,11 +487,28 @@ export default {
         this.surveys = await api.survey.my()
       } catch {
         // 提示已由接口层统一弹出；这里什么都不做，列表保持原样，用户可手动刷新重试
+      } finally {
+        this.loading = false
       }
     },
 
     handleSort(command) { this.sortOrder = command },
     handleStatus(command) { this.statusFilter = command },
+
+    /** 列表分页：翻页时记页码；筛选变化时由 watch 调 resetPage 回到第 1 页 */
+    handlePageChange(page) {
+      this.pageNum = page
+      savePageNum(PAGE_KEY, page)
+    },
+    handleSizeChange(size) {
+      this.pageSize = size
+      this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
+    },
+    resetPage() {
+      this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
+    },
 
     // ============ 新建相关 ============
     openCreateDialog() {
@@ -685,32 +774,83 @@ export default {
   margin-top: 4px;
 }
 
+/* ============== 顶部 / 工具栏 ============== */
+.page-subtitle {
+  margin: 6px 0 0 15px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.toolbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+.toolbar-trigger {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--ink-2);
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+.toolbar-trigger:hover {
+  background: var(--sky-50);
+  color: var(--sky-600);
+}
+.toolbar-search {
+  width: 280px;
+}
+
+.list-skeleton {
+  padding: 4px;
+}
+
 /* ============== 列表样式 ============== */
 .survey-list {
   background: #fff;
-  border-radius: 10px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-lg);
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow-sm);
 }
 
 .list-header {
   display: grid;
-  grid-template-columns: 3fr 110px 200px 180px 230px;
+  grid-template-columns: 3fr 96px 170px 160px 430px;
   padding: 14px 24px;
-  background: #fafbfc;
-  border-bottom: 1px solid #ebeef5;
-  font-size: 13px;
-  color: #909399;
-  font-weight: 500;
+  background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
+  border-bottom: 1px solid var(--stroke);
+  font-size: 12px;
+  color: var(--ink-3);
+  font-weight: 600;
+  letter-spacing: 0.4px;
 }
 
 .list-row {
   display: grid;
-  grid-template-columns: 3fr 110px 200px 180px 230px;
+  grid-template-columns: 3fr 96px 170px 160px 430px;
   padding: 18px 24px;
-  border-bottom: 1px solid #f5f7fa;
+  border-bottom: 1px solid #f1f5fd;
   align-items: center;
-  transition: all 0.2s ease;
+  transition: background 0.2s var(--ease);
   position: relative;
 }
 
@@ -720,15 +860,16 @@ export default {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
+  top: 14px;
+  bottom: 14px;
   width: 3px;
+  border-radius: 0 3px 3px 0;
   background: transparent;
-  transition: background 0.2s;
+  transition: background 0.2s var(--ease);
 }
 
-.list-row:hover { background: #f8fafc; }
-.list-row:hover::before { background: #409eff; }
+.list-row:hover { background: #f7fbff; }
+.list-row:hover::before { background: var(--brand-gradient); }
 
 .col-title { min-width: 0; padding-right: 16px; }
 
@@ -771,26 +912,28 @@ export default {
   display: inline-flex;
   align-items: center;
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
   font-weight: 500;
+  border: 1px solid transparent;
 }
 
 .badge .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  margin-right: 5px;
+  margin-right: 6px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6);
 }
 
-.badge-published { background: #f0f9eb; color: #67c23a; }
-.badge-published .dot { background: #67c23a; }
+.badge-published { background: #ecfdf3; color: #16a34a; border-color: #c9f2d9; }
+.badge-published .dot { background: #16a34a; }
 
-.badge-draft { background: #fdf6ec; color: #e6a23c; }
-.badge-draft .dot { background: #e6a23c; }
+.badge-draft { background: #fff8e8; color: #d97706; border-color: #ffe7bd; }
+.badge-draft .dot { background: #d97706; }
 
-.badge-ended { background: #fef0f0; color: #f56c6c; }
-.badge-ended .dot { background: #f56c6c; }
+.badge-ended { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+.badge-ended .dot { background: #64748b; }
 
 .col-time { font-size: 12px; }
 
@@ -826,10 +969,121 @@ export default {
 .col-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
 }
 
-.col-actions .el-button { margin: 0; }
+/* ============== 行内操作按钮：带文字的胶囊，一种功能一个色 ============== */
+.row-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  background: #f4f7fc;
+  white-space: nowrap;
+  color: var(--ink-2);
+  box-shadow: none;
+  transition:
+    transform 0.18s var(--ease),
+    background-color 0.18s var(--ease),
+    color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+.row-btn .el-icon {
+  font-size: 13px;
+  margin-right: 4px;
+}
+.row-btn:hover {
+  transform: translateY(-1px);
+}
+.row-btn:active {
+  transform: scale(0.97);
+}
+
+/* 编辑 = 天空蓝（主操作） */
+.rb-edit {
+  background: #eaf3ff;
+  color: #1d4ed8;
+  border-color: #d5e7ff;
+}
+.rb-edit:hover {
+  background: #2f80ed;
+  color: #fff;
+  border-color: #2f80ed;
+  box-shadow: 0 6px 14px rgba(47, 128, 237, 0.3);
+}
+
+/* 发布 = 绿 */
+.rb-publish {
+  background: #e9f9ef;
+  color: #15803d;
+  border-color: #cdf2dc;
+}
+.rb-publish:hover {
+  background: #16a34a;
+  color: #fff;
+  border-color: #16a34a;
+  box-shadow: 0 6px 14px rgba(22, 163, 74, 0.28);
+}
+
+/* 分享 = 橙 */
+.rb-share {
+  background: #fff6e8;
+  color: #b45309;
+  border-color: #ffe6bf;
+}
+.rb-share:hover {
+  background: #f59e0b;
+  color: #fff;
+  border-color: #f59e0b;
+  box-shadow: 0 6px 14px rgba(245, 158, 11, 0.3);
+}
+
+/* 统计 = 紫（与"复制"的青色刻意区分开） */
+.rb-stats {
+  background: #f3ecff;
+  color: #6d28d9;
+  border-color: #e4d6ff;
+}
+.rb-stats:hover {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed;
+  box-shadow: 0 6px 14px rgba(124, 58, 237, 0.3);
+}
+
+/* 复制 = 青 */
+.rb-copy {
+  background: #e6f9fd;
+  color: #0e7490;
+  border-color: #c8f1fa;
+}
+.rb-copy:hover {
+  background: #0891b2;
+  color: #fff;
+  border-color: #0891b2;
+  box-shadow: 0 6px 14px rgba(8, 145, 178, 0.3);
+}
+
+/* 删除 = 红 */
+.rb-delete {
+  background: #ffefef;
+  color: #b91c1c;
+  border-color: #ffd9d9;
+}
+.rb-delete:hover {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+  box-shadow: 0 6px 14px rgba(239, 68, 68, 0.3);
+}
+
+.col-actions .el-button {
+  margin: 0;
+}
 
 /* ============== 模板卡片 ============== */
 .template-grid {
@@ -890,13 +1144,53 @@ export default {
 
 .template-card:hover .tpl-footer { opacity: 1; }
 
-@media (max-width: 1100px) {
+/* 宽屏收窄一点、操作列按屏幕逐级压缩；窄屏只留图标（但按钮仍是 30px，不再是小圆点） */
+@media (max-width: 1500px) {
   .list-header, .list-row {
-    grid-template-columns: 2fr 100px 180px 150px 200px;
-    padding: 14px 16px;
+    grid-template-columns: 2.4fr 88px 150px 140px 400px;
+    padding: 14px 18px;
+  }
+  .row-btn {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .list-header, .list-row {
+    grid-template-columns: 2fr 80px 130px 120px 360px;
+  }
+  .row-btn {
+    padding: 0 8px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 1150px) {
+  .btn-label {
+    display: none;
+  }
+  .row-btn {
+    width: 30px;
+    padding: 0;
+  }
+  .row-btn .el-icon {
+    margin-right: 0;
+  }
+  .list-header, .list-row {
+    grid-template-columns: 2fr 80px 130px 120px 220px;
   }
   .template-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  /* 窄屏：列表自己横向滚动（与 .table-card 同一口径），不要把整页撑出横向滚动条 */
+  .survey-list {
+    overflow-x: auto;
+  }
+  .list-header,
+  .list-row {
+    min-width: 800px;
   }
 }
 </style>

@@ -71,13 +71,19 @@ public class QuestionController {
     @GetMapping("/list/{surveyId}")
     public List<Question> getQuestions(@PathVariable Integer surveyId,
                                        @RequestHeader(value = "X-User-Id", required = false) Integer userId,
-                                       @RequestHeader(value = "X-User-Role", required = false) String role) {
+                                       @RequestHeader(value = "X-User-Role", required = false) String role,
+                                       @RequestHeader(value = "X-Survey-Password", required = false) String password) {
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) {
             throw new BizException("问卷不存在");
         }
 
         OwnershipGuard.requireVisible(survey, userId, role, "问卷尚未发布，无权查看");
+
+        // ★ 答题密码：没设就直通；设了就必须带对请求头。
+        //   放在 requireVisible 之后：先判"能不能看"，再判"要不要密码"，
+        //   否则草稿问卷会先被问密码、反而泄露"存在这样一份问卷"。
+        surveyService.requireAccessPassword(survey, password);
 
         return questionService.getQuestionsBySurveyId(surveyId);
     }

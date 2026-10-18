@@ -32,6 +32,8 @@ import java.io.IOException;
  *   /api/user/refresh                     ：调用它时 access token 已过期（见 isWhiteList）
  *   /api/captcha/                         ：注册页的滑块验证码（此时必然没有 token）
  *   /api/survey/share/、/api/survey/view/ ：匿名访客凭分享码打开问卷、记访问量
+ *   /api/survey/result/                   ：匿名查看"公开结果页"（问卷作者主动开启才可用，
+ *                                           Controller 内部还会校验 public_result=1 并去掉填空原文）
  *   /api/question/list/                   ：匿名答题页必须能加载题目
  *                                           ★ Controller 内部还细分了"已发布可读 / 草稿仅作者"
  *   /api/answer/submit-share/             ：匿名提交答卷
@@ -223,6 +225,7 @@ public class JwtAuthFilter implements Filter {
                 || uri.equals("/api/user/refresh")
                 || uri.startsWith("/api/captcha/")
                 || uri.startsWith("/api/survey/share/")
+                || uri.startsWith("/api/survey/result/")
                 || uri.startsWith("/api/survey/view/")
                 || uri.startsWith("/api/question/list/")
                 || uri.startsWith("/api/answer/submit-share/")

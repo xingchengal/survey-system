@@ -1,7 +1,10 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="m-0">📜 系统监控</h2>
+      <div>
+        <h2 class="page-title">系统监控</h2>
+        <p class="page-subtitle">操作日志与异常日志 · 保留 90 天</p>
+      </div>
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
@@ -14,14 +17,23 @@
           </span>
         </template>
 
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 16px; gap: 10px;">
-          <el-input v-model="opUsername" placeholder="按操作人筛选..." clearable :prefix-icon="User" style="width: 200px;" @keyup.enter="loadOperations" @clear="loadOperations" />
-          <el-input v-model="opOperation" placeholder="按操作类型筛选..." clearable :prefix-icon="Search" style="width: 220px;" @keyup.enter="loadOperations" @clear="loadOperations" />
+        <div class="toolbar-card">
+          <el-input v-model="opUsername" placeholder="按操作人筛选..." clearable :prefix-icon="User" @keyup.enter="loadOperations" @clear="loadOperations" />
+          <el-input v-model="opOperation" placeholder="按操作类型筛选..." clearable :prefix-icon="Search" @keyup.enter="loadOperations" @clear="loadOperations" />
           <el-button type="primary" @click="loadOperations">搜索</el-button>
           <el-button :icon="Refresh" @click="loadOperations">刷新</el-button>
+          <TableDensity />
         </div>
 
-        <el-table class="w-full" :data="operations" stripe border v-loading="opLoading">
+        <div class="table-card">
+        <PageState
+          :loading="opLoading"
+          :error="opError"
+          :empty="operations.length === 0"
+          empty-text="暂无日志"
+          @retry="loadOperations"
+        >
+        <el-table class="w-full" :data="operations" stripe border max-height="560">
           <el-table-column prop="id" label="ID" width="80" align="center" />
           <el-table-column prop="username" label="操作人" width="130" align="center">
             <template #default="{ row }">
@@ -54,12 +66,13 @@
             :total="opTotal"
             layout="total, sizes, prev, pager, next, jumper"
             background
-            @size-change="loadOperations"
-            @current-change="loadOperations"
+            @size-change="handleOpSizeChange"
+            @current-change="handleOpPageChange"
           />
         </div>
+        </PageState>
+        </div>
 
-        <el-empty v-if="operations.length === 0 && !opLoading" description="暂无日志" />
       </el-tab-pane>
 
       <!-- ==================== 异常日志 ==================== -->
@@ -71,14 +84,23 @@
           </span>
         </template>
 
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 16px; gap: 10px;">
+        <div class="toolbar-card">
           <el-input v-model="errorKeyword" placeholder="搜索异常信息、路径..." clearable :prefix-icon="Search" style="width: 300px;" @keyup.enter="loadErrors" @clear="loadErrors" />
           <el-button type="primary" @click="loadErrors">搜索</el-button>
           <el-button :icon="Refresh" @click="loadErrors">刷新</el-button>
           <el-button type="danger" :icon="Delete" @click="clearErrors" :disabled="errorTotal === 0">清空全部</el-button>
+          <TableDensity />
         </div>
 
-        <el-table class="w-full" :data="errors" stripe border v-loading="errorLoading">
+        <div class="table-card">
+        <PageState
+          :loading="errorLoading"
+          :error="errorError"
+          :empty="errors.length === 0"
+          empty-text="暂无异常"
+          @retry="loadErrors"
+        >
+        <el-table class="w-full" :data="errors" stripe border max-height="560">
           <el-table-column prop="id" label="ID" width="70" align="center" />
           <el-table-column prop="errorType" label="异常类型" width="180" align="center">
             <template #default="{ row }">
@@ -108,7 +130,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="createTime" label="发生时间" width="170" />
-          <el-table-column label="操作" width="120" align="center" fixed="right">
+          <el-table-column label="操作" width="150" align="center" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="viewDetail(row)">详情</el-button>
               <el-button type="danger" link size="small" @click="deleteError(row)">删除</el-button>
@@ -125,11 +147,12 @@
             layout="total, sizes, prev, pager, next, jumper"
             background
             @size-change="handleErrorSizeChange"
-            @current-change="loadErrors"
+            @current-change="handleErrorPageChange"
           />
         </div>
+        </PageState>
+        </div>
 
-        <el-empty v-if="errors.length === 0 && !errorLoading" description="暂无异常" />
       </el-tab-pane>
     </el-tabs>
 
@@ -170,10 +193,21 @@ import { Refresh, Search, User, Delete } from '@element-plus/icons-vue'
 // ★ 统一接口层（src/api）：日志类接口按「操作日志 / 异常日志」两个子对象导出，
 //   页面只关心「调哪个接口、拿到什么数据」
 import api from '../api'
+// 三态容器：骨架 / 空 / 错误（带重试）
+import PageState from '../components/PageState.vue'
+// 行密度切换（默认 / 紧凑）
+import TableDensity from '../components/TableDensity.vue'
+// 页码记忆（sessionStorage）：两个 tab 各存各的
+import { readPageNum, savePageNum } from '../utils/pageMemory'
+
+/** 两个 tab 各自的页码键 */
+const OP_PAGE_KEY = 'OperationLog:op'
+const ERROR_PAGE_KEY = 'OperationLog:error'
 
 // 图标已在 main.js 里全局注册，这里不再重复注册
 // （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
+  components: { PageState, TableDensity },
   data() {
     return {
       activeTab: 'operation',
@@ -181,6 +215,8 @@ export default {
       // 操作日志
       operations: [],
       opLoading: false,
+      // 接口失败标记：由 PageState 渲染「加载失败 + 重试」
+      opError: false,
       opUsername: '',
       opOperation: '',
       opPageNum: 1,
@@ -190,6 +226,7 @@ export default {
       // 异常日志
       errors: [],
       errorLoading: false,
+      errorError: false,
       errorKeyword: '',
       errorPageNum: 1,
       errorPageSize: 10,
@@ -207,10 +244,32 @@ export default {
     }
   },
   mounted() {
+    // 恢复两个 tab 各自停留的页码
+    this.opPageNum = readPageNum(OP_PAGE_KEY)
+    this.errorPageNum = readPageNum(ERROR_PAGE_KEY)
     this.loadOperations()
     this.loadErrorCount()
   },
   methods: {
+    /** 操作日志：改条数 / 翻页都要记页码（改条数时页码复位，避免落到空页） */
+    handleOpSizeChange() {
+      this.opPageNum = 1
+      savePageNum(OP_PAGE_KEY, 1)
+      this.loadOperations()
+    },
+
+    handleOpPageChange(page) {
+      this.opPageNum = page
+      savePageNum(OP_PAGE_KEY, page)
+      this.loadOperations()
+    },
+
+    handleErrorPageChange(page) {
+      this.errorPageNum = page
+      savePageNum(ERROR_PAGE_KEY, page)
+      this.loadErrors()
+    },
+
     /**
      * ★ 改"每页条数"时要把**页码复位到 1**，否则会落到空页上：
      *   页码仍是旧值时，例如在第 5 页把每页改成 100 条，总页数变成 1 页，
@@ -219,6 +278,7 @@ export default {
      */
     handleErrorSizeChange() {
       this.errorPageNum = 1
+      savePageNum(ERROR_PAGE_KEY, 1)
       this.loadErrors()
     },
 
@@ -233,6 +293,7 @@ export default {
     // ==================== 操作日志 ====================
     async loadOperations() {
       this.opLoading = true
+      this.opError = false
       try {
         // 参数对象交给接口层，toQuery 会自动拼串并跳过 null/undefined/空串
         const data = await api.operationLog.page({
@@ -245,6 +306,7 @@ export default {
         this.opTotal = data.total || 0
       } catch {
         // ★ 接口层已按 HTTP 状态码统一提示，这里只留 catch 做流程控制，loading 由 finally 复位
+        this.opError = true
       } finally {
         this.opLoading = false
       }
@@ -253,6 +315,7 @@ export default {
     // ==================== 异常日志 ====================
     async loadErrors() {
       this.errorLoading = true
+      this.errorError = false
       try {
         // 同 loadOperations：只传参数对象，query 拼接交给接口层
         const data = await api.errorLog.page({
@@ -264,6 +327,7 @@ export default {
         this.errorTotal = data.total || 0
       } catch {
         // ★ 不再自己弹「加载异常日志失败」（接口层已统一提示），只保留流程控制
+        this.errorError = true
       } finally {
         this.errorLoading = false
       }

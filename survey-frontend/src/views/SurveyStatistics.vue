@@ -1,86 +1,154 @@
 <template>
-  <div style="padding: 20px;">
-    <!-- 顶部栏 -->
+  <div class="stats-page">
+    <!-- ==================== 头部 ==================== -->
     <div class="page-header">
       <div>
-        <h2 class="m-0">📈 {{ surveyTitle }} - 统计</h2>
-        <div style="color: #666; margin-top: 6px;">
-          回收数量：<strong style="color: #f56c6c; font-size: 20px;">{{ responseCount }}</strong> 份
-          <!-- 质控：有可疑样本时才出现，避免"0 份可疑"也占一行 -->
-          <template v-if="quality && quality.suspicious > 0">
-            <el-tag type="warning" size="small" class="ml-8" :title="qualityHint">
-              其中可疑 {{ quality.suspicious }} 份（{{ quality.suspiciousRate }}%）
-            </el-tag>
-            <el-switch v-model="excludeInvalid" class="ml-10" size="small"
-                       active-text="剔除可疑样本" @change="reloadAll" />
-          </template>
-        </div>
+        <h2 class="page-title">答卷统计</h2>
+        <p class="page-subtitle">{{ surveyTitle || '加载中…' }} · 数据来自真实答卷</p>
       </div>
-      <div>
+      <div class="header-actions">
         <el-button @click="$router.push('/my/surveys')">返回</el-button>
-        <el-button type="primary" @click="openAnswerList" :disabled="responseCount === 0">
+        <el-button :disabled="responseCount === 0" @click="openAnswerList">
           <el-icon><View /></el-icon> 查看答卷
         </el-button>
-        <el-button type="success" @click="exportExcel" :disabled="responseCount === 0">
-          <el-icon><Download /></el-icon> 导出Excel
+        <el-button :disabled="responseCount === 0" @click="openShare">
+          <el-icon><Share /></el-icon> 分享报告
+        </el-button>
+        <el-button type="primary" :disabled="responseCount === 0" @click="exportExcel">
+          <el-icon><Download /></el-icon> 导出 Excel
         </el-button>
       </div>
     </div>
 
-    <el-empty v-if="questions.length === 0" description="该问卷还没有题目" />
-
-    <div v-else>
-      <el-card class="mb-20" v-for="(q, qIndex) in questions" :key="q.id">
-        <div style="font-weight: bold; font-size: 16px; margin-bottom: 16px;">
-          {{ qIndex + 1 }}. {{ q.title }}
-          <el-tag class="ml-8" size="small">
-            {{ q.type === 1 ? '单选题' : q.type === 2 ? '多选题' : '单行输入' }}
-          </el-tag>
-        </div>
-
-        <!-- 选择题图表 -->
-        <div v-if="q.type === 1 || q.type === 2">
-          <div v-if="q.chartData && q.chartData.length > 0">
-            <div :ref="el => setChartRef(el, q.id)" style="width: 100%; height: 320px;"></div>
-          </div>
-          <div v-else style="text-align: center; color: #999; padding: 20px;">暂无回答数据</div>
-        </div>
-
-        <!-- 填空题回答列表 -->
-        <div v-else>
-          <div v-if="q.textAnswers && q.textAnswers.length > 0">
-            <div v-for="(ans, aIndex) in q.textAnswers" :key="aIndex"
-                 style="padding: 10px 14px; margin-bottom: 8px; background: #f5f7fa; border-radius: 6px;">
-              {{ ans }}
-            </div>
-          </div>
-          <div v-else style="text-align: center; color: #999; padding: 20px;">暂无回答数据</div>
-        </div>
-      </el-card>
+    <!-- ==================== 骨架屏 ==================== -->
+    <div v-if="loading" class="stats-skeleton">
+      <el-row :gutter="20" class="mb-20">
+        <el-col v-for="i in 4" :key="i" :span="6"><div class="sk-block" style="height: 96px;"></div></el-col>
+      </el-row>
+      <div class="sk-block" style="height: 340px; margin-bottom: 20px;"></div>
+      <div class="sk-block" style="height: 340px;"></div>
     </div>
 
-    <!-- 答卷列表对话框 -->
-    <el-dialog v-model="listVisible" title="所有答卷" width="700px">
-      <el-table class="w-full" :data="answers" stripe border max-height="400">
-        <el-table-column type="index" label="序号" width="70" align="center" />
-        <el-table-column prop="id" label="答卷ID" width="90" align="center" />
-        <el-table-column prop="submitTime" label="提交时间" width="200" />
+    <template v-else>
+      <!-- ==================== 四个概览 ==================== -->
+      <el-row :gutter="20" class="mb-20">
+        <el-col v-for="tile in tiles" :key="tile.key" :span="6">
+          <div class="stat-tile">
+            <div class="stat-ico" :style="{ background: tile.bg, color: tile.color }">
+              <el-icon :size="22"><component :is="tile.icon" /></el-icon>
+            </div>
+            <div>
+              <div class="stat-label">{{ tile.label }}</div>
+              <div class="stat-num" :style="{ color: tile.color }">{{ tile.value }}</div>
+            </div>
+          </div>
+        </el-col>
+      </el-row>
+
+      <!-- ==================== 质控条 ==================== -->
+      <div v-if="quality && quality.suspicious > 0" class="quality-bar">
+        <div class="quality-main">
+          <div class="quality-icon"><el-icon :size="20"><Warning /></el-icon></div>
+          <div>
+            <div class="quality-title">
+              可疑样本 {{ quality.suspicious }} 份
+              <span class="quality-rate">（占 {{ quality.suspiciousRate }}%）</span>
+            </div>
+            <div class="quality-reasons" :title="qualityHint">
+              <el-tag
+                v-for="r in quality.reasons"
+                :key="r.code"
+                size="small"
+                effect="plain"
+                round
+                class="reason-tag"
+              >
+                {{ r.label }} · {{ r.count }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+        <div class="quality-switch">
+          <span class="quality-switch-label">统计时剔除可疑样本</span>
+          <el-switch v-model="excludeInvalid" @change="reloadAll" />
+        </div>
+      </div>
+
+      <!-- ==================== 题目列表 ==================== -->
+      <el-empty v-if="questions.length === 0" description="该问卷还没有题目" />
+
+      <div v-else class="question-list">
+        <el-card v-for="(q, qIndex) in questions" :key="q.id" class="q-card">
+          <div class="q-head">
+            <div class="q-index">{{ qIndex + 1 }}</div>
+            <div class="q-title-wrap">
+              <div class="q-title">{{ q.title }}</div>
+              <div class="q-meta">
+                <el-tag :type="typeTag(q.type)" size="small" effect="light" round>{{ typeName(q.type) }}</el-tag>
+                <span class="q-count">{{ answerSummary(q) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 选择题 -->
+          <div v-if="isChoice(q)">
+            <div v-if="q.chartData && q.chartData.length > 0" :ref="el => setChartRef(el, q.id)" class="q-chart"></div>
+            <el-empty v-else description="暂无回答数据" :image-size="70" />
+          </div>
+
+          <!-- 填空题 -->
+          <div v-else class="text-answers">
+            <template v-if="q.textAnswers && q.textAnswers.length > 0">
+              <div v-for="(ans, aIndex) in visibleTexts(q)" :key="aIndex" class="text-answer">
+                <span class="text-answer-index">{{ aIndex + 1 }}</span>
+                <span class="text-answer-body">{{ ans }}</span>
+              </div>
+              <el-button
+                v-if="q.textAnswers.length > TEXT_PREVIEW"
+                link
+                type="primary"
+                class="text-more"
+                @click="toggleTexts(q.id)"
+              >
+                {{ textExpanded[q.id] ? '收起' : `展开全部 ${q.textAnswers.length} 条` }}
+              </el-button>
+            </template>
+            <el-empty v-else description="暂无回答数据" :image-size="70" />
+          </div>
+        </el-card>
+      </div>
+    </template>
+
+    <!-- ==================== 答卷列表对话框 ==================== -->
+    <el-dialog v-model="listVisible" width="760px" class="answer-dialog">
+      <template #header>
+        <div class="dialog-head">
+          <span class="dialog-title">全部答卷</span>
+          <el-tag size="small" effect="light" round>共 {{ answerPage.total }} 份</el-tag>
+        </div>
+      </template>
+
+      <el-table v-loading="answerLoading" class="w-full" :data="answers" max-height="420">
+        <el-table-column type="index" label="序号" width="64" align="center" />
+        <el-table-column prop="id" label="答卷 ID" width="96" align="center" />
+        <el-table-column prop="submitTime" label="提交时间" width="190" />
         <el-table-column label="填写者" align="center">
           <template #default="{ row }">
-            <el-tag v-if="row.userId" type="success">用户 ID: {{ row.userId }}</el-tag>
-            <el-tag v-else type="info">匿名</el-tag>
+            <el-tag v-if="row.userId" type="success" effect="light" round size="small">用户 #{{ row.userId }}</el-tag>
+            <el-tag v-else type="info" effect="light" round size="small">匿名</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center">
+        <el-table-column label="操作" width="110" align="center">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="viewAnswerDetail(row)">查看详情</el-button>
           </template>
         </el-table-column>
       </el-table>
+
       <!-- ★ 分页器：没有它时后端一次返回整份问卷的全部答卷（两万份 = 两万个对象） -->
       <el-pagination
         v-if="answerPage.total > 0"
-        class="mt-3"
+        class="answer-pager"
         background
         layout="total, prev, pager, next"
         :current-page="answerPage.pageNum"
@@ -88,18 +156,35 @@
         :total="answerPage.total"
         @current-change="loadAnswerPage"
       />
-      <el-empty v-if="answers.length === 0" description="暂无答卷" />
+      <el-empty v-if="answers.length === 0" description="暂无答卷" :image-size="70" />
     </el-dialog>
 
-    <!-- 答卷详情对话框 -->
-    <el-dialog v-model="detailVisible" :title="`答卷 #${currentAnswerId} 详情`" width="700px">
-      <div v-for="(item, idx) in answerDetails" :key="item.id" style="margin-bottom: 16px; padding: 12px; background: #f5f7fa; border-radius: 6px;">
-        <div style="font-weight: bold; margin-bottom: 6px;">
-          {{ idx + 1 }}. {{ getQuestionTitle(item.questionId) }}
+    <!-- ==================== 答卷详情对话框 ==================== -->
+    <el-dialog v-model="detailVisible" :title="`答卷 #${currentAnswerId} 详情`" width="720px">
+      <div v-for="(item, idx) in answerDetails" :key="item.id" class="detail-row">
+        <div class="detail-index">{{ idx + 1 }}</div>
+        <div class="detail-body">
+          <div class="detail-title">{{ getQuestionTitle(item.questionId) }}</div>
+          <div class="detail-content">{{ item.content || '（未作答）' }}</div>
         </div>
-        <div class="text-secondary">{{ item.content || '（未作答）' }}</div>
       </div>
-      <el-empty v-if="answerDetails.length === 0" description="暂无回答内容" />
+      <el-empty v-if="answerDetails.length === 0" description="暂无回答内容" :image-size="70" />
+    </el-dialog>
+
+    <!-- ==================== 分享报告（生成图片） ==================== -->
+    <el-dialog v-model="shareVisible" title="分享报告" width="560px" top="4vh">
+      <div class="share-preview">
+        <img v-if="shareImage" :src="shareImage" alt="答卷统计分享图" />
+        <div v-else class="sk-block" style="height: 420px;"></div>
+      </div>
+      <p class="share-hint">
+        图片可直接保存或转发到群里；文字摘要适合贴到聊天/答辩 PPT 里。
+      </p>
+      <template #footer>
+        <el-button @click="shareVisible = false">关闭</el-button>
+        <el-button @click="copyShareText">复制文字摘要</el-button>
+        <el-button type="primary" :disabled="!shareImage" @click="downloadShareImage">保存图片</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -108,14 +193,26 @@
 // ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
 import echarts from '../utils/echarts'
 import { ElMessage } from 'element-plus'
+import { ChatDotRound, Memo, Warning, CircleCheck, Share } from '@element-plus/icons-vue'
 // ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
 //   http.js 统一带 Authorization、统一按 HTTP 状态码判成败、统一弹后端 message。
 //   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
 import api from '../api'
-// 本页图标均为模板标签形式，已由 main.js 全局注册，无需 import
+import {
+  chartText, chartStrong, chartSplit, chartTooltip, THEME_EVENT,
+  chartPalette, chartColor, chartSurface, chartEmptyGraphic, chartNum, chartPct, isDarkTheme
+} from '../utils/chartTheme'
+// 分享图：纯 canvas 手绘（不引截图库），见 utils/shareCard.js
+import { renderStatsCard } from '../utils/shareCard'
+// 题型元数据与判定：与后端 common/QuestionType 同口径
+import { typeLabel, typeMeta, hasChart, isRating, ratingAverage } from '../utils/questionTypes'
 
-// 图标已在 main.js 全局注册，不再重复注册（View 是 HTML 保留标签名）
+/** 填空题默认先展示多少条（其余折叠，避免 2000 条一次性铺满页面） */
+const TEXT_PREVIEW = 20
+
 export default {
+  // Share 在模板里以标签形式用（<Share />），这里显式注册
+  components: { Share },
   data() {
     return {
       surveyId: null,
@@ -123,8 +220,11 @@ export default {
       responseCount: 0,
       questions: [],
       chartInstances: {},
+      /** 首屏 / 切换口径时的骨架屏 */
+      loading: true,
       // 答卷列表
       listVisible: false,
+      answerLoading: false,
       answers: [],
       /**
        * 答卷列表分页状态（与后端 PageResult 字段同名，便于直接回填）。
@@ -139,21 +239,57 @@ export default {
       /** 质控摘要：{ total, suspicious, suspiciousRate, reasons:[{code,label,count}] } */
       quality: null,
       /** 是否剔除可疑样本（true = 图表只用有效答卷） */
-      excludeInvalid: false
+      excludeInvalid: false,
+      // ===== 分享报告（图片） =====
+      shareVisible: false,
+      /** 生成好的 PNG dataURL；空串 = 还在生成 */
+      shareImage: '',
+      // ===== 填空题折叠 =====
+      TEXT_PREVIEW,
+      textExpanded: {}
     }
   },
   computed: {
+    /** 顶部四个概览卡 */
+    tiles() {
+      const suspicious = this.quality ? this.quality.suspicious : 0
+      const counted = this.excludeInvalid ? Math.max(this.responseCount - suspicious, 0) : this.responseCount
+      return [
+        { key: 'responses', label: '回收答卷', value: this.responseCount, icon: ChatDotRound, color: '#2f80ed', bg: 'linear-gradient(135deg,#e8f3ff,#d7e9ff)' },
+        { key: 'questions', label: '题目数量', value: this.questions.length, icon: Memo, color: '#7c3aed', bg: 'linear-gradient(135deg,#f3ecff,#e6dbff)' },
+        { key: 'suspicious', label: '可疑样本', value: suspicious, icon: Warning, color: '#d97706', bg: 'linear-gradient(135deg,#fff5e6,#ffe9c7)' },
+        { key: 'counted', label: '计入统计', value: counted, icon: CircleCheck, color: '#16a34a', bg: 'linear-gradient(135deg,#e9f9ef,#d6f3e3)' }
+      ]
+    },
     /** 可疑原因的中文汇总（鼠标悬停在徽标上能看到原因分布） */
     qualityHint() {
       if (!this.quality || !this.quality.reasons || !this.quality.reasons.length) return ''
       return this.quality.reasons.map(r => `${r.label}：${r.count} 份`).join('；')
+    },
+    /**
+     * 分享图里的环形数据：始终与"当前口径"一致 ——
+     * 关掉剔除时全部计入；打开剔除时把可疑样本单列出来。
+     * 两份加起来恒等于回收答卷数，不会出现"百分比加起来不是 100%"。
+     */
+    shareSegments() {
+      const suspicious = this.quality ? this.quality.suspicious : 0
+      const counted = this.excludeInvalid
+        ? Math.max(this.responseCount - suspicious, 0)
+        : this.responseCount
+      const excluded = this.excludeInvalid ? suspicious : 0
+      return [
+        { name: '计入统计', value: counted, color: '#22c55e' },
+        { name: '剔除可疑', value: excluded, color: '#f59e0b' }
+      ].filter(s => s.value > 0)
     }
   },
   mounted() {
     this.surveyId = this.$route.params.id
     this.loadAll()
+    window.addEventListener(THEME_EVENT, this.handleThemeChange)
   },
   beforeUnmount() {
+    window.removeEventListener(THEME_EVENT, this.handleThemeChange)
     // ★ resize 监听必须用具名函数，否则无法 removeEventListener：
     //   匿名写法 `window.addEventListener('resize', () => chart.resize())` 会让每进一次统计页
     //   就永久多一个监听，而且它还会对已 dispose 的实例调 resize。
@@ -165,12 +301,25 @@ export default {
     })
   },
   methods: {
-    async loadAll() {
-      try {
-        // ★ 切换"剔除可疑样本"会重跑本方法：先把旧图表 dispose 掉 ——
-        //   否则 v-for 重建 DOM 后，chart 还挂在已脱离文档的旧元素上，图表会变空白。
-        this.disposeCharts()
+    /** 主题切换：销毁旧图表并用新配色重画（不重新请求数据，也不清空 el 引用） */
+    handleThemeChange() {
+      Object.values(this.chartInstances).forEach(item => {
+        if (item.resizeHandler) window.removeEventListener('resize', item.resizeHandler)
+        if (item.chart) item.chart.dispose()
+        item.chart = null
+        item.resizeHandler = null
+      })
+      this.questions.forEach(q => {
+        if (this.isChoice(q) && q.chartData && q.chartData.length > 0) this.initChart(q)
+      })
+    },
 
+    async loadAll() {
+      // ★ 切换"剔除可疑样本"会重跑本方法：先把旧图表 dispose 掉 ——
+      //   否则 v-for 重建 DOM 后，chart 还挂在已脱离文档的旧元素上，图表会变空白。
+      this.disposeCharts()
+      this.loading = true
+      try {
         // ★ 一次请求取回全部：问卷标题 + 答卷数 + 题目列表 + 每题的统计/文本。
         //   原实现是 `1 + 1 + 1 + N` 次请求，且最后一步是 for + await **串行** ——
         //   N 道题就要等 N 个来回，延迟直接叠加（10 题约等于 10 倍往返）。
@@ -190,18 +339,20 @@ export default {
 
         // 质控摘要（可疑份数 / 原因分布）：独立请求，失败不影响主流程
         this.loadQuality()
-
-        // ↓↓↓ 下面是纯前端图表渲染 ↓↓↓
-        this.$nextTick(() => {
-          this.questions.forEach(q => {
-            if ((q.type === 1 || q.type === 2) && q.chartData && q.chartData.length > 0) {
-              this.initChart(q)
-            }
-          })
-        })
       } catch {
         // 失败提示由接口层统一弹出，这里不再重复弹，避免出现两条红字。
+      } finally {
+        this.loading = false
       }
+
+      // ★ 骨架屏与内容是两个分支：必须等 loading=false 的那一帧挂完 DOM 再画，
+      //   否则图表容器不存在 → init 出来是 0 宽画布（表现为"卡片空白且不报错"）。
+      await this.$nextTick()
+      this.questions.forEach(q => {
+        if (this.isChoice(q) && q.chartData && q.chartData.length > 0) {
+          this.initChart(q)
+        }
+      })
     },
 
     /** 质控摘要（失败就静默：它只是提示，不该让统计页整体报错） */
@@ -227,7 +378,8 @@ export default {
       this.chartInstances = {}
     },
 
-    setChartRef(el, questionId) {      if (!el) return
+    setChartRef(el, questionId) {
+      if (!el) return
       if (!this.chartInstances[questionId]) {
         // resizeHandler 与 chart 一起存，卸载时才能移除监听（见 beforeUnmount）
         this.chartInstances[questionId] = { el: null, chart: null, resizeHandler: null }
@@ -238,53 +390,165 @@ export default {
     initChart(question) {
       const ref = this.chartInstances[question.id]
       if (!ref || !ref.el) return
+      // 容器宽度为 0（首帧布局未完成）时画出来的是 0 宽画布
+      if (!ref.el.clientWidth) return
+      if (ref.resizeHandler) {
+        window.removeEventListener('resize', ref.resizeHandler)
+        ref.resizeHandler = null
+      }
       if (ref.chart) ref.chart.dispose()
 
       const chart = echarts.init(ref.el)
       ref.chart = chart
 
-      const isSingle = question.type === 1
+      // 评分题的 content 是 "1"~"5"，图表标签补上"分"，避免 x 轴只有裸数字
+      const isRatingQuestion = isRating(question.type)
       const chartData = question.chartData.map(item => ({
-        name: item.content,
+        name: isRatingQuestion ? `${item.content} 分` : item.content,
         value: item.count
       }))
+      const total = chartData.reduce((sum, d) => sum + Number(d.value || 0), 0)
+      // 全部选项都是 0 票：不画一个空坐标系，直接在图表中央给一句文案
+      const isEmpty = total === 0
 
-      const option = isSingle
+      // 单选 / 下拉 = 圆环（中心总数）；多选 / 评分 = 横向条形（分布更好读）
+      const pieLike = question.type === 1 || question.type === 5
+      const option = pieLike
         ? {
-            tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-            legend: { orient: 'vertical', left: 'left' },
+            color: chartPalette(),
+            tooltip: {
+              trigger: 'item',
+              // 单位统一为「人 / %」，百分比四舍五入到整数
+              formatter: p => `${p.name}：${chartNum(p.value)} 人（${chartPct(p.percent)}%）`,
+              ...chartTooltip()
+            },
+            title: {
+              text: String(total),
+              subtext: '回答数',
+              left: '34%',
+              top: '40%',
+              textAlign: 'center',
+              textStyle: { fontSize: 24, fontWeight: 700, color: chartStrong() },
+              subtextStyle: { fontSize: 12, color: chartText() }
+            },
+            legend: {
+              orient: 'vertical',
+              right: '4%',
+              top: 'middle',
+              icon: 'circle',
+              itemWidth: 8,
+              itemHeight: 8,
+              textStyle: { color: chartText() }
+            },
             series: [
               {
                 type: 'pie',
-                radius: ['40%', '70%'],
-                label: { formatter: '{b}\n{c}人' },
+                radius: ['54%', '76%'],
+                center: ['34%', '50%'],
+                itemStyle: { borderColor: chartSurface(), borderWidth: 3, borderRadius: 6 },
+                label: { formatter: '{b}\n{c} 人', color: chartText(), fontSize: 12 },
+                labelLine: { length: 10, length2: 8 },
                 data: chartData
               }
             ]
           }
         : {
-            tooltip: { trigger: 'axis' },
-            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-            xAxis: {
-              type: 'category',
-              data: chartData.map(d => d.name),
-              axisLabel: { interval: 0, rotate: 20 }
+            color: chartPalette(),
+            tooltip: {
+              trigger: 'axis',
+              axisPointer: { type: 'shadow' },
+              formatter: params => {
+                const p = Array.isArray(params) ? params[0] : params
+                return `${p.name}：${chartNum(p.value)} 人`
+              },
+              ...chartTooltip()
             },
-            yAxis: { type: 'value', minInterval: 1 },
+            grid: { left: 8, right: 36, top: 8, bottom: 8, containLabel: true },
+            xAxis: {
+              type: 'value',
+              minInterval: 1,
+              axisLabel: { color: chartText() },
+              splitLine: { lineStyle: { color: chartSplit() } }
+            },
+            yAxis: {
+              type: 'category',
+              inverse: true,
+              data: chartData.map(d => d.name),
+              axisTick: { show: false },
+              axisLine: { show: false },
+              axisLabel: { color: chartText(), width: 180, overflow: 'truncate' }
+            },
             series: [
               {
                 type: 'bar',
                 data: chartData.map(d => d.value),
-                itemStyle: { color: '#409eff' },
-                label: { show: true, position: 'top' }
+                barWidth: 14,
+                showBackground: true,
+                backgroundStyle: {
+                  color: isDarkTheme() ? '#16263f' : '#f1f6fd',
+                  borderRadius: 7
+                },
+                itemStyle: {
+                  borderRadius: [0, 7, 7, 0],
+                  color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                    { offset: 0, color: chartColor(4) },
+                    { offset: 1, color: chartColor(0) }
+                  ])
+                },
+                label: { show: true, position: 'right', color: chartText(), fontSize: 12 }
               }
             ]
           }
 
+      if (isEmpty) {
+        // 空数据态：去掉标题/图例/系列，只留居中文案（统一用 chartTheme 的 graphic）
+        option.title = undefined
+        option.legend = undefined
+        option.series = []
+        option.graphic = chartEmptyGraphic('暂无作答数据')
+      }
+
       chart.setOption(option)
+      // 首帧宽度可能还没算完：下一帧补一次 resize，避免画到 0 宽画布
+      requestAnimationFrame(() => chart.resize())
       // ★ 具名 handler，卸载时才能移除监听（见 beforeUnmount 的说明）
       ref.resizeHandler = () => chart.resize()
       window.addEventListener('resize', ref.resizeHandler)
+    },
+
+    isChoice(q) {
+      // ★ 评分题也走图表：1~5 分的分布就是分组计数（与后端 hasChart 同口径）
+      return hasChart(q.type)
+    },
+
+    typeName(type) {
+      return typeLabel(type)
+    },
+
+    typeTag(type) {
+      return typeMeta(type).tag
+    },
+
+    /** 每题"回答数"：选择题/评分题按计数求和，文本类按条数；评分题附带平均分 */
+    answerSummary(q) {
+      if (this.isChoice(q)) {
+        const n = (q.chartData || []).reduce((sum, d) => sum + Number(d.count || 0), 0)
+        if (isRating(q.type)) {
+          const avg = ratingAverage(q.chartData)
+          return `${n} 份回答${avg == null ? '' : ` · 平均 ${avg.toFixed(1)} 分`}`
+        }
+        return `${n} 份回答`
+      }
+      return `${(q.textAnswers || []).length} 条回答`
+    },
+
+    visibleTexts(q) {
+      const list = q.textAnswers || []
+      return this.textExpanded[q.id] ? list : list.slice(0, TEXT_PREVIEW)
+    },
+
+    toggleTexts(questionId) {
+      this.textExpanded = { ...this.textExpanded, [questionId]: !this.textExpanded[questionId] }
     },
 
     // 打开答卷列表：从第 1 页开始，成功了才开弹窗（失败提示由接口层弹）
@@ -302,6 +566,7 @@ export default {
      * ★ 返回 true/false 供 openAnswerList 判断"要不要开弹窗"。
      */
     async loadAnswerPage(pageNum) {
+      this.answerLoading = true
       try {
         const res = await api.answer.list(this.surveyId, pageNum, this.answerPage.pageSize)
         this.answers = res.list
@@ -311,6 +576,8 @@ export default {
       } catch {
         // 提示由接口层统一弹出
         return false
+      } finally {
+        this.answerLoading = false
       }
     },
 
@@ -348,6 +615,336 @@ export default {
         // 失败提示由接口层统一弹出
       }
     },
+
+    // ==================== 分享报告 ====================
+
+    /** 打开分享弹窗并生成图片（同步生成，1080×1320 一张 PNG，几十毫秒） */
+    openShare() {
+      this.shareVisible = true
+      this.shareImage = ''
+      try {
+        this.shareImage = renderStatsCard({
+          title: this.surveyTitle,
+          tiles: this.tiles.map(t => ({ label: t.label, value: t.value, color: t.color })),
+          segments: this.shareSegments,
+          generatedAt: this.nowText()
+        })
+      } catch {
+        // canvas 不可用（极旧内核 / 被浏览器禁用）时不要留个空白弹窗
+        this.shareVisible = false
+        ElMessage.error('生成分享图失败，请换个浏览器再试')
+      }
+    },
+
+    /** 文字摘要：直接贴到聊天或 PPT 里 */
+    copyShareText() {
+      const counted = this.tiles.find(t => t.key === 'counted')
+      const text = [
+        `【${this.surveyTitle || '问卷'}】答卷统计`,
+        `回收答卷：${this.responseCount} 份`,
+        `题目数量：${this.questions.length} 道`,
+        `可疑样本：${this.quality ? this.quality.suspicious : 0} 份`,
+        `计入统计：${counted ? counted.value : this.responseCount} 份`
+      ].join('\n')
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(() => ElMessage.success('摘要已复制'))
+          .catch(() => ElMessage.warning('复制失败，请手动选择复制'))
+      } else {
+        ElMessage.warning('复制失败，请手动选择复制')
+      }
+    },
+
+    downloadShareImage() {
+      if (!this.shareImage) return
+      // 文件名里不能出现 \ / : * ? " < > |，问卷标题是用户输入，必须先清洗
+      const safeTitle = String(this.surveyTitle || '问卷').replace(/[\\/:*?"<>|]/g, '_')
+      const a = document.createElement('a')
+      a.href = this.shareImage
+      a.download = `${safeTitle}-答卷统计.png`
+      a.click()
+    },
+
+    nowText() {
+      return new Date().toLocaleString('zh-CN', { hour12: false })
+    }
   }
 }
+
 </script>
+
+<style scoped>
+.stats-page {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.page-subtitle {
+  margin: 6px 0 0 15px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ==================== 概览卡 ==================== */
+.stat-tile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: #fff;
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-sm);
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease);
+}
+.stat-tile:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+.stat-ico {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.stat-label {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.stat-num {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+/* ==================== 质控条 ==================== */
+.quality-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: var(--r-lg);
+  border: 1px solid #ffe3b8;
+  background: linear-gradient(120deg, #fffaf0 0%, #fff4e0 100%);
+}
+.quality-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.quality-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffe9c7;
+  color: #d97706;
+  flex-shrink: 0;
+}
+.quality-title {
+  font-weight: 600;
+  color: #92400e;
+}
+.quality-rate {
+  font-weight: 400;
+  color: #b45309;
+  font-size: 12px;
+}
+.quality-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.reason-tag {
+  background: #fff;
+  border-color: #ffe3b8;
+  color: #b45309;
+}
+.quality-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.quality-switch-label {
+  font-size: 13px;
+  color: #92400e;
+}
+
+/* ==================== 题目卡 ==================== */
+.question-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.q-card {
+  border-radius: var(--r-lg);
+}
+.q-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.q-index {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #fff;
+  background: var(--brand-gradient);
+  box-shadow: 0 6px 14px rgba(47, 128, 237, 0.28);
+  flex-shrink: 0;
+}
+.q-title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+.q-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.5;
+}
+.q-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.q-count {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.q-chart {
+  width: 100%;
+  height: 300px;
+}
+
+/* ==================== 填空题回答 ==================== */
+.text-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.text-answer {
+  display: flex;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: #f8fbff;
+  border: 1px solid #eef4fd;
+  transition: background 0.18s var(--ease);
+}
+.text-answer:hover {
+  background: #f2f8ff;
+}
+.text-answer-index {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--sky-100);
+  color: var(--sky-700);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.text-answer-body {
+  color: var(--ink-2);
+  line-height: 1.65;
+  word-break: break-word;
+}
+.text-more {
+  align-self: flex-start;
+}
+
+/* ==================== 弹窗 ==================== */
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dialog-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.answer-pager {
+  margin-top: 14px;
+  justify-content: flex-end;
+}
+.detail-row {
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  background: #f8fbff;
+  border: 1px solid #eef4fd;
+}
+.detail-index {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--sky-100);
+  color: var(--sky-700);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.detail-body {
+  flex: 1;
+  min-width: 0;
+}
+.detail-title {
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.detail-content {
+  color: var(--ink-2);
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+/* ==================== 分享报告 ==================== */
+.share-preview {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--stroke);
+  background: var(--surface-2);
+}
+.share-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.share-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+  line-height: 1.6;
+}
+</style>

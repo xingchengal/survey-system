@@ -63,6 +63,13 @@ export default {
    */
   byShareCode: (shareCode, opts) => http.get(`/api/survey/share/${shareCode}`, null, opts),
 
+  /**
+   * 公开结果页（匿名）：只有作者在设置里开启「公开结果」才可用。
+   * ★ 返回的是**脱敏统计**（不含填空题原文），未开启/不存在时 400。
+   * ★ 传 silent：结果页自己会展示"未开启 / 链接失效"的空态，不需要再弹一条红字。
+   */
+  result: (shareCode) => http.get(`/api/survey/result/${shareCode}`, null, { silent: true }),
+
   /** 记一次访问量（公开接口，失败也不打扰用户） */
   view: (shareCode) => http.post(`/api/survey/view/${shareCode}`, null, { silent: true }),
 

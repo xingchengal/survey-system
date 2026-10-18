@@ -1,17 +1,30 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="m-0">{{ isAdmin ? '🚫 违规问卷管理' : '🗑️ 回收站' }}</h2>
-      <div class="flex-gap-10">
-        <el-input v-model="keyword" placeholder="搜索问卷标题..." clearable :prefix-icon="Search" style="width: 260px;" @keyup.enter="handleSearch" @clear="handleSearch" />
-        <el-button type="primary" @click="handleSearch">搜索</el-button>
-        <el-button :icon="Refresh" @click="loadRecycle">刷新</el-button>
+      <div>
+        <h2 class="page-title">{{ isAdmin ? '违规问卷管理' : '回收站' }}</h2>
+        <p class="page-subtitle">被移入回收站的问卷可以随时恢复或彻底删除</p>
       </div>
+    </div>
+
+    <div class="toolbar-card">
+      <el-input v-model="keyword" placeholder="搜索问卷标题..." clearable :prefix-icon="Search" @keyup.enter="handleSearch" @clear="handleSearch" />
+      <el-button type="primary" @click="handleSearch">搜索</el-button>
+      <el-button :icon="Refresh" @click="loadRecycle">刷新</el-button>
+      <TableDensity />
     </div>
 
     <el-alert class="mb-16" :title="isAdmin ? '这里是所有被下架的问卷，可恢复或彻底删除' : '回收站里的问卷不会出现在正常列表，可随时恢复或彻底删除'" type="info" :closable="false" />
 
-    <el-table class="w-full" :data="surveys" stripe border v-loading="loading">
+    <div class="table-card">
+    <PageState
+      :loading="loading"
+      :error="error"
+      :empty="surveys.length === 0"
+      :empty-text="isAdmin ? '暂无违规问卷' : '回收站是空的'"
+      @retry="loadRecycle"
+    >
+    <el-table class="w-full" :data="surveys" stripe border max-height="560">
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="问卷标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
@@ -29,6 +42,11 @@
         </template>
       </el-table-column>
 
+      <!-- ★ 回收站里"什么时候删的"比"什么时候创建的"更有用：
+           deletedAt 由后端在 moveToRecycle 时写 NOW()，恢复时清回 NULL（历史数据已回填） -->
+      <el-table-column prop="deletedAt" label="删除时间" width="170">
+        <template #default="{ row }">{{ row.deletedAt || '—' }}</template>
+      </el-table-column>
       <el-table-column prop="createdTime" label="创建时间" width="170" />
       <el-table-column label="操作" width="200" align="center" fixed="right">
         <template #default="{ row }">
@@ -51,7 +69,8 @@
       />
     </div>
 
-    <el-empty v-if="surveys.length === 0 && !loading" :description="isAdmin ? '暂无违规问卷' : '回收站是空的'" />
+    </PageState>
+    </div>
   </div>
 </template>
 
@@ -64,14 +83,26 @@ import { Refresh, Search } from '@element-plus/icons-vue'
 // ★ 统一接口层（src/api）：分页 / 恢复 / 彻底删除都走它 ——
 //   token、query 拼接、错误提示、401 跳登录都不用本页再管
 import api from '../api'
+// 三态容器：骨架 / 空 / 错误（带重试）
+import PageState from '../components/PageState.vue'
+// 行密度切换（默认 / 紧凑）
+import TableDensity from '../components/TableDensity.vue'
+// 页码记忆（sessionStorage）
+import { readPageNum, savePageNum } from '../utils/pageMemory'
+
+/** 本页在 sessionStorage 里的页码键 */
+const PAGE_KEY = 'Recycle'
 
 // 图标已在 main.js 里全局注册，这里不再重复注册
 // （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
+  components: { PageState, TableDensity },
   data() {
     return {
       surveys: [],
       loading: false,
+      // 接口失败标记：由 PageState 渲染「加载失败 + 重试」
+      error: false,
       keyword: '',
       pageNum: 1,
       pageSize: 10,
@@ -88,11 +119,14 @@ export default {
     }
   },
   mounted() {
+    // 恢复上次停留的页码
+    this.pageNum = readPageNum(PAGE_KEY)
     this.loadRecycle()
   },
   methods: {
     async loadRecycle() {
       this.loading = true
+      this.error = false
       try {
         // 参数对象直接给接口层（空关键字会被 toQuery 自动跳过）
         const data = await api.survey.recyclePage({
@@ -103,7 +137,8 @@ export default {
         this.surveys = data.list || []
         this.total = data.total || 0
       } catch {
-        // ★ 接口层已统一提示，这里只负责流程控制，loading 交给 finally 复位
+        // ★ 接口层已统一提示，这里只负责流程控制；error 让 PageState 显示重试入口
+        this.error = true
       } finally {
         this.loading = false
       }
@@ -111,17 +146,20 @@ export default {
 
     handleSearch() {
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadRecycle()
     },
 
     handleSizeChange(size) {
       this.pageSize = size
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadRecycle()
     },
 
     handlePageChange(page) {
       this.pageNum = page
+      savePageNum(PAGE_KEY, page)
       this.loadRecycle()
     },
 

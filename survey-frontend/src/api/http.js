@@ -202,7 +202,7 @@ async function tryRefresh() {
  *   - raw    为 true 时直接返回 Response 对象
  */
 async function sendRequest(method, url, options = {}) {
-  const { data, params, blob, silent, raw } = options
+  const { data, params, blob, silent, raw, headers: customHeaders } = options
 
   const finalUrl = url + toQuery(params)
   const headers = {}
@@ -210,6 +210,12 @@ async function sendRequest(method, url, options = {}) {
   // 1. 自动带登录凭证
   const token = localStorage.getItem(TOKEN_KEY)
   if (token) headers['Authorization'] = `Bearer ${token}`
+
+  // 1.1 额外请求头（目前只有匿名答题页的 X-Survey-Password）：
+  //     ★ 密码放请求头而不是 query —— query 会进访问日志、浏览器历史、Referer。
+  if (customHeaders && typeof customHeaders === 'object') {
+    Object.assign(headers, customHeaders)
+  }
 
   const init = { method, headers }
   if (data !== undefined && data !== null) {

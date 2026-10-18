@@ -24,6 +24,14 @@ const routes = [
     component: () => import('../views/SurveyFillByCode.vue'),
     meta: { title: '填写问卷', public: true }
   },
+  {
+    // 公开结果页：作者在「设置」里开启「公开结果」后，匿名可访问。
+    // ★ public: true —— 不加会先被守卫踢去登录页，而结果页本来就不需要账号。
+    path: '/r/:shareCode',
+    name: 'PublicResult',
+    component: () => import('../views/PublicResult.vue'),
+    meta: { title: '公开结果', public: true }
+  },
 
   // ===== 后台页面 =====
   {

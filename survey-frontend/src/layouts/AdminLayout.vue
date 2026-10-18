@@ -1,21 +1,22 @@
 <template>
-  <el-container style="height: 100vh;">
-    <!-- 侧边栏 -->
-    <el-aside width="220px" style="background: #001529; color: #fff; display: flex; flex-direction: column;">
+  <el-container class="app-shell">
+    <!-- 侧边栏（<1100px 收窄成图标条，<768px 变抽屉） -->
+    <el-aside width="232px" class="app-sidebar" :class="{ 'is-open': drawerOpen }">
       <!-- Logo -->
-      <div style="height: 60px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; border-bottom: 1px solid #0a2a3a; flex-shrink: 0;">
-        📊 问卷系统
+      <div class="app-logo">
+        <BrandLogo class="logo-mark" :size="34" />
+        <span class="logo-text">问卷系统</span>
+        <span class="logo-badge">v2.2</span>
       </div>
 
       <!-- 菜单（可滚动） -->
-      <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
+      <div class="app-menu">
         <el-menu
           :default-active="$route.path"
           router
-          background-color="#001529"
-          text-color="#b0b8c4"
-          active-text-color="#fff"
-          style="border: none;"
+          background-color="transparent"
+          text-color="#b9c7e6"
+          active-text-color="#ffffff"
         >
           <!-- ===== 管理员菜单 ===== -->
           <template v-if="isAdmin">
@@ -86,12 +87,45 @@
       </div>
     </el-aside>
 
+    <!-- 移动端抽屉遮罩：点空白处收起侧栏 -->
+    <div v-if="drawerOpen" class="sidebar-mask" @click="drawerOpen = false" />
+
     <!-- 右侧区域 -->
     <el-container>
-      <el-header style="background: #fff; border-bottom: 1px solid #e8e8e8; display: flex; align-items: center; justify-content: space-between; padding: 0 20px;">
-        <div style="font-size: 16px; font-weight: 500;">{{ $route.meta.title || '后台管理' }}</div>
+      <el-header class="app-header">
+        <!-- 顶栏只做"你在哪"的导航：首页 / 当前页；页面大标题由内容区的 .page-title 负责 -->
+        <div class="app-header-left">
+          <button
+            type="button"
+            class="hamburger"
+            :title="drawerOpen ? '收起菜单' : '展开菜单'"
+            @click="drawerOpen = !drawerOpen"
+          >
+            <el-icon :size="20"><Fold v-if="drawerOpen" /><Expand v-else /></el-icon>
+          </button>
 
-        <div style="display: flex; align-items: center; height: 100%;">
+          <el-breadcrumb separator="/" class="app-breadcrumb">
+            <el-breadcrumb-item :to="{ path: homePath }">
+              <span class="crumb-home">
+                <el-icon><HomeFilled /></el-icon>
+                <span class="crumb-home-text">首页</span>
+              </span>
+            </el-breadcrumb-item>
+            <el-breadcrumb-item>{{ $route.meta.title || '后台管理' }}</el-breadcrumb-item>
+          </el-breadcrumb>
+        </div>
+
+        <div class="app-header-right">
+          <!-- 主题切换（浅色 / 深色）：偏好存在 localStorage，刷新后由 main.js 恢复 -->
+          <button
+            type="button"
+            class="theme-toggle"
+            :title="isDark ? '切换到浅色' : '切换到深色'"
+            @click="handleToggleTheme"
+          >
+            <el-icon :size="18"><Sunny v-if="isDark" /><Moon v-else /></el-icon>
+          </button>
+
           <!-- ==================== 通知铃铛 ==================== -->
           <el-popover
             placement="bottom-end"
@@ -102,7 +136,7 @@
             <template #reference>
               <div class="bell-wrapper">
                 <el-badge :value="unreadCount > 0 ? unreadCount : ''" :hidden="unreadCount === 0" :max="99">
-                  <el-icon :size="20" style="color: #606266; cursor: pointer;"><Bell /></el-icon>
+                  <el-icon :size="20" class="bell-icon"><Bell /></el-icon>
                 </el-badge>
               </div>
             </template>
@@ -144,18 +178,18 @@
 
           <!-- ==================== 用户下拉 ==================== -->
           <el-dropdown @command="handleCommand">
-            <span style="cursor: pointer; display: flex; align-items: center; padding: 0 10px; height: 100%;">
+            <span class="user-chip">
               <el-avatar
-                :size="32"
+                :size="34"
                 :src="currentUser.avatar"
-                style="background: #409eff; color: #fff; display: flex; align-items: center; justify-content: center;"
+                class="user-avatar"
               >
                 {{ avatarText }}
               </el-avatar>
-              <span class="ml-8">{{ displayName }}</span>
-              <el-tag v-if="isAdmin" type="danger" size="small" style="margin-left: 6px;">管理员</el-tag>
-              <el-tag v-else type="info" size="small" style="margin-left: 6px;">用户</el-tag>
-              <el-icon class="ml-4"><ArrowDown /></el-icon>
+              <span class="user-name">{{ displayName }}</span>
+              <!-- 只给管理员挂角色标签：「用户」这个标签对普通用户没有信息量，只是占位 -->
+              <el-tag v-if="isAdmin" type="danger" size="small" effect="light" class="user-role">管理员</el-tag>
+              <el-icon class="user-caret"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
@@ -171,7 +205,7 @@
         </div>
       </el-header>
 
-      <el-main style="background: #f5f7fa; padding: 20px;">
+      <el-main class="app-main">
         <router-view />
       </el-main>
     </el-container>
@@ -212,10 +246,14 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 // ★ 登录态统一从 utils/auth 读：避免裸 JSON.parse 遇到脏数据时抛异常，
 //   把整个后台布局（含侧边栏和顶栏）都渲染崩掉。
-import { getUser, clearAuth } from '../utils/auth'
+import { getUser, clearAuth, homePathFor } from '../utils/auth'
+import { toggleTheme } from '../utils/theme'
+// 品牌标识（替换原来的 emoji，与登录/注册页、favicon 同一图形）
+import BrandLogo from '../components/BrandLogo.vue'
 
 export default {
   components: {
+    BrandLogo,
     DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
     DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
     ChatDotRound, BellFilled, InfoFilled, Close
@@ -224,6 +262,10 @@ export default {
     return {
       // ★ 用 getUser()：直接 JSON.parse(localStorage...) 遇到脏数据会抛异常
       currentUser: getUser() || {},
+      /** 当前是否深色主题（只用于切换按钮的图标方向） */
+      isDark: document.documentElement.dataset.theme === 'dark',
+      /** <768px 时侧栏变抽屉：true = 抽屉展开（桌面端无影响） */
+      drawerOpen: false,
       // 公告相关
       announcementVisible: false,
       currentAnnouncement: null,
@@ -236,6 +278,10 @@ export default {
   computed: {
     isAdmin() {
       return this.currentUser.role === 'admin'
+    },
+    /** 面包屑「首页」的落点：管理员去系统总览，普通用户去数据看板（与路由守卫同一口径） */
+    homePath() {
+      return homePathFor(this.currentUser.role)
     },
     displayName() {
       return this.currentUser.nickname || this.currentUser.username || '用户'
@@ -251,6 +297,11 @@ export default {
     //   （watch 放在 mounted 之前，是 ESLint 的 vue/order-in-components 规则要求）
     $route() {
       this.currentUser = getUser() || {}
+      // 移动端：点菜单跳页后把抽屉收起
+      this.drawerOpen = false
+      // ★ 切页后把内容区滚回顶部：内容区是独立滚动容器（.app-main），
+      //   浏览器/热更新会保留上一次的 scrollTop，表现为"新页面标题被顶栏裁掉一截"。
+      this.$nextTick(this.resetMainScroll)
     }
   },
   mounted() {
@@ -265,12 +316,27 @@ export default {
     this.loadUnreadCount()
     // 每 30 秒刷新一次未读
     this.notifyTimer = setInterval(this.loadUnreadCount, 30000)
+    // 首次进入也归零：刷新/热更新可能恢复上一次的滚动位置
+    this.$nextTick(this.resetMainScroll)
   },
   beforeUnmount() {
     // 组件卸载时清掉 30 秒轮询未读数的定时器，避免离开后台后还在请求
     if (this.notifyTimer) clearInterval(this.notifyTimer)
   },
   methods: {
+    /** 切换浅色 / 深色主题 */
+    handleToggleTheme() {
+      this.isDark = toggleTheme() === 'dark'
+      // 通知图表页重画（canvas 读不到 CSS 变量，必须按新主题重新 init）
+      window.dispatchEvent(new CustomEvent('theme-change'))
+    },
+
+    /** 把右侧内容区滚回顶部（内容区自己滚动，不是 window） */
+    resetMainScroll() {
+      const main = this.$el && this.$el.querySelector ? this.$el.querySelector('.app-main') : null
+      if (main) main.scrollTop = 0
+    },
+
     async handleCommand(command) {
       if (command === 'logout') {
         // ★ 先调后端接口，清 Cookie。
@@ -425,40 +491,276 @@ export default {
 </script>
 
 <style>
+/* ==================== 外壳 ==================== */
+.app-shell {
+  height: 100vh;
+  background: var(--surface-2);
+}
+
+/* ---------- 侧边栏 ---------- */
+.app-sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(86, 204, 242, 0.22) 0%, transparent 60%),
+    linear-gradient(180deg, #0b1b3a 0%, #0a2540 55%, #071a2e 100%);
+  box-shadow: 4px 0 24px rgba(7, 26, 46, 0.18);
+  overflow: hidden;
+}
+.app-sidebar::after {
+  content: '';
+  position: absolute;
+  left: -40%;
+  right: -40%;
+  bottom: -40%;
+  height: 300px;
+  background: radial-gradient(closest-side, rgba(47, 128, 237, 0.28), transparent);
+  pointer-events: none;
+}
+
+.app-logo {
+  height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  position: relative;
+  z-index: 1;
+}
+.logo-mark {
+  flex-shrink: 0;
+  filter: drop-shadow(0 6px 14px rgba(47, 128, 237, 0.45));
+}
+.logo-text {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.logo-badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #9ed0ff;
+  background: rgba(47, 128, 237, 0.18);
+  border: 1px solid rgba(158, 208, 255, 0.25);
+}
+
+.app-menu {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 0 6px;
+  position: relative;
+  z-index: 1;
+}
+
 /* ===== 侧边栏菜单 ===== */
 .el-menu {
   border-right: none !important;
+  background: transparent;
 }
 
 .el-menu-item {
   position: relative;
-  transition: all 0.2s ease;
-  border-radius: 0 8px 8px 0;
-  margin: 4px 8px 4px 0;
   height: 46px;
   line-height: 46px;
+  margin: 4px 14px;
+  border-radius: 12px;
+  transition: all 0.2s var(--ease);
+}
+
+.el-menu-item .el-icon {
+  font-size: 18px;
+  margin-right: 10px;
 }
 
 .el-menu-item:hover {
-  background-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: #fff !important;
+  transform: translateX(2px);
 }
 
 .el-menu-item.is-active {
-  background: linear-gradient(90deg, #1677ff 0%, #409eff 100%) !important;
+  /* 侧栏选中也属于"小尺寸蓝色元件"：用弱渐变，避免胶囊左上角出现一条亮青色边 */
+  background: var(--btn-gradient) !important;
   color: #fff !important;
-  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.4);
+  box-shadow: 0 8px 20px rgba(47, 128, 237, 0.42);
 }
 
 .el-menu-item.is-active::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: -14px;
   top: 50%;
   transform: translateY(-50%);
   width: 4px;
-  height: 60%;
-  background: #fff;
+  height: 22px;
   border-radius: 0 4px 4px 0;
+  background: #9ed0ff;
+}
+
+/* ---------- 顶栏 ---------- */
+.app-header {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--stroke);
+  position: relative;
+  z-index: 5;
+}
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 顶栏面包屑：字号/颜色都比内容区的 .page-title 弱，形成"导航 vs 标题"的层级 */
+.app-breadcrumb {
+  display: flex;
+  align-items: center;
+}
+.app-breadcrumb .el-breadcrumb__inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink-3);
+  transition: color 0.18s var(--ease);
+}
+.app-breadcrumb .el-breadcrumb__inner.is-link:hover {
+  color: var(--sky-600);
+}
+.app-breadcrumb .el-breadcrumb__item:last-child .el-breadcrumb__inner {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.app-breadcrumb .el-breadcrumb__separator {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.crumb-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.crumb-home .el-icon {
+  font-size: 15px;
+}
+
+/* 移动端汉堡按钮（桌面端隐藏） */
+.hamburger {
+  display: none;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+.hamburger:hover {
+  background: var(--sky-50);
+  color: var(--sky-600);
+}
+.sidebar-mask {
+  display: none;
+}
+.app-header-right {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 6px;
+}
+.bell-icon {
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+.bell-wrapper:hover .bell-icon {
+  color: var(--sky-600);
+  transform: rotate(-8deg);
+}
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+.theme-toggle:hover {
+  background: var(--sky-50);
+  color: var(--sky-600);
+  transform: rotate(-12deg);
+}
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s var(--ease);
+}
+.user-chip:hover {
+  background: var(--sky-50);
+}
+.user-avatar {
+  background: var(--brand-gradient);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(47, 128, 237, 0.3);
+}
+.user-name {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 500;
+}
+.user-role {
+  margin-left: 2px;
+}
+.user-caret {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* ---------- 内容区 ---------- */
+.app-main {
+  padding: 24px;
+  background:
+    radial-gradient(1200px 500px at 15% -10%, #eaf4ff 0%, transparent 60%),
+    radial-gradient(900px 420px at 100% 0%, #eef2ff 0%, transparent 55%),
+    var(--surface-2);
+  overflow-y: auto;
 }
 
 /* ===== 底部接口文档按钮 ===== */
@@ -545,16 +847,17 @@ export default {
 
 /* ===== 通知铃铛 ===== */
 .bell-wrapper {
-  padding: 0 16px;
-  height: 100%;
+  height: 40px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   cursor: pointer;
-  transition: background 0.2s;
+  border-radius: 12px;
+  transition: background 0.2s var(--ease);
 }
 
 .bell-wrapper:hover {
-  background: #f5f7fa;
+  background: var(--sky-50);
 }
 
 .notify-item {
@@ -635,4 +938,130 @@ export default {
 .notify-delete:hover {
   color: #f56c6c;
 }
+
+/* ==================== 响应式 ====================
+   三档：>1100 完整侧栏；≤1100 收窄成图标条；≤768 变抽屉 + 顶栏汉堡。
+   el-aside 的宽度是行内 style，媒体查询里必须 !important 才盖得住。 */
+@media (max-width: 1100px) {
+  .app-sidebar {
+    width: 72px !important;
+  }
+  .app-logo {
+    padding: 0;
+    justify-content: center;
+  }
+  .logo-text,
+  .logo-badge {
+    display: none;
+  }
+  .el-menu-item {
+    margin: 4px 10px;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    justify-content: center;
+  }
+  .el-menu-item span {
+    display: none;
+  }
+  .el-menu-item .el-icon {
+    margin-right: 0;
+  }
+  .api-doc-footer {
+    padding: 8px;
+  }
+  .api-doc-btn-inner {
+    justify-content: center;
+    padding: 10px 0;
+  }
+  .api-doc-text,
+  .api-doc-arrow {
+    display: none;
+  }
+  .api-doc-icon {
+    margin-right: 0;
+  }
+  .app-main {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 抽屉：默认移出屏幕外，.is-open 时滑入；抽屉里恢复 232px 与文案 */
+  .app-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 232px !important;
+    z-index: 2000;
+    transform: translateX(-100%);
+    transition: transform 0.28s var(--ease);
+  }
+  .app-sidebar.is-open {
+    transform: translateX(0);
+    box-shadow: 0 0 48px rgba(3, 10, 24, 0.5);
+  }
+  .sidebar-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1999;
+    background: rgba(8, 15, 28, 0.46);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  .app-logo {
+    padding: 0 20px;
+    justify-content: flex-start;
+  }
+  .logo-text,
+  .logo-badge {
+    display: inline;
+  }
+  .logo-badge {
+    margin-left: auto;
+  }
+  .el-menu-item {
+    margin: 4px 14px;
+    padding-left: 20px !important;
+    justify-content: flex-start;
+  }
+  .el-menu-item span {
+    display: inline;
+  }
+  .el-menu-item .el-icon {
+    margin-right: 10px;
+  }
+  .api-doc-footer {
+    padding: 12px;
+  }
+  .api-doc-btn-inner {
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+  .api-doc-text,
+  .api-doc-arrow {
+    display: block;
+  }
+  .api-doc-icon {
+    margin-right: 10px;
+  }
+  .hamburger {
+    display: flex;
+  }
+  .app-header {
+    padding: 0 12px;
+  }
+  .app-main {
+    padding: 12px;
+  }
+  .crumb-home-text,
+  .user-role {
+    display: none;
+  }
+  .user-chip {
+    padding: 0 6px;
+  }
+}
+
 </style>

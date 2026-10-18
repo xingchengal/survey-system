@@ -1,10 +1,24 @@
 <template>
-  <div style="max-width: 1200px; margin: 0 auto;">
+  <div class="profile-page">
+    <!-- 骨架屏：资料回来前先占位，避免左侧卡片"空一下再跳出来" -->
+    <div v-if="loading" class="profile-skeleton">
+      <el-row :gutter="20">
+        <el-col :span="8" :xs="24" :sm="24" :md="8"><div class="sk-block" style="height: 680px;"></div></el-col>
+        <el-col :span="16" :xs="24" :sm="24" :md="16">
+          <div class="sk-block" style="height: 196px; margin-bottom: 20px;"></div>
+          <div class="sk-block" style="height: 172px; margin-bottom: 20px;"></div>
+          <div class="sk-block" style="height: 300px;"></div>
+        </el-col>
+      </el-row>
+    </div>
+
+    <template v-else>
     <el-row :gutter="20">
       <!-- 左侧：用户信息卡 -->
-      <el-col :span="8">
-        <el-card :body-style="{ padding: '24px' }">
-          <div style="display: flex; justify-content: center;">
+      <el-col :span="8" :xs="24" :sm="24" :md="8">
+        <el-card :body-style="{ padding: '24px' }" class="profile-card">
+          <div class="profile-cover"></div>
+          <div class="avatar-wrap">
             <div class="avatar-container" @click="triggerUpload" @mouseenter="avatarHover = true" @mouseleave="avatarHover = false">
               <el-avatar :size="110" :src="user.avatar" class="avatar-img">
                 {{ avatarText }}
@@ -17,9 +31,9 @@
             <input ref="fileInput" type="file" accept="image/*" style="display: none;" @change="handleFileChange" />
           </div>
 
-          <h2 style="margin: 12px 0 6px 0; text-align: center;">{{ user.nickname || user.username }}</h2>
+          <h2 class="profile-name">{{ user.nickname || user.username }}</h2>
           <div class="text-center">
-            <el-tag type="info" effect="dark">普通用户</el-tag>
+            <el-tag type="primary" effect="light" round>普通用户</el-tag>
           </div>
 
           <el-divider />
@@ -70,37 +84,37 @@
       </el-col>
 
       <!-- 右侧：用户内容 -->
-      <el-col :span="16">
+      <el-col :span="16" :xs="24" :sm="24" :md="16">
         <!-- 我的数据 -->
         <el-card class="mb-20">
           <template #header>
             <span class="text-bold">📊 我的数据</span>
           </template>
           <el-row :gutter="12">
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#409eff"><Document /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-blue">
+                <el-icon :size="22" color="#2f80ed"><Document /></el-icon>
                 <div class="mini-value color-primary">{{ myStats.total }}</div>
                 <div class="mini-label">我的问卷</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#67c23a"><Promotion /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-green">
+                <el-icon :size="22" color="#16a34a"><Promotion /></el-icon>
                 <div class="mini-value color-success">{{ myStats.published }}</div>
                 <div class="mini-label">已发布</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#e6a23c"><EditPen /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-amber">
+                <el-icon :size="22" color="#d97706"><EditPen /></el-icon>
                 <div class="mini-value color-warning">{{ myStats.draft }}</div>
                 <div class="mini-label">草稿</div>
               </div>
             </el-col>
-            <el-col :span="6">
-              <div class="mini-card">
-                <el-icon :size="22" color="#f56c6c"><ChatDotRound /></el-icon>
+            <el-col :span="6" :xs="12" :sm="12" :md="6">
+              <div class="mini-card mini-violet">
+                <el-icon :size="22" color="#7c3aed"><ChatDotRound /></el-icon>
                 <div class="mini-value color-danger">{{ myStats.responses }}</div>
                 <div class="mini-label">收到答卷</div>
               </div>
@@ -114,22 +128,22 @@
             <span class="text-bold">⚡ 常用功能</span>
           </template>
           <el-row :gutter="12">
-            <el-col :span="8">
-              <div class="quick-action" @click="$router.push('/my/surveys')">
+            <el-col :span="8" :xs="24" :sm="24" :md="8">
+              <div class="quick-action qa-blue" @click="$router.push('/my/surveys')">
                 <el-icon :size="26" color="#409eff"><Document /></el-icon>
                 <div class="qa-title">我的问卷</div>
                 <div class="qa-desc">创建 / 管理</div>
               </div>
             </el-col>
-            <el-col :span="8">
-              <div class="quick-action" @click="$router.push('/my/dashboard')">
+            <el-col :span="8" :xs="24" :sm="24" :md="8">
+              <div class="quick-action qa-green" @click="$router.push('/my/dashboard')">
                 <el-icon :size="26" color="#67c23a"><DataBoard /></el-icon>
                 <div class="qa-title">数据看板</div>
                 <div class="qa-desc">查看数据</div>
               </div>
             </el-col>
-            <el-col :span="8">
-              <div class="quick-action" @click="$router.push('/my/recycle')">
+            <el-col :span="8" :xs="24" :sm="24" :md="8">
+              <div class="quick-action qa-red" @click="$router.push('/my/recycle')">
                 <el-icon :size="26" color="#f56c6c"><Delete /></el-icon>
                 <div class="qa-title">回收站</div>
                 <div class="qa-desc">恢复 / 删除</div>
@@ -225,6 +239,7 @@
         </el-card>
       </el-col>
     </el-row>
+    </template>
 
     <!-- ★ 头像裁剪。不裁剪的话原图会被原样转成 base64 存库（约 1.4MB JSON），
          而它每次都随 GET /api/user/profile 返回。 -->
@@ -338,6 +353,8 @@ export default {
         ]
       },
       avatarHover: false,
+      /** 首次进入的骨架屏：资料回来即关（失败也关，避免一直闪） */
+      loading: true,
       // rawImage 是原图 data URL，cropVisible 控制裁剪组件显隐
       cropVisible: false,
       rawImage: '',
@@ -385,6 +402,8 @@ export default {
       } catch {
         // ★ 这里保留 catch 只为挡住 rejection（提示已由接口层统一弹出），
         //   后面的表单初始化不再执行
+      } finally {
+        this.loading = false
       }
     },
 
@@ -585,25 +604,62 @@ export default {
 </script>
 
 <style scoped>
+.profile-page {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ==================== 左侧资料卡 ==================== */
+.profile-card {
+  overflow: hidden;
+}
+.profile-cover {
+  height: 104px;
+  margin: -24px -24px 0;
+  background:
+    radial-gradient(140% 180% at 85% -30%, rgba(255, 255, 255, 0.4) 0%, transparent 55%),
+    var(--brand-gradient);
+  position: relative;
+  overflow: hidden;
+}
+.profile-cover::after {
+  content: '';
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -60px;
+  bottom: -110px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.avatar-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: -62px;
+  position: relative;
+  z-index: 1;
+}
 .avatar-container {
   position: relative;
   cursor: pointer;
   border-radius: 50%;
   overflow: hidden;
-  transition: transform 0.25s ease;
+  transition: transform 0.25s var(--ease);
 }
 .avatar-container:hover { transform: scale(1.03); }
 .avatar-img {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--brand-gradient);
   font-size: 44px;
   color: #fff;
   display: block;
   object-fit: cover;
+  border: 4px solid #fff;
+  box-shadow: 0 10px 24px rgba(15, 61, 145, 0.2);
 }
 .avatar-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(15, 23, 42, 0.55);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -611,15 +667,22 @@ export default {
   justify-content: center;
   border-radius: 50%;
 }
-.info-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #f0f2f5; font-size: 14px; }
+.profile-name {
+  margin: 14px 0 8px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.info-row { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px dashed #eef3fb; font-size: 14px; }
 .info-row:last-child { border-bottom: none; }
-.info-label { color: #909399; display: flex; align-items: center; }
-.info-value { color: #303133; font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.info-label { color: var(--ink-3); display: flex; align-items: center; }
+.info-value { color: var(--ink); font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 账号用等宽小字（"页面内账号采用小字展示"），与昵称的视觉权重区分开 */
-.info-account { font-size: 13px; font-weight: 400; color: #606266; font-family: Consolas, Monaco, monospace; }
+.info-account { font-size: 13px; font-weight: 400; color: var(--ink-2); font-family: Consolas, Monaco, monospace; }
 
 /* ---- 表单页内提示（错误信息页内展示，不用弹窗） ---- */
-.form-hint { font-size: 12px; color: #909399; line-height: 1.6; }
+.form-hint { font-size: 12px; color: var(--ink-3); line-height: 1.6; }
 
 /* ---- 危险操作区（账号注销）：用红边框与上面的普通设置拉开距离，
         让"这是不可逆操作"在视觉上先说出来 ---- */
@@ -628,27 +691,59 @@ export default {
   margin-top: 4px;
   padding: 14px 16px;
   border: 1px solid #fbc4c4;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: #fef8f8;
 }
-.danger-title { font-size: 14px; font-weight: 600; color: #f56c6c; }
-.danger-desc { font-size: 12px; color: #909399; line-height: 1.8; margin: 6px 0 12px 0; }
+.danger-title { font-size: 14px; font-weight: 600; color: #ef4444; }
+.danger-desc { font-size: 12px; color: var(--ink-3); line-height: 1.8; margin: 6px 0 12px 0; }
 
 /* ---- 最近登录记录 ---- */
 .login-log-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.login-log-empty { font-size: 13px; color: #909399; }
-.login-log-row { padding: 6px 0; border-bottom: 1px dashed #f0f2f5; }
+.login-log-empty { font-size: 13px; color: var(--ink-3); }
+.login-log-row { padding: 7px 0; border-bottom: 1px dashed #eef3fb; }
 .login-log-row:last-child { border-bottom: none; }
-.login-log-time { font-size: 13px; color: #303133; display: flex; align-items: center; gap: 6px; }
-.login-log-ip { font-size: 12px; color: #909399; margin-top: 2px; }
+.login-log-time { font-size: 13px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+.login-log-ip { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 
-.mini-card { text-align: center; padding: 14px 6px; border-radius: 10px; background: #fafbfc; transition: all 0.2s ease; }
-.mini-card:hover { background: #f0f7ff; transform: translateY(-2px); }
-.mini-value { font-size: 22px; font-weight: bold; line-height: 1.2; margin-top: 6px; }
-.mini-label { font-size: 12px; color: #909399; margin-top: 2px; }
+/* ---- 右上数据小卡 ---- */
+.mini-card {
+  text-align: center;
+  padding: 16px 6px;
+  border-radius: var(--r-md);
+  background: #f8fbff;
+  border: 1px solid var(--stroke);
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease);
+}
+.mini-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-sm); }
+.mini-blue { background: linear-gradient(160deg, #f2f8ff, #e6f1ff); }
+.mini-green { background: linear-gradient(160deg, #f2fdf6, #e4f8ec); }
+.mini-amber { background: linear-gradient(160deg, #fffaf0, #fff2db); }
+.mini-violet { background: linear-gradient(160deg, #f8f5ff, #efe8ff); }
+.mini-value { font-size: 24px; font-weight: 700; line-height: 1.2; margin-top: 6px; }
+.mini-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 
-.quick-action { text-align: center; padding: 18px 10px; border-radius: 10px; border: 1px solid #f0f2f5; cursor: pointer; transition: all 0.25s ease; }
-.quick-action:hover { background: #f0f7ff; border-color: #409eff; transform: translateY(-2px); }
-.qa-title { font-size: 13px; font-weight: 500; color: #303133; margin-top: 8px; }
-.qa-desc { font-size: 11px; color: #909399; margin-top: 2px; }
+/* ---- 常用功能入口 ---- */
+.quick-action {
+  text-align: center;
+  padding: 20px 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--stroke);
+  background: #fff;
+  cursor: pointer;
+  transition:
+    transform 0.22s var(--ease),
+    box-shadow 0.22s var(--ease),
+    border-color 0.22s var(--ease);
+}
+.quick-action:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+.qa-blue:hover { border-color: var(--sky-300); }
+.qa-green:hover { border-color: #bbf7d0; }
+.qa-red:hover { border-color: #fecaca; }
+.qa-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 8px; }
+.qa-desc { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
 </style>

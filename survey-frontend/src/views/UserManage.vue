@@ -1,30 +1,42 @@
 <template>
   <div>
     <div class="page-header">
-      <h2 class="m-0">👥 用户管理</h2>
-      <div class="flex-gap-10">
-        <!-- ★ 账号注销（软删除）：两个视图。
-             "在用用户"里看不到已注销的人（后端按设计过滤了 deleted_at），
-             所以恢复入口必须有一个能**看见**他们的列表，否则 restore 就是"有端点没入口"。 -->
-        <el-radio-group v-model="view" @change="handleViewChange">
-          <el-radio-button value="active">在用用户</el-radio-button>
-          <el-radio-button value="deleted">已注销</el-radio-button>
-        </el-radio-group>
-        <el-input
-          v-model="keyword"
-          placeholder="搜索用户名或昵称..."
-          clearable
-          :prefix-icon="Search"
-          style="width: 260px;"
-          @keyup.enter="handleSearch"
-          @clear="handleSearch"
-        />
-        <el-button type="primary" @click="handleSearch">搜索</el-button>
-        <el-button :icon="Refresh" @click="loadUsers">刷新</el-button>
+      <div>
+        <h2 class="page-title">用户管理</h2>
+        <p class="page-subtitle">共 {{ total }} 位用户 · 支持按用户名 / 昵称搜索</p>
       </div>
     </div>
 
-    <el-table class="w-full" :data="users" stripe border v-loading="loading">
+    <div class="toolbar-card">
+      <!-- ★ 账号注销（软删除）：两个视图。
+           "在用用户"里看不到已注销的人（后端按设计过滤了 deleted_at），
+           所以恢复入口必须有一个能**看见**他们的列表，否则 restore 就是"有端点没入口"。 -->
+      <el-radio-group v-model="view" @change="handleViewChange">
+        <el-radio-button value="active">在用用户</el-radio-button>
+        <el-radio-button value="deleted">已注销</el-radio-button>
+      </el-radio-group>
+      <el-input
+        v-model="keyword"
+        placeholder="搜索用户名或昵称..."
+        clearable
+        :prefix-icon="Search"
+        @keyup.enter="handleSearch"
+        @clear="handleSearch"
+      />
+      <el-button type="primary" @click="handleSearch">搜索</el-button>
+      <el-button :icon="Refresh" @click="loadUsers">刷新</el-button>
+      <TableDensity />
+    </div>
+
+    <div class="table-card">
+    <PageState
+      :loading="loading"
+      :error="error"
+      :empty="users.length === 0"
+      :empty-text="view === 'deleted' ? '没有被注销的账号' : '暂无用户'"
+      @retry="loadUsers"
+    >
+    <el-table class="w-full" :data="users" stripe border max-height="560">
       <el-table-column prop="id" label="ID" width="80" align="center" />
       <el-table-column prop="username" label="用户名" min-width="140" />
       <el-table-column prop="nickname" label="昵称" min-width="140" />
@@ -60,8 +72,8 @@
         @current-change="handlePageChange"
       />
     </div>
-
-    <el-empty v-if="users.length === 0 && !loading" :description="view === 'deleted' ? '没有被注销的账号' : '暂无用户'" />
+    </PageState>
+    </div>
   </div>
 </template>
 
@@ -73,15 +85,30 @@ import { Refresh, Search } from '@element-plus/icons-vue'
 // ★ 统一接口层（src/api）：用户分页 / 删除用户都走它，
 //   分页参数对象直接传，query 拼接与错误提示都由接口层负责
 import api from '../api'
+// 三态容器：骨架 / 空 / 错误（带重试）。列表页统一用它，别再各写各的
+import PageState from '../components/PageState.vue'
+// 行密度切换（默认 / 紧凑）
+import TableDensity from '../components/TableDensity.vue'
+// 页码记忆：翻到第 N 页 → 进详情 → 返回，仍停在第 N 页（sessionStorage）
+import { readPageNum, savePageNum } from '../utils/pageMemory'
+
+/** 本页在 sessionStorage 里的页码键（每个列表页唯一） */
+const PAGE_KEY = 'UserManage'
 
 // 图标已在 main.js 里全局注册，这里不再重复注册
 // （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
+  components: { PageState, TableDensity },
   data() {
     return {
       users: [],
       loading: false,
+      // 接口失败标记：由 PageState 渲染「加载失败 + 重试」，不再只弹一条 toast
+      error: false,
       keyword: '',
+      // 列表视图：在用用户 / 已注销。★ 必须声明在 data 里才是响应式
+      // （漏声明时 v-model 只写到实例 ctx 上，切视图后模板不会重渲染）
+      view: 'active',
       pageNum: 1,
       pageSize: 10,
       total: 0,
@@ -90,11 +117,21 @@ export default {
     }
   },
   mounted() {
+    // ★ 顶栏全局搜索跳过来时带 ?keyword=用户名：直接按它搜一次（页码回 1，避免落在第 3 页看不到人）
+    const kw = this.$route && this.$route.query ? this.$route.query.keyword : ''
+    if (typeof kw === 'string' && kw.trim()) {
+      this.keyword = kw.trim()
+      this.pageNum = 1
+    } else {
+      // 恢复上次停留的页码（从详情页返回时不会被弹回第 1 页）
+      this.pageNum = readPageNum(PAGE_KEY)
+    }
     this.loadUsers()
   },
   methods: {
     async loadUsers() {
       this.loading = true
+      this.error = false
       try {
         // 参数对象直接给接口层（空关键字由 toQuery 自动跳过）
         const params = {
@@ -110,7 +147,8 @@ export default {
         this.users = data.list || []
         this.total = data.total || 0
       } catch {
-        // ★ 接口层已统一提示，这里只保留流程控制，loading 由 finally 复位
+        // ★ 接口层已统一提示，这里只保留流程控制；error 交给 PageState 显示重试入口
+        this.error = true
       } finally {
         this.loading = false
       }
@@ -125,22 +163,26 @@ export default {
       this.users = []
       this.total = 0
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadUsers()
     },
 
     handleSearch() {
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadUsers()
     },
 
     handleSizeChange(size) {
       this.pageSize = size
       this.pageNum = 1
+      savePageNum(PAGE_KEY, 1)
       this.loadUsers()
     },
 
     handlePageChange(page) {
       this.pageNum = page
+      savePageNum(PAGE_KEY, page)
       this.loadUsers()
     },
 
