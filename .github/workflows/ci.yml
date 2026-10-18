@@ -119,7 +119,8 @@ jobs:
         with:
           name: jacoco-report
           path: survey-backend/target/site/jacoco/
-          if-no-files-found: warning
+          # ★ 合法值只有 warn / error / ignore —— 写 warning 会让整个作业红（v4 校验更严）。
+          if-no-files-found: warn
           retention-days: 14
 
   # ============================================================
