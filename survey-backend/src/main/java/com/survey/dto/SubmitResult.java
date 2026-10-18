@@ -2,6 +2,8 @@ package com.survey.dto;
 
 import com.survey.common.Grader;
 
+import java.util.List;
+
 /**
  * 提交答卷的返回值。
  *
@@ -17,6 +19,8 @@ import com.survey.common.Grader;
  * @param earnedScore 本次得分（graded=false 时为 null）
  * @param passScore  及格分（问卷没设及格线时为 null）
  * @param passed     是否及格：null = 未设及格线；0/1 为判定结果
+ * @param questions  逐题结果：**只有作者开启"提交后显示答案"时才有值**，否则为 null
+ *                   （成绩卡默认只显示分数，不泄题）；普通问卷同样为 null
  */
 public record SubmitResult(
         String message,
@@ -24,17 +28,23 @@ public record SubmitResult(
         Integer totalScore,
         Integer earnedScore,
         Integer passScore,
-        Integer passed) {
+        Integer passed,
+        List<Grader.QuestionResult> questions) {
 
     /** 普通问卷（不判分）的返回体。 */
     public static SubmitResult notGraded(String message) {
-        return new SubmitResult(message, false, null, null, null, null);
+        return new SubmitResult(message, false, null, null, null, null, null);
     }
 
-    /** 由判分结果组装（{@code result} 为 null 时退化成普通问卷）。 */
-    public static SubmitResult of(String message, Grader.Result result, Integer passScore) {
+    /**
+     * 由判分结果组装（{@code result} 为 null 时退化成普通问卷）。
+     *
+     * @param showAnswers 作者是否开启"提交后显示答案" —— 只有 true 才把逐题结果带出去
+     */
+    public static SubmitResult of(String message, Grader.Result result, Integer passScore,
+                                  boolean showAnswers) {
         if (result == null) return notGraded(message);
         return new SubmitResult(message, true, result.totalScore(), result.earnedScore(),
-                passScore, result.passed());
+                passScore, result.passed(), showAnswers ? result.questions() : null);
     }
 }

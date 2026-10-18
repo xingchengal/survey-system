@@ -121,6 +121,12 @@ public class AnswerService {
     private static final int NPS_MIN = 0;
     private static final int NPS_MAX = 10;
 
+    /**
+     * 限时答卷的宽限（毫秒）：前端倒计时到 0 后还会有一两次网络往返，
+     * 卡得太死会把"刚好最后一秒点提交"的人误判成超时。
+     */
+    private static final long TIME_LIMIT_GRACE_MS = 10_000L;
+
     /** 日期题的格式（value-format 统一为 yyyy-MM-dd，避免客户端时区把日期差一天） */
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
@@ -235,6 +241,18 @@ public class AnswerService {
         if (survey.getEndTime() != null
                 && !survey.getEndTime().isAfter(java.time.LocalDateTime.now())) {
             throw new BizException("问卷已截止，无法提交答卷");
+        }
+
+        // ★★ 限时：按前端上报的答题耗时校验（+10 秒宽限）。
+        //   ★ 这不是防作弊：duration_ms 是客户端值、可伪造（见 entity/Answer 与《待解决问题》C8）；
+        //     它挡的是"页面倒计时结束还继续答题"的正常超时。
+        //   ★ durationMs 为 null（老客户端/直接调接口）时不拦 —— 与改造前行为一致；
+        //     这个缺口是已知的，要堵得靠"开始答卷发服务端时间凭证"，不在本轮范围。
+        if (survey.getTimeLimitSeconds() != null && durationMs != null
+                && durationMs > survey.getTimeLimitSeconds() * 1000L + TIME_LIMIT_GRACE_MS) {
+            int limit = survey.getTimeLimitSeconds();
+            String limitText = limit % 60 == 0 ? (limit / 60) + " 分钟" : limit + " 秒";
+            throw new BizException("答题超时（限时 " + limitText + "），本次答卷未提交");
         }
 
         // ★★ 第五道：**答卷防重**（登录态）。
@@ -405,8 +423,21 @@ public class AnswerService {
             throw new BizException("你已经提交过这份问卷，不能重复提交");
         }
 
+        // ★ 判分题的逐题对错随明细一起落库（t_answer_detail.is_correct）：
+        //   · 多选一选项一行，同一道题的所有行拿到**同一个**值（口径是按题，不是按行）；
+        //   · 非计分题 / 普通问卷不写（保持 NULL），成绩卡据此只标"有判分"的题。
+        Map<Integer, Integer> correctnessByQuestion = new HashMap<>();
+        if (grading != null) {
+            for (Grader.QuestionResult qr : grading.questions()) {
+                correctnessByQuestion.put(qr.questionId(), qr.correct() ? 1 : 0);
+            }
+        }
         for (AnswerDetail d : details) {
             d.setAnswerId(answer.getId());
+            Integer correct = correctnessByQuestion.get(d.getQuestionId());
+            if (correct != null) {
+                d.setIsCorrect(correct);
+            }
             answerDetailMapper.insert(d);
         }
 
@@ -438,7 +469,10 @@ public class AnswerService {
         }
 
         // 返回给答题页的分数（普通问卷 graded=false，前端照旧显示感谢语）
-        return SubmitResult.of("提交成功", grading, survey.getPassScore());
+        // ★ 逐题结果只在作者开启"提交后显示答案"时带出去（否则成绩卡只给分数，不泄题）
+        boolean showAnswers = survey.getShowAnswerAfterSubmit() != null
+                && survey.getShowAnswerAfterSubmit() == 1;
+        return SubmitResult.of("提交成功", grading, survey.getPassScore(), showAnswers);
     }
 
     /**

@@ -88,7 +88,9 @@ public interface SurveyMapper {
             "access_password=#{accessPassword}, max_responses=#{maxResponses}, " +
             "thank_text=#{thankText}, redirect_url=#{redirectUrl}, " +
             "public_result=IFNULL(#{publicResult}, 0), ip_limit=IFNULL(#{ipLimit}, 0), " +
-            "grade_enabled=IFNULL(#{gradeEnabled}, 0), pass_score=#{passScore} WHERE id=#{id}")
+            "grade_enabled=IFNULL(#{gradeEnabled}, 0), pass_score=#{passScore}, " +
+            "time_limit_seconds=#{timeLimitSeconds}, " +
+            "show_answer_after_submit=IFNULL(#{showAnswerAfterSubmit}, 0) WHERE id=#{id}")
     int update(Survey survey);
 
     /**

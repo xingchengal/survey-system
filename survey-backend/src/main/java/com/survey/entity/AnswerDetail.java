@@ -38,6 +38,13 @@ public class AnswerDetail {
     /** 排序题：名次（1 起）；其它题型为 null */
     private Integer rankNo;
 
+    /**
+     * 该题是否答对：1 = 对，0 = 错，NULL = 未判分（普通问卷 / 非计分题 / 判分上线前的历史答卷）。
+     * ★ 口径是**按题**而不是按行：多选一选项一行，同一道题的所有行会拿到同一个值。
+     * ★ 成绩卡与答卷详情用它展示"逐题对错"，作者事后改答案不影响已存的值。
+     */
+    private Integer isCorrect;
+
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
 
@@ -55,4 +62,7 @@ public class AnswerDetail {
 
     public Integer getRankNo() { return rankNo; }
     public void setRankNo(Integer rankNo) { this.rankNo = rankNo; }
+
+    public Integer getIsCorrect() { return isCorrect; }
+    public void setIsCorrect(Integer isCorrect) { this.isCorrect = isCorrect; }
 }

@@ -5,6 +5,7 @@ import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -41,13 +42,26 @@ public final class Grader {
     }
 
     /**
+     * 单题的判分结果（成绩卡"逐题对错"的数据源）。
+     *
+     * @param questionId     题目 id
+     * @param correct        是否答对（未作答 = false）
+     * @param correctAnswers 正确答案的选项原文（按选项顺序）
+     *                       ★ 只在作者开启"提交后显示答案"时才会被返回给答题人；
+     *                       Grader 本身总是算出来，**暴露与否由 DTO 层控制**。
+     */
+    public record QuestionResult(Integer questionId, boolean correct, List<String> correctAnswers) {
+    }
+
+    /**
      * 判分结果。
      *
      * @param totalScore  本卷总分（所有 &gt;0 的题目分值之和）
      * @param earnedScore 本次得分
      * @param passed      是否及格：null = 未设及格线；0 = 不及格；1 = 及格
+     * @param questions   逐题结果（只含"设了分值的题"，顺序与题目顺序一致；不判分时为空列表）
      */
-    public record Result(int totalScore, int earnedScore, Integer passed) {
+    public record Result(int totalScore, int earnedScore, Integer passed, List<QuestionResult> questions) {
     }
 
     /**
@@ -97,7 +111,7 @@ public final class Grader {
             // 防御：正常路径下 SurveyService 开启考试模式时就要求总分 > 0（QuestionService 保存时也会拦），
             // 这里兜住"历史数据里开关开着但题目分值被清空"的脏状态 —— 不抛异常，按 0/0 记录，
             // 至少不会让提交直接 500。
-            return new Result(0, 0, null);
+            return new Result(0, 0, null, List.of());
         }
 
         // 提交内容按题目归集：用 Set 去重（多选重复项不应被当成"多选了几个"）
@@ -113,6 +127,7 @@ public final class Grader {
         }
 
         int earned = 0;
+        List<QuestionResult> perQuestion = new ArrayList<>();
         for (Question q : questions) {
             if (q == null || q.getScore() == null || q.getScore() <= 0) continue;
             if (!isGradable(q.getType())) continue;   // 防御：保存时已拒绝
@@ -139,6 +154,10 @@ public final class Grader {
                 right = !got.isEmpty() && got.size() == correct.size() && got.containsAll(correct);
             }
             if (right) earned += q.getScore();
+            // ★ 逐题结果（含正确答案）在这里统一算出来：
+            //   · 成绩卡的"逐题对错"用它；
+            //   · "提交后显示答案"也用它 —— 是否把 correctAnswers 返回给答题人由 DTO 层决定。
+            perQuestion.add(new QuestionResult(q.getId(), right, new ArrayList<>(correct)));
         }
 
         Integer passed = null;
@@ -146,6 +165,6 @@ public final class Grader {
             // 等于及格分算及格（>= 而不是 >）
             passed = earned >= survey.getPassScore() ? 1 : 0;
         }
-        return new Result(total, earned, passed);
+        return new Result(total, earned, passed, perQuestion);
     }
 }

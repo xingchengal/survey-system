@@ -395,6 +395,24 @@ public class SurveyService {
                 }
             }
         }
+
+        // ★ 答题限时：null / 0 = 不限；上限 24 小时（再长就不是"考试"了，而是配置写错）。
+        //   ★ 服务端按前端上报的 duration_ms 校验（+10 秒宽限），**不是防作弊**：
+        //     duration_ms 可伪造，这条挡的是"倒计时结束还在答"的正常超时。
+        Integer timeLimit = survey.getTimeLimitSeconds();
+        if (timeLimit != null && timeLimit <= 0) {
+            timeLimit = null;   // 0 与 null 同义：不限时（前端清空输入框时可能传 0）
+        }
+        if (timeLimit != null && timeLimit > 86400) {
+            throw new BizException("答题限时不能超过 24 小时（86400 秒）；留空表示不限时");
+        }
+        survey.setTimeLimitSeconds(timeLimit);
+
+        // ★ 提交后显示答案：只有考试问卷才有意义 —— 关闭考试模式时强制归零，
+        //   否则会出现"普通问卷却返回了一堆 null 答案"的歧义配置。
+        int showAnswer = gradeEnabled == 1 && survey.getShowAnswerAfterSubmit() != null
+                && survey.getShowAnswerAfterSubmit() == 1 ? 1 : 0;
+        survey.setShowAnswerAfterSubmit(showAnswer);
     }
 
     /** 去空白；空串返回 null（"清空"在库里统一表示为 NULL） */

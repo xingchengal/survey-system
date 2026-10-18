@@ -106,6 +106,7 @@ CREATE TABLE `t_answer_detail` (
   `content` varchar(1000) DEFAULT NULL COMMENT '回答内容',
   `row_key` varchar(500) DEFAULT NULL COMMENT '矩阵题：该答案属于哪一行（行标题原文）；其它题型为 NULL',
   `rank_no` smallint DEFAULT NULL COMMENT '排序题：名次（1 起）；其它题型为 NULL',
+  `is_correct` tinyint DEFAULT NULL COMMENT '该题是否答对：1=对，0=错，NULL=未判分。★ 口径按题：多选一选项一行，同题所有行同值',
   PRIMARY KEY (`id`),
   KEY `idx_answer_id` (`answer_id`),
   KEY `idx_question_id` (`question_id`)
@@ -245,6 +246,8 @@ CREATE TABLE `t_survey` (
   `public_result` tinyint NOT NULL DEFAULT '0' COMMENT '是否公开结果页：0=不公开，1=开启（匿名可访问 /r/{shareCode}）',
   `grade_enabled` tinyint NOT NULL DEFAULT '0' COMMENT '考试模式：0=普通问卷（不判分），1=判分（提交时算分并写入 t_answer 三个分数字段）',
   `pass_score` int DEFAULT NULL COMMENT '及格分：NULL=不判及格（只出分）；开启考试模式时取值必须在 0 ~ 本卷总分之间',
+  `time_limit_seconds` int DEFAULT NULL COMMENT '答题限时（秒）：NULL=不限；前端倒计时，服务端按上报 duration_ms + 10s 宽限校验（非防作弊）',
+  `show_answer_after_submit` tinyint NOT NULL DEFAULT '0' COMMENT '提交后是否展示正确答案：0=否（只出分），1=是；只在 grade_enabled=1 时有意义',
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',

@@ -245,4 +245,24 @@ class GraderTest {
         // ★ 不能用 List.of：它不接受 null 元素（会直接 NPE），而这里正好要造一个 score=null 的题
         assertEquals(10, Grader.totalScore(java.util.Arrays.asList(a, b, c)));
     }
+
+    @Test
+    @DisplayName("逐题结果：只含计分题，带正确答案；答对/答错各一条")
+    void questionResults_onlyScoredQuestions() {
+        Question q1 = question(11, 1, 6);
+        Question q2 = question(13, 2, 4);
+        Question unscored = question(12, 1, 0);
+        Map<Integer, List<Option>> opts = new LinkedHashMap<>();
+        opts.put(11, List.of(option("A", true), option("B", false)));
+        opts.put(13, List.of(option("C", true), option("D", true)));
+
+        Grader.Result r = Grader.grade(survey(1, null), List.of(q1, q2, unscored), opts,
+                List.of(answer(11, "A"), answer(13, "C")));
+
+        assertEquals(2, r.questions().size(), "未设分值的题不应出现在逐题结果里");
+        assertTrue(r.questions().get(0).correct());
+        assertEquals(List.of("A"), r.questions().get(0).correctAnswers());
+        assertFalse(r.questions().get(1).correct(), "多选漏选 = 答错");
+        assertEquals(List.of("C", "D"), r.questions().get(1).correctAnswers());
+    }
 }

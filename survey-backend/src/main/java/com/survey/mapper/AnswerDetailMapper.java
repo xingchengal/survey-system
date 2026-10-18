@@ -26,9 +26,9 @@ import java.util.Map;
 @Mapper
 public interface AnswerDetailMapper {
 
-    /** 插入一条答案（一次提交里每题一行）。 */
-    @Insert("INSERT INTO t_answer_detail(answer_id, question_id, content, row_key, rank_no) " +
-            "VALUES(#{answerId}, #{questionId}, #{content}, #{rowKey}, #{rankNo})")
+    /** 插入一条答案（一次提交里每题一行）。★ 判分题的 is_correct 随明细一起落库。 */
+    @Insert("INSERT INTO t_answer_detail(answer_id, question_id, content, row_key, rank_no, is_correct) " +
+            "VALUES(#{answerId}, #{questionId}, #{content}, #{rowKey}, #{rankNo}, #{isCorrect})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(AnswerDetail detail);
 

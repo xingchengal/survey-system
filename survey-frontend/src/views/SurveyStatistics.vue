@@ -238,7 +238,15 @@
       <div v-for="(item, idx) in answerDetails" :key="item.id" class="detail-row">
         <div class="detail-index">{{ idx + 1 }}</div>
         <div class="detail-body">
-          <div class="detail-title">{{ getQuestionTitle(item.questionId) }}</div>
+          <div class="detail-title">
+            {{ getQuestionTitle(item.questionId) }}
+            <!-- ★ 判分题的逐题对错（t_answer_detail.is_correct）：多选一选项一行，
+                 只在该题的第一行显示一次，避免同一道题重复挂三个"答对"。 -->
+            <template v-if="item.isCorrect != null && idx === firstDetailIndex(item.questionId)">
+              <el-tag v-if="item.isCorrect === 1" type="success" size="small" style="margin-left:6px;">答对</el-tag>
+              <el-tag v-else type="danger" size="small" style="margin-left:6px;">答错</el-tag>
+            </template>
+          </div>
           <div class="detail-content">{{ formatDetail(item) }}</div>
         </div>
       </div>
@@ -796,6 +804,11 @@ export default {
     getQuestionTitle(questionId) {
       const q = this.questions.find(item => item.id === questionId)
       return q ? q.title : `题目 #${questionId}`
+    },
+
+    /** 某题在答卷详情里的第一行下标（逐题对错标签只在第一行显示一次） */
+    firstDetailIndex(questionId) {
+      return this.answerDetails.findIndex(x => x.questionId === questionId)
     },
 
     /**

@@ -1,5 +1,6 @@
 package com.survey.service;
 
+import com.survey.common.BizException;
 import com.survey.common.SurveyStatus;
 import com.survey.dto.SubmitResult;
 import com.survey.entity.Answer;
@@ -29,6 +30,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -122,7 +125,11 @@ class AnswerServiceGradingTest {
     }
 
     private void givenSurvey(Question q, Option... options) {
-        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(1, 8));
+        givenSurvey(survey(1, 8), q, options);
+    }
+
+    private void givenSurvey(Survey s, Question q, Option... options) {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(s);
         when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(q));
         when(optionMapper.findByQuestionIds(anyList())).thenReturn(List.of(options));
     }
@@ -208,5 +215,85 @@ class AnswerServiceGradingTest {
         ArgumentCaptor<Answer> captor = ArgumentCaptor.forClass(Answer.class);
         verify(answerMapper).insert(captor.capture());
         assertNull(captor.getValue().getIsPassed());
+    }
+
+    // ==================== P1：限时 / 逐题对错 / 提交后显示答案 ====================
+
+    @Test
+    @DisplayName("限时：超过限时 + 10 秒宽限 → 400，且一份数据都不写")
+    void timeLimitExceeded_rejected() {
+        Survey s = survey(1, 8);
+        s.setTimeLimitSeconds(60);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        BizException e = assertThrows(BizException.class, () -> answerService.submit(
+                SURVEY_ID, null, List.of(answer(11, "A")), 71_000, "127.0.0.1"));
+
+        assertTrue(e.getMessage().contains("答题超时"), e.getMessage());
+        verify(answerMapper, never()).insert(any());
+        verify(answerDetailMapper, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("限时：落在宽限内（69 秒 / 限时 60 秒）→ 正常收卷")
+    void timeLimitWithinGrace_accepted() {
+        Survey s = survey(1, 8);
+        s.setTimeLimitSeconds(60);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        SubmitResult result = answerService.submit(SURVEY_ID, null,
+                List.of(answer(11, "A")), 69_000, "127.0.0.1");
+
+        assertEquals(10, result.earnedScore());
+    }
+
+    @Test
+    @DisplayName("逐题对错：答对写 1、答错写 0（t_answer_detail.is_correct）")
+    void correctness_isPersistedOnDetails() {
+        givenSurvey(single(11, 10), option(11, "A", true), option(11, "B", false));
+        answerService.submit(SURVEY_ID, null, List.of(answer(11, "A")), 3000, "127.0.0.1");
+        ArgumentCaptor<AnswerDetail> right = ArgumentCaptor.forClass(AnswerDetail.class);
+        verify(answerDetailMapper).insert(right.capture());
+        assertEquals(1, right.getValue().getIsCorrect());
+
+        givenSurvey(single(11, 10), option(11, "A", true), option(11, "B", false));
+        answerService.submit(SURVEY_ID, null, List.of(answer(11, "B")), 3000, "127.0.0.1");
+        ArgumentCaptor<AnswerDetail> wrong = ArgumentCaptor.forClass(AnswerDetail.class);
+        verify(answerDetailMapper, times(2)).insert(wrong.capture());
+        assertEquals(0, wrong.getAllValues().get(1).getIsCorrect());
+    }
+
+    @Test
+    @DisplayName("普通问卷：明细的 isCorrect 保持 null（不能被当成答错）")
+    void plainSurvey_correctnessStaysNull() {
+        Survey s = survey(0, null);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        answerService.submit(SURVEY_ID, null, List.of(answer(11, "A")), 3000, "127.0.0.1");
+
+        ArgumentCaptor<AnswerDetail> captor = ArgumentCaptor.forClass(AnswerDetail.class);
+        verify(answerDetailMapper).insert(captor.capture());
+        assertNull(captor.getValue().getIsCorrect());
+    }
+
+    @Test
+    @DisplayName("提交后显示答案：开启才返回逐题结果，关闭时为 null")
+    void showAnswers_onlyWhenEnabled() {
+        Survey s = survey(1, 8);
+        s.setShowAnswerAfterSubmit(1);
+        givenSurvey(s, single(11, 10), option(11, "A", true));
+
+        SubmitResult withAnswers = answerService.submit(SURVEY_ID, null,
+                List.of(answer(11, "A")), 3000, "127.0.0.1");
+        assertNotNull(withAnswers.questions());
+        assertEquals(1, withAnswers.questions().size());
+        assertTrue(withAnswers.questions().get(0).correct());
+        assertEquals(List.of("A"), withAnswers.questions().get(0).correctAnswers());
+
+        // 关闭时再交一份：questions 必须为 null（不泄题）
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(1, 8));
+        SubmitResult without = answerService.submit(SURVEY_ID, null,
+                List.of(answer(11, "A")), 3000, "127.0.0.1");
+        assertNull(without.questions());
     }
 }

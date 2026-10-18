@@ -51,6 +51,19 @@
             及格线 {{ submitResult.passScore }} 分
           </span>
         </div>
+        <!-- ★ 逐题对错：只有作者开启「提交后显示答案」时后端才返回 questions；
+             没开时这里不渲染，成绩卡只给分数（不泄题）。 -->
+        <div v-if="submitResult.questions && submitResult.questions.length" class="score-review">
+          <div v-for="qr in submitResult.questions" :key="qr.questionId" class="score-review-row">
+            <span class="score-review-title">{{ questionTitle(qr.questionId) }}</span>
+            <el-tag :type="qr.correct ? 'success' : 'danger'" size="small">
+              {{ qr.correct ? '答对' : '答错' }}
+            </el-tag>
+            <span class="score-review-answer">
+              正确答案：{{ (qr.correctAnswers || []).join('、') || '—' }}
+            </span>
+          </div>
+        </div>
       </el-card>
       <el-result :icon="submitResult ? 'info' : 'success'" :title="submitResult ? '已交卷' : '提交成功！'"
                  :sub-title="thankText">
@@ -88,6 +101,11 @@
           <span>共 {{ questions.length }} 题</span>
           <span class="fill-meta-dot">·</span>
           <span>预计 {{ estimatedMinutes }} 分钟</span>
+          <!-- 限时答卷：倒计时（服务端提交时会按上报耗时校验，超时拒收） -->
+          <template v-if="timeLeft != null">
+            <span class="fill-meta-dot">·</span>
+            <span :class="{ 'fill-time-urgent': timeLeftUrgent }">剩余 {{ timeLeftText }}</span>
+          </template>
         </div>
 
         <div v-if="survey.endTime" style="margin-top: 12px;">
@@ -421,7 +439,13 @@ export default {
        * ★ 唯一用途：提交时上报"答题耗时"，给后端的"答题过快"质控判定。
        *   它是**客户端值、可伪造** —— 后端只当提示，不当安全边界。
        */
-      startedAt: 0
+      startedAt: 0,
+      /** 限时答卷：剩余秒数（null = 不限时），由 timeLimitTimer 每秒递减 */
+      timeLeft: null,
+      /** 限时倒计时器（与 endTime 的 countdownTimer 是两回事） */
+      timeLimitTimer: null,
+      /** 是否已经提示过"时间到"（避免每秒弹一次） */
+      timeUpNotified: false
     }
   },
   computed: {
@@ -565,6 +589,17 @@ export default {
     redirectUrl() {
       const url = this.survey && this.survey.redirectUrl
       return url && /^https?:\/\//i.test(url) ? url : ''
+    },
+    /** 限时答卷的剩余时间文案（mm:ss；不限时返回空串） */
+    timeLeftText() {
+      if (this.timeLeft == null) return ''
+      const m = Math.floor(this.timeLeft / 60)
+      const s = this.timeLeft % 60
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    },
+    /** 剩余不足 1 分钟时高亮提示 */
+    timeLeftUrgent() {
+      return this.timeLeft != null && this.timeLeft <= 60
     }
   },
   mounted() {
@@ -577,6 +612,7 @@ export default {
   beforeUnmount() {
     if (this.countdownTimer) clearInterval(this.countdownTimer)
     if (this.redirectTimer) clearInterval(this.redirectTimer)
+    this.clearTimeLimit()
   },
   methods: {
     async loadSurvey() {
@@ -654,6 +690,7 @@ export default {
       this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
       this.initAnswers()
       this.startCountdown()
+      this.startTimeLimit()
     },
 
     /**
@@ -708,6 +745,7 @@ export default {
         this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
         this.initAnswers()
         this.startCountdown()
+        this.startTimeLimit()
       } catch (e) {
         this.passwordError = (e && e.message) || '密码不正确，请重试'
       } finally {
@@ -1030,6 +1068,50 @@ export default {
       this.countdownTimer = setInterval(() => this.updateCountdown(), 1000)
     },
 
+    /**
+     * 限时答卷：按问卷配置启动倒计时。
+     * ★ 剩余时间从**打开页面**算起（startedAt）—— 与提交时上报的 duration_ms 同一口径，
+     *   否则"进页面先看了 3 分钟再开始答"会让前端显示 10 分钟、服务端却按 13 分钟判超时。
+     * ★ 到 0 时自动交卷：服务端对"超时"是拒收的（+10 秒宽限），
+     *   不自动交的话用户只能眼睁睁看着答案作废。
+     */
+    startTimeLimit() {
+      const limit = this.survey && this.survey.timeLimitSeconds
+      if (!limit || limit <= 0 || this.timeLimitTimer) return
+      const elapsed = this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0
+      this.timeLeft = Math.max(0, limit - elapsed)
+      if (this.timeLeft === 0) {
+        this.onTimeUp()
+        return
+      }
+      this.timeLimitTimer = setInterval(() => {
+        if (this.timeLeft == null) return
+        this.timeLeft = Math.max(0, this.timeLeft - 1)
+        if (this.timeLeft === 0) this.onTimeUp()
+      }, 1000)
+    },
+
+    clearTimeLimit() {
+      if (this.timeLimitTimer) {
+        clearInterval(this.timeLimitTimer)
+        this.timeLimitTimer = null
+      }
+    },
+
+    onTimeUp() {
+      this.clearTimeLimit()
+      if (this.timeUpNotified || this.submitted) return
+      this.timeUpNotified = true
+      ElMessage.warning('答题时间到，正在为你提交当前答案…')
+      this.submitAnswer()
+    },
+
+    /** 成绩卡里按 id 找题干（题目已加载；找不到时给一个不误导的占位） */
+    questionTitle(questionId) {
+      const q = this.questions.find(x => x.id === questionId)
+      return q ? q.title : `题目 #${questionId}`
+    },
+
     updateCountdown() {
       const end = new Date(this.survey.endTime.replace(/-/g, '/')).getTime()
       const now = Date.now()
@@ -1130,6 +1212,7 @@ export default {
         const result = await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
         this.submitResult = result && result.graded ? result : null
         this.submitted = true
+        this.clearTimeLimit()
         this.startRedirectTimer()
         // ★ 提交成功后静默刷新一次分享信息：限量问卷往往"你交完就满了"，
         //   刷新后"再填一份"会自动消失，而不是点进去再吃一次 400。
@@ -1166,6 +1249,12 @@ export default {
       this.currentOrder = 1
       this.history = []
       this.allDone = false
+      // ★ 限时问卷"再填一份"要重新起算：重置开始时间与倒计时，而不是接着上一份的剩余时间
+      this.clearTimeLimit()
+      this.timeLeft = null
+      this.timeUpNotified = false
+      this.startedAt = Date.now()
+      this.$nextTick(() => this.startTimeLimit())
     }
   }
 }
@@ -1209,6 +1298,37 @@ export default {
 .score-pass {
   font-size: 13px;
   color: var(--ink-3, #64748b);
+}
+/* 限时答卷：剩余不足 1 分钟时标红 */
+.fill-time-urgent {
+  color: #dc2626;
+  font-weight: 600;
+}
+/* 成绩卡的逐题对错（作者开启"提交后显示答案"才有） */
+.score-review {
+  margin-top: 14px;
+  border-top: 1px dashed var(--line-1, #e5e7eb);
+  padding-top: 10px;
+  text-align: left;
+}
+.score-review-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.score-review-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2, #475569);
+}
+.score-review-answer {
+  color: var(--ink-3, #64748b);
+  flex-shrink: 0;
 }
 /* G7：题量 / 预计时长 */
 .fill-meta {

@@ -86,6 +86,20 @@ public class Survey {
      */
     private Integer passScore;
 
+    /**
+     * 答题限时（秒）：NULL/0 = 不限时。
+     * ★ 前端按它做倒计时，服务端在提交时按**上报的 duration_ms** 校验（超过限时 + 10 秒宽限就拒收）。
+     * ★ 注意这不是防作弊：duration_ms 来自前端、可伪造（见《待解决问题》C8），
+     *   它挡的是"页面倒计时结束还继续答题"的正常超时，不是恶意绕过。
+     */
+    private Integer timeLimitSeconds;
+
+    /**
+     * 提交后是否展示正确答案：0 = 否（默认，只出分），1 = 是。
+     * ★ 只在 gradeEnabled=1 时有意义；关闭考试模式时会被归一成 0。
+     */
+    private Integer showAnswerAfterSubmit;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
 
@@ -223,6 +237,12 @@ public class Survey {
 
     public Integer getPassScore() { return passScore; }
     public void setPassScore(Integer passScore) { this.passScore = passScore; }
+
+    public Integer getTimeLimitSeconds() { return timeLimitSeconds; }
+    public void setTimeLimitSeconds(Integer timeLimitSeconds) { this.timeLimitSeconds = timeLimitSeconds; }
+
+    public Integer getShowAnswerAfterSubmit() { return showAnswerAfterSubmit; }
+    public void setShowAnswerAfterSubmit(Integer showAnswerAfterSubmit) { this.showAnswerAfterSubmit = showAnswerAfterSubmit; }
 
     /**
      * IP 限制：0=关闭，1=同一 IP 只能提交一次（属于「高级设置包」）。
