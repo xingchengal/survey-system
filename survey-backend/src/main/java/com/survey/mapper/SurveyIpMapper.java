@@ -1,5 +1,6 @@
 package com.survey.mapper;
 
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -28,4 +29,8 @@ public interface SurveyIpMapper {
     /** 这个 IP 是否已提交过该问卷（只读；提交路径用的是 insertIgnore 的返回值） */
     @Select("SELECT COUNT(*) FROM t_survey_ip WHERE survey_id = #{surveyId} AND ip = #{ip}")
     int countBySurveyAndIp(@Param("surveyId") Integer surveyId, @Param("ip") String ip);
+
+    /** 彻底删除问卷时清空它的 IP 记录（问卷都没了，这些记录只会占着唯一键）。 */
+    @Delete("DELETE FROM t_survey_ip WHERE survey_id = #{surveyId}")
+    int deleteBySurveyId(@Param("surveyId") Integer surveyId);
 }

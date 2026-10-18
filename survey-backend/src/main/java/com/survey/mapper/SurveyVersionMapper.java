@@ -55,4 +55,12 @@ public interface SurveyVersionMapper {
      */
     @Delete("DELETE FROM t_survey_version WHERE survey_id = #{surveyId} AND version_no <= #{maxVersionNoToDelete}")
     int deleteUpTo(@Param("surveyId") Integer surveyId, @Param("maxVersionNoToDelete") int maxVersionNoToDelete);
+
+    /**
+     * 彻底删除问卷时清空它的全部版本快照。
+     * ★ 快照里是**完整题目 JSON**：问卷都彻底删了还留着它，等于"删了但没删干净"，
+     *   而且这些行永远不会再被任何正常查询读到（只能靠手工 SQL 发现）。
+     */
+    @Delete("DELETE FROM t_survey_version WHERE survey_id = #{surveyId}")
+    int deleteBySurveyId(@Param("surveyId") Integer surveyId);
 }

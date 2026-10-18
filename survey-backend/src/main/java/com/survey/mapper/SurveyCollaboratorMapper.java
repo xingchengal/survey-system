@@ -85,4 +85,8 @@ public interface SurveyCollaboratorMapper {
 
     @Delete("DELETE FROM t_survey_collaborator WHERE survey_id = #{surveyId} AND user_id = #{userId}")
     int delete(@Param("surveyId") Integer surveyId, @Param("userId") Integer userId);
+
+    /** 彻底删除问卷时清空全部协作者（否则「共享给我的问卷」会残留幽灵条目）。 */
+    @Delete("DELETE FROM t_survey_collaborator WHERE survey_id = #{surveyId}")
+    int deleteBySurveyId(@Param("surveyId") Integer surveyId);
 }

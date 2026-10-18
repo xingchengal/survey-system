@@ -1,5 +1,6 @@
 package com.survey.mapper;
 
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -64,4 +65,14 @@ public interface SurveyReviewMapper {
             + "FROM t_survey_review WHERE reporter_id = #{reporterId} "
             + "ORDER BY id DESC LIMIT 100")
     List<Map<String, Object>> findByReporter(@Param("reporterId") Integer reporterId);
+
+    /**
+     * 彻底删除问卷时清空它的举报记录。
+     * ★ 举报是从属于问卷的记录：问卷行都没了，survey_id 再也关联不到任何东西，
+     *   留着只会让审核台列表里出现"标题为空"的孤儿行。
+     * ★ 若将来需要"删除后仍可审计"，正确做法是删除前把记录归档到独立的审计表，
+     *   而不是在这里留半条记录。
+     */
+    @Delete("DELETE FROM t_survey_review WHERE survey_id = #{surveyId}")
+    int deleteBySurveyId(@Param("surveyId") Integer surveyId);
 }

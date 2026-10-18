@@ -21,7 +21,11 @@ import com.survey.service.NotificationService;
 import com.survey.mapper.AnswerMapper;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
+import com.survey.mapper.SurveyCollaboratorMapper;
+import com.survey.mapper.SurveyIpMapper;
 import com.survey.mapper.SurveyMapper;
+import com.survey.mapper.SurveyReviewMapper;
+import com.survey.mapper.SurveyVersionMapper;
 import com.survey.common.TextLimits;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -95,6 +99,22 @@ public class SurveyService {
 
     @Autowired
     private NotificationService notificationService;
+
+    /**
+     * 彻底删除时要清理的"后加子表"。
+     * ★ 这 4 张表是本项目后续几轮才出现的（版本快照/协作者/IP/举报），
+     *   早期的 cascadeDeleteSurvey 只认识"题目/选项/答卷/明细"，于是彻底删除会留下孤儿行
+     *   —— 其中 t_survey_version 里是**完整题目 JSON**，属于"删了但没删干净"。
+     *   新增任何"从属于问卷"的表时，必须同步加到这里（并补 SurveyServiceCascadeDeleteTest 的断言）。
+     */
+    @Autowired
+    private SurveyVersionMapper surveyVersionMapper;
+    @Autowired
+    private SurveyCollaboratorMapper surveyCollaboratorMapper;
+    @Autowired
+    private SurveyIpMapper surveyIpMapper;
+    @Autowired
+    private SurveyReviewMapper surveyReviewMapper;
 
     // ===== 分享码生成 =====
 
@@ -219,7 +239,7 @@ public class SurveyService {
      * 级联物理删除一份问卷及其全部子数据。
      *
      * ★ 删除顺序必须**自底向上**（先子后父），与 UserService.deleteUser 的既有顺序保持一致：
-     *     答卷明细 → 答卷 → 选项 → 题目 → 问卷
+     *     答卷明细 → 答卷 → 选项 → 题目 → 版本/协作/IP/举报 → 问卷
      *   反过来删（先删问卷）会留下永远查不到、也永远删不掉的子表垃圾。
      * ★ 两处复用：permanentDelete（回收站彻底删）、UserService.deleteUser（删用户时连带删
      *   他名下的问卷）—— 集中在这里就避免了"两份实现、改一处漏一处"。
@@ -251,15 +271,23 @@ public class SurveyService {
         optionMapper.deleteBySurveyId(surveyId);
         // 4) 题目
         questionMapper.deleteBySurveyId(surveyId);
-        // 5) 问卷本体
+        // 5) 版本快照 / 协作者 / IP 记录 / 举报（都是"从属于问卷"的后加表）
+        //    ★ 必须在删问卷本体**之前**：这些表都靠 survey_id 关联，
+        //      问卷行一删就再也定位不到它们了（只能靠手工 SQL 才发现残留）。
+        int versionRows = surveyVersionMapper.deleteBySurveyId(surveyId);
+        int collaboratorRows = surveyCollaboratorMapper.deleteBySurveyId(surveyId);
+        int ipRows = surveyIpMapper.deleteBySurveyId(surveyId);
+        int reviewRows = surveyReviewMapper.deleteBySurveyId(surveyId);
+        // 6) 问卷本体
         int rows = surveyMapper.deleteById(surveyId);
-        // 6) 统计缓存：问卷与题目都已不存在，这些 key 不会再被任何正常请求读到
+        // 7) 统计缓存：问卷与题目都已不存在，这些 key 不会再被任何正常请求读到
         //    （统计接口会先因"问卷/题目不存在"而 400），删掉纯粹是不让残值白占内存到 TTL 到期。
         //    ★ 事务内删缓存是安全的：删是幂等的，且下次访问会回源得到正确值 ——
         //      与"自增"相反，后者绝不能在事务里做（回滚会造成缓存比库多）。
         statsCacheService.evictSurvey(surveyId, questionIds);
-        LOG.info("级联删除问卷 id={}：清理答卷 {} 份 / 明细 {} 条，以及其选项与题目，删除问卷 {} 行",
-                surveyId, answerRows, detailRows, rows);
+        LOG.info("级联删除问卷 id={}：清理答卷 {} 份 / 明细 {} 条 / 版本 {} 条 / 协作者 {} 条 / "
+                        + "IP {} 条 / 举报 {} 条，以及其选项与题目，删除问卷 {} 行",
+                surveyId, answerRows, detailRows, versionRows, collaboratorRows, ipRows, reviewRows, rows);
         return rows;
     }
 
