@@ -162,4 +162,59 @@ class LoginLogServiceTest {
         assertTrue(limit > 0 && limit <= 100,
                 "最近登录的查询上限必须是 Service 内写死的小值，实际=" + limit);
     }
+
+    // ==================== 5. 保留策略（C2） ====================
+
+    /**
+     * 反射设置私有 `@Value` 字段。
+     * ★ 纯单测里没有 Spring 容器，`@Value("${log.retention-days:90}")` 不会被注入（字段恒为 0）——
+     *   所以每条与保留策略相关的用例都必须先设值，否则测出来的只是"默认关闭"这一条分支。
+     */
+    private void setRetentionDays(int days) {
+        try {
+            var field = LoginLogService.class.getDeclaredField("retentionDays");
+            field.setAccessible(true);
+            field.setInt(loginLogService, days);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(
+                    "反射设置 LoginLogService.retentionDays 失败 —— 字段名/类型可能变了，请同步本测试", e);
+        }
+    }
+
+    @Test
+    @DisplayName("保留策略：retentionDays > 0 时按天数清理过期登录记录")
+    void purgeExpired_shouldDeleteByRetentionDays() {
+        setRetentionDays(90);
+        when(loginLogMapper.deleteOlderThan(90)).thenReturn(7);
+
+        loginLogService.purgeExpired();
+
+        verify(loginLogMapper).deleteOlderThan(90);
+    }
+
+    /**
+     * ★ 配成 0 / 负数 = **关闭**自动清理（保留全部历史）。
+     *   这是与 ErrorLogService 共用的语义（同一个 `log.retention-days` 键），
+     *   如果有人把 `<= 0` 的判断删掉，运维设成 0 会变成"一启动就清空全表"。
+     */
+    @Test
+    @DisplayName("保留策略：retentionDays <= 0 时关闭清理（一条都不删）")
+    void purgeExpired_shouldBeDisabledWhenRetentionIsNonPositive() {
+        setRetentionDays(0);
+
+        loginLogService.purgeExpired();
+
+        verifyNoInteractions(loginLogMapper);
+    }
+
+    /** 清理任务自己失败绝不能把异常抛给调度器（否则每分钟刷一次堆栈），也不能影响别的定时任务。 */
+    @Test
+    @DisplayName("保留策略：清理抛异常时吞掉，不向上抛")
+    void purgeExpired_shouldSwallowExceptions() {
+        setRetentionDays(30);
+        when(loginLogMapper.deleteOlderThan(30)).thenThrow(new RuntimeException("db down"));
+
+        assertDoesNotThrow(() -> loginLogService.purgeExpired());
+        verify(loginLogMapper).deleteOlderThan(30);
+    }
 }

@@ -1,6 +1,7 @@
 package com.survey.mapper;
 
 import com.survey.entity.LoginLog;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -21,8 +22,10 @@ import java.util.List;
  *   status      : 1=成功 / 0=失败 —— 本 Mapper 的**写入方当前固定传 1**（见 LoginLog 类注释）
  *
  * ── 两个注意点 ────────────────────────────────────────
- *   1. 这里**没有** update/delete：登录日志与 t_operation_log / t_error_log 一样是
- *      "只追加"的审计数据，不提供单条修改与删除，避免事后篡改（整表清理在 DB 层做）；
+ *   1. 这里**没有**单条 update/delete：登录日志与 t_operation_log / t_error_log 一样是
+ *      "只追加"的审计数据，不提供单条修改与删除，避免事后篡改；
+ *      **整表级的过期清理**是唯一的例外（`deleteOlderThan`，由 LoginLogService 的定时任务调用，
+ *      与 t_error_log 的保留策略同款）—— 它不是"改某一条"，而是按保留期回收整个时间窗。
  *   2. 查询一律 `WHERE user_id = ?` —— 个人中心的"最近登录"**只能看自己的**，
  *      没有"按用户名查别人登录记录"的接口（管理端也不需要，见端点审计表）。
  */
@@ -45,4 +48,22 @@ public interface LoginLogMapper {
     @Select("SELECT * FROM t_login_log WHERE user_id = #{userId} "
             + "ORDER BY create_time DESC, id DESC LIMIT #{limit}")
     List<LoginLog> findRecentByUser(@Param("userId") Integer userId, @Param("limit") int limit);
+
+    /**
+     * 删除早于 `now - days 天` 的登录记录（保留策略，由 LoginLogService 的定时任务调用）。
+     *
+     * ★ 为什么这张表需要清理、而 t_operation_log **不需要**（两者都是"只追加"的审计数据）：
+     *   · `t_operation_log` 是**审计证据**（谁在什么时候改了什么），删了就查不回来了；
+     *   · `t_login_log` 只服务"最近登录时间/IP"这一个展示位（`findRecentByUser` 只取最近 10 条），
+     *     历史行没有任何读取方 —— 留着只是占空间。
+     *   所以这里按保留期回收，与 `t_error_log` 的 `deleteOlderThan` 同一口径；
+     *   ★ 绝不提供"删单条/改单条"（那才会让审计数据可被篡改）。
+     *
+     * ★ 走 `idx_create_time`（表上有这个索引），范围扫描后整段删除，不扫全表。
+     * ★ 参数是 int（Service 里已保证 > 0），不存在注入。
+     *
+     * @param days 保留天数（早于 now - days 的记录会被删除）
+     */
+    @Delete("DELETE FROM t_login_log WHERE create_time < DATE_SUB(NOW(), INTERVAL #{days} DAY)")
+    int deleteOlderThan(@Param("days") int days);
 }

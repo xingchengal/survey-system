@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,8 +24,17 @@ import java.util.List;
  *   表结构有 status（1=成功 / 0=失败），是为将来的"登录失败次数限制、多次错误临时锁定账号"预留的。
  *   现在**只写成功**，理由：
  *     · 需求要展示的是"你上次什么时候、从哪个 IP 登录过"，失败记录不在展示范围内；
- *     · 登录接口本身就是**公开 + 高频**的入口，一次扫描就能灌满这张表（而它还没有清理任务）。
- *   将来要做失败锁定，把 record 的调用点挪到"登录失败"分支并传 status=0 即可，**不用改表**。
+ *     · 登录接口本身就是**公开 + 高频**的入口，一次扫描就能灌满这张表。
+ *   ★ **"表满"不再是理由**（C2 已补）：本类现在有保留策略定时任务（`purgeExpired`，
+ *     默认 90 天，配置项 `log.retention-days`，与异常日志共用同一个键）。
+ *     将来把 record 挪到失败分支时，沿用同一条清理链路即可，不需要再补清理代码。
+ *
+ * ── ★ 为什么这张"只追加"的表要清理，而 t_operation_log 不清理 ─────
+ *   `t_login_log` 只服务"最近登录"一个展示位（`findRecentByUser` 只取最近 10 条），
+ *   历史行**没有任何读取方**，留着只是占空间；
+ *   `t_operation_log` 是**审计证据**（谁在什么时候改了什么），必须一直留 ——
+ *   两者保留策略**刻意不同**，别看到"操作日志没清理任务"就以为这里也漏了。
+ *   共同点：都**不提供删单条/改单条**（那才会让审计数据可被篡改），只做整段时间窗回收。
  *
  * ── ★ 写入失败绝不影响登录 ────────────────────────────
  *   record() 整体包 try-catch，只打印一行错误。理由：登录日志是"审计的补充"，
@@ -97,5 +108,41 @@ public class LoginLogService {
     private static String truncate(String value, int maxLength) {
         if (value == null || value.isEmpty()) return null;
         return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    // ==================== 保留策略 ====================
+
+    /**
+     * 登录日志保留天数，默认 90 天。
+     * ★ 与 `t_error_log` 共用配置项 `log.retention-days`（ErrorLogService 也是这个键）——
+     *   运维只调一个值就能同时改两个日志表的窗口，不会出现"改了一个忘了另一个"。
+     * ★ 配成 0 或负数 = 关闭自动清理（保留全部历史）。
+     */
+    @Value("${log.retention-days:90}")
+    private int retentionDays;
+
+    /**
+     * 每天凌晨 3:45 清理过期登录日志。
+     *
+     * ★ 为什么在这个点：3:30 是异常日志清理、4:15 是刷新令牌清理 ——
+     *   三条维护任务错开，避免同一时刻抢数据库连接。
+     *
+     * ★ 为什么整体 try-catch：与 record() 同一个理由 ——
+     *   日志维护任务绝不能因为自身失败而影响业务，更不能让调度器反复抛异常刷屏。
+     * ★ 依赖启动类上的 @EnableScheduling（与 ErrorLogService.purgeExpiredLogs 同源）。
+     */
+    @Scheduled(cron = "0 45 3 * * ?")
+    public void purgeExpired() {
+        if (retentionDays <= 0) {
+            return;   // 配成 0 或负数 = 关闭自动清理
+        }
+        try {
+            int removed = loginLogMapper.deleteOlderThan(retentionDays);
+            if (removed > 0) {
+                LOG.info("登录日志保留策略：删除 {} 天前的记录 {} 条", retentionDays, removed);
+            }
+        } catch (Exception e) {
+            LOG.error("登录日志清理失败：{}", e.getMessage(), e);
+        }
     }
 }
