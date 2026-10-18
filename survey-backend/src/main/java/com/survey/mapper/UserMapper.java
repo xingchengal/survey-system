@@ -222,9 +222,31 @@ public interface UserMapper {
      *   `JwtAuthFilter`（每个请求）、`RefreshTokenService.rotate`（续期）、
      *   `LogAspect` / `GlobalExceptionHandler`（取昵称）都走它，
      *   所以账号一注销，他手里那枚还没过期的 JWT 与 refresh token **立刻失效**。
+     *
+     * ★★ **故意不查 `avatar`**（2026-10-18，C1）。
+     *   `t_user.avatar` 是 mediumtext、直接存 base64 图片，**单张解码后可达 2MB**
+     *   （见 common/AvatarValidator）；而上面这些调用方**全都只取昵称/角色/状态**，
+     *   白读一张头像就是每个请求多背一次 MB 级 IO。
+     *   ⇒ 只有个人中心（`/api/user/profile`）需要头像，它走 {@link #findByIdWithAvatar}。
+     *   ★ 改这里时**必须同步下面那张显式列清单**：MyBatis 开了 `map-underscore-to-camel-case`，
+     *     漏掉一列**不会报错**，那个字段会静默变成 null（例如漏了 `disabled`，
+     *     "被禁用账号仍能登录"就会静默复活）。新增 t_user 列时请一并加进来。
+     */
+    @Select("SELECT id, username, password, nickname, role, created_time, phone, email, "
+            + "deleted_at, token_valid_after, disabled "
+            + "FROM t_user WHERE id = #{id} AND deleted_at IS NULL")
+    User findById(Integer id);
+
+    /**
+     * 按 id 查**未注销**用户，**含头像**。唯一调用方：个人中心 `GET /api/user/profile`。
+     *
+     * ★ 为什么不直接复用 {@link #findById}：那一条刻意排除了 mediumtext 的 avatar
+     *   （理由见那边的注释）。个人中心是**唯一**需要把头像发给前端的地方，
+     *   所以为它单独留一条 `SELECT *` —— 一次请求多读一张图，可以接受。
+     * ★ 其它任何地方都不要用它：归属校验、日志、过滤器都不需要头像。
      */
     @Select("SELECT * FROM t_user WHERE id = #{id} AND deleted_at IS NULL")
-    User findById(Integer id);
+    User findByIdWithAvatar(Integer id);
 
     /**
      * 按 id 查，**包括已注销的**。两个调用场景（都必须看到已注销账号）：

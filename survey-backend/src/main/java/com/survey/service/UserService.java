@@ -345,6 +345,19 @@ public class UserService {
         return userMapper.findById(id);
     }
 
+    /**
+     * 按 id 查**未注销**的用户，**含头像** —— 只有个人中心 `GET /api/user/profile` 用。
+     *
+     * ★ 与 {@link #getById} 的区别只有一列：`avatar`（mediumtext，单张解码后可达 2MB）。
+     *   归属校验/日志/过滤器只要昵称与状态，让它们每个请求都背一张头像是纯浪费
+     *   （见 UserMapper.findById 的注释）。
+     * ★ 新增调用方前先问一句：**这里真的要把头像发给前端吗？**
+     *   目前唯一的答案是"个人中心要显示头像"。
+     */
+    public User getByIdWithAvatar(Integer id) {
+        return userMapper.findByIdWithAvatar(id);
+    }
+
     // ★ mapper 的 findActiveUsers(keyword, role) 传 null 即全量查询：listActiveUsersPage 是它的唯一分页入口。
 
     /**

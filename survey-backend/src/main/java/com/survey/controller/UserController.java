@@ -344,7 +344,11 @@ public class UserController {
     @Operation(summary = "获取当前用户信息")
     @GetMapping("/profile")
     public User getProfile(@RequestHeader("X-User-Id") Integer userId) {
-        User user = userService.getById(userId);
+        // ★ 用 getByIdWithAvatar 而不是 getById：**个人中心是唯一需要头像的地方**。
+        //   getById 刻意不查 mediumtext 的 avatar（每个请求白读一张最多 2MB 的图），
+        //   见 UserMapper.findById 的注释。这里若用错了方法，症状是"个人中心头像消失"，
+        //   而接口仍然 200 —— 属于沙箱里最容易漏掉的那类视觉回归。
+        User user = userService.getByIdWithAvatar(userId);
         // ★ 失败抛 BizException（400 + 明确文案），与全项目其它端点一致：
         //   若直接 return null，就是 **HTTP 200 + 空响应体**，前端只能拿到 undefined，
         //   分不清"用户不存在"和"接口出问题"。
