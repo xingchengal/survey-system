@@ -577,6 +577,30 @@
           </div>
         </el-form-item>
 
+        <el-divider content-position="left">现场与名单</el-divider>
+
+        <el-form-item label="启用签到">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.checkinEnabled" :active-value="1" :inactive-value="0" />
+            <el-tag v-if="surveyInfo.checkinEnabled === 1" type="success" size="small">可在答卷列表里签到</el-tag>
+          </div>
+          <div class="setting-hint">
+            开启后，「问卷统计 → 所有答卷」每行会出现「签到」按钮，用于活动现场核销。
+            数据只记"是否签到 + 签到时间"，不影响答卷内容与分数。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="公开报名名单">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.showParticipants" :active-value="1" :inactive-value="0" />
+            <el-tag v-if="surveyInfo.showParticipants === 1" type="warning" size="small">填写页可见前 50 位</el-tag>
+          </div>
+          <div class="setting-hint">
+            开启后，填写页会显示"第 N 位 · 称呼 · 报名时间"（接龙场景）。
+            称呼取第一道单行文本题的回答；请勿在报名问卷里收集敏感信息后再公开名单。
+          </div>
+        </el-form-item>
+
         <el-divider content-position="left">考试判分</el-divider>
 
         <el-form-item label="考试模式">
@@ -894,7 +918,10 @@ export default {
         // 提交后是否展示正确答案（只有考试模式有意义）
         showAnswerAfterSubmit: 0,
         // 是否仅限登录用户填写（0=匿名可填，默认；1=必须先登录）
-        requireLogin: 0
+        requireLogin: 0,
+        // 签到核销 / 公开报名名单（0=关闭，默认）
+        checkinEnabled: 0,
+        showParticipants: 0
       },
       questions: [],
 
@@ -1154,6 +1181,9 @@ export default {
           showAnswerAfterSubmit: data.showAnswerAfterSubmit === 1 ? 1 : 0,
           // ★ 仅限登录用户填写：默认 0（老后端不返回时也不会误开）
           requireLogin: data.requireLogin === 1 ? 1 : 0,
+          // ★ 签到核销 / 公开报名名单：默认都关
+          checkinEnabled: data.checkinEnabled === 1 ? 1 : 0,
+          showParticipants: data.showParticipants === 1 ? 1 : 0,
           // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
@@ -1675,7 +1705,10 @@ export default {
           showAnswerAfterSubmit: this.surveyInfo.gradeEnabled === 1
             && this.surveyInfo.showAnswerAfterSubmit === 1 ? 1 : 0,
           // ★ 仅限登录用户填写：默认 0，关闭时也传 0（静态 SQL，不传会被写成默认值）
-          requireLogin: this.surveyInfo.requireLogin === 1 ? 1 : 0
+          requireLogin: this.surveyInfo.requireLogin === 1 ? 1 : 0,
+          // ★ 签到核销 / 公开报名名单
+          checkinEnabled: this.surveyInfo.checkinEnabled === 1 ? 1 : 0,
+          showParticipants: this.surveyInfo.showParticipants === 1 ? 1 : 0
         })
 
         // ★ 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿

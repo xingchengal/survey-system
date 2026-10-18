@@ -156,7 +156,20 @@
         </div>
       </el-card>
 
-      <!-- 答题密码门：密码正确前不加载题目（题目由后端按请求头校验，前端只是体验层） -->
+      <!-- ★ 接龙报名名单：作者开启「公开报名名单」后才显示。
+           只显示称呼与时间（后端只返回这两个字段），不暴露手机号等其它答案。 -->
+      <el-card v-if="participants.length" class="mb-20 participants-card">
+        <div class="participants-head">
+          📋 报名名单（{{ participants.length }} 位）
+          <span class="participants-tip">按报名先后排列</span>
+        </div>
+        <div v-for="p in participants" :key="p.seq" class="participant-row">
+          <span class="participant-seq">{{ p.seq }}</span>
+          <span class="participant-name">{{ p.name }}</span>
+          <span class="participant-time">{{ p.submitTime }}</span>
+        </div>
+      </el-card>
+
       <el-card v-if="survey.hasPassword && !passwordVerified" class="mb-20 password-card">
         <div class="password-title">🔒 该问卷需要答题密码</div>
         <p class="password-hint">请向问卷发布者索取密码后填写</p>
@@ -465,7 +478,9 @@ export default {
       /** 限时倒计时器（与 endTime 的 countdownTimer 是两回事） */
       timeLimitTimer: null,
       /** 是否已经提示过"时间到"（避免每秒弹一次） */
-      timeUpNotified: false
+      timeUpNotified: false,
+      /** 公开报名名单（作者开启「公开报名名单」时才有；只含称呼与时间） */
+      participants: []
     }
   },
   computed: {
@@ -655,6 +670,10 @@ export default {
         //   （失败不弹提示、不跳登录）；
         //   ★ 绝不【加 await】：访问量统计不该拖慢问卷首屏渲染。
         api.survey.view(this.shareCode).catch(() => {})
+        // ★ 接龙报名名单：作者开启后异步拉取，失败静默（不影响答题）
+        if (data.showParticipants === 1) {
+          this.loadParticipants()
+        }
         // ★ 草稿 / 回收站等（既不是已发布也不是已结束）→ 对外一律当作"不存在或已下线"
         if (data.status !== 1 && data.status !== 2) {
           this.survey = null
@@ -1098,6 +1117,15 @@ export default {
       this.countdownTimer = setInterval(() => this.updateCountdown(), 1000)
     },
 
+    /** 拉取公开报名名单（失败静默：它只是展示，不该影响答题） */
+    async loadParticipants() {
+      try {
+        this.participants = (await api.answer.participants(this.shareCode)) || []
+      } catch {
+        this.participants = []
+      }
+    },
+
     /**
      * 限时答卷：按问卷配置启动倒计时。
      * ★ 剩余时间从**打开页面**算起（startedAt）—— 与提交时上报的 duration_ms 同一口径，
@@ -1326,6 +1354,54 @@ export default {
 </script>
 
 <style scoped>
+/* 接龙报名名单（作者开启「公开报名名单」才有） */
+.participants-head {
+  font-weight: 600;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.participants-tip {
+  font-size: 12px;
+  color: var(--ink-3, #94a3b8);
+  font-weight: 400;
+}
+.participant-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--line-1, #f1f5f9);
+}
+.participant-row:last-child {
+  border-bottom: none;
+}
+.participant-seq {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--sky-50, #eff6ff);
+  color: var(--sky-600, #0284c7);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.participant-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.participant-time {
+  color: var(--ink-3, #94a3b8);
+  font-size: 12px;
+  flex-shrink: 0;
+}
 /* 仅限登录：登录/注册引导按钮 */
 .login-gate-actions {
   margin-top: 18px;

@@ -212,6 +212,22 @@
             <el-tag v-else type="info" effect="light" round size="small">匿名</el-tag>
           </template>
         </el-table-column>
+        <el-table-column v-if="checkinEnabled" label="签到" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.checkedIn === 1" type="success" size="small">已签到</el-tag>
+            <span v-else class="text-gray">未签到</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="checkinEnabled" label="核销" width="100" align="center">
+          <template #default="{ row }">
+            <el-button
+              size="small"
+              :type="row.checkedIn === 1 ? 'info' : 'primary'"
+              plain
+              @click="toggleCheckin(row)"
+            >{{ row.checkedIn === 1 ? '取消' : '签到' }}</el-button>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="110" align="center">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="viewAnswerDetail(row)">查看详情</el-button>
@@ -306,6 +322,8 @@ export default {
       responseCount: 0,
       /** 判分摘要（考试问卷才有；普通问卷为 null，顶部不渲染平均分/及格率） */
       scoreSummary: null,
+      /** 问卷是否启用签到核销（决定答卷列表显不显示签到列） */
+      checkinEnabled: false,
       questions: [],
       chartInstances: {},
       /** 首屏 / 切换口径时的骨架屏 */
@@ -435,6 +453,7 @@ export default {
         this.responseCount = data.answerCount
         // ★ 判分摘要：普通问卷后端给 null（见 SurveyStatisticsDTO），这里不做兜底数字
         this.scoreSummary = data.scoreSummary || null
+        this.checkinEnabled = data.checkinEnabled === true
 
         // 后端每题返回 { question, chartData, textAnswers }；
         // 摊平成模板一直用的结构（题目字段直接铺开 + 两个统计字段）。
@@ -804,6 +823,18 @@ export default {
     getQuestionTitle(questionId) {
       const q = this.questions.find(item => item.id === questionId)
       return q ? q.title : `题目 #${questionId}`
+    },
+
+    /** 签到 / 取消签到（只改当前行状态，不重拉整个列表） */
+    async toggleCheckin(row) {
+      const next = row.checkedIn !== 1
+      try {
+        await api.answer.checkin(row.id, next)
+        row.checkedIn = next ? 1 : 0
+        ElMessage.success(next ? '已签到' : '已取消签到')
+      } catch {
+        // 失败提示由 http.js 统一弹出（如"该问卷未启用签到核销"）
+      }
     },
 
     /** 某题在答卷详情里的第一行下标（逐题对错标签只在第一行显示一次） */

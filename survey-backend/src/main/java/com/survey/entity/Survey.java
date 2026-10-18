@@ -109,6 +109,12 @@ public class Survey {
      */
     private Integer requireLogin;
 
+    /** 是否启用签到核销：0=否（默认），1=是。作者在答卷列表里打勾/取消。 */
+    private Integer checkinEnabled;
+
+    /** 是否公开报名名单：0=否（默认），1=是。开启后填写页显示前 50 位报名者。 */
+    private Integer showParticipants;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
 
@@ -255,6 +261,12 @@ public class Survey {
 
     public Integer getRequireLogin() { return requireLogin; }
     public void setRequireLogin(Integer requireLogin) { this.requireLogin = requireLogin; }
+
+    public Integer getCheckinEnabled() { return checkinEnabled; }
+    public void setCheckinEnabled(Integer checkinEnabled) { this.checkinEnabled = checkinEnabled; }
+
+    public Integer getShowParticipants() { return showParticipants; }
+    public void setShowParticipants(Integer showParticipants) { this.showParticipants = showParticipants; }
 
     /**
      * IP 限制：0=关闭，1=同一 IP 只能提交一次（属于「高级设置包」）。

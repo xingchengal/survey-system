@@ -186,6 +186,34 @@ public interface AnswerMapper {
     int countByUser(Integer userId);
 
     /**
+     * 签到 / 取消签到。
+     * ★ checked_in_at 用 IF 一句写完：取消签到时**同时清空时间**，避免出现"未签到但有签到时间"的矛盾数据。
+     * ★ 只改这一行，不动答卷内容与分数。
+     */
+    @Update("UPDATE t_answer SET checked_in = #{checkedIn}, " +
+            "checked_in_at = IF(#{checkedIn} = 1, NOW(), NULL) WHERE id = #{id}")
+    int updateCheckedIn(@Param("id") Integer id, @Param("checkedIn") int checkedIn);
+
+    /**
+     * 报名名单：按**接龙顺序**（提交时间正序）取前 N 份答卷。
+     * ★ 与答卷列表的倒序相反：接龙名单要的是"谁先报的"。
+     */
+    @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} " +
+            "ORDER BY submit_time ASC, id ASC LIMIT #{limit}")
+    List<Answer> findFirstBySurveyId(@Param("surveyId") Integer surveyId, @Param("limit") int limit);
+
+    /**
+     * 批量取"某一题"在若干答卷里的回答（报名名单用：一次查出所有称呼，避免 N+1）。
+     * 返回 Map：{ aid: answerId, content }。
+     */
+    @Select("<script>SELECT answer_id AS aid, content FROM t_answer_detail " +
+            "WHERE question_id = #{questionId} AND answer_id IN " +
+            "<foreach collection='answerIds' item='id' open='(' separator=',' close=')'>#{id}</foreach>" +
+            "</script>")
+    List<Map<String, Object>> findContentsByAnswerIds(@Param("questionId") Integer questionId,
+                                                      @Param("answerIds") List<Integer> answerIds);
+
+    /**
      * 判分摘要（统计页的"平均分 / 及格率"）。
      *
      * ★ 口径：只统计 {@code earned_score IS NOT NULL} 的答卷 —— 普通问卷与判分上线前的历史答卷

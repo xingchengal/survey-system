@@ -91,7 +91,9 @@ public interface SurveyMapper {
             "grade_enabled=IFNULL(#{gradeEnabled}, 0), pass_score=#{passScore}, " +
             "time_limit_seconds=#{timeLimitSeconds}, " +
             "show_answer_after_submit=IFNULL(#{showAnswerAfterSubmit}, 0), " +
-            "require_login=IFNULL(#{requireLogin}, 0) WHERE id=#{id}")
+            "require_login=IFNULL(#{requireLogin}, 0), " +
+            "checkin_enabled=IFNULL(#{checkinEnabled}, 0), " +
+            "show_participants=IFNULL(#{showParticipants}, 0) WHERE id=#{id}")
     int update(Survey survey);
 
     /**

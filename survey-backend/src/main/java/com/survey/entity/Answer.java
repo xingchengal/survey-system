@@ -44,6 +44,13 @@ public class Answer {
     /** 是否及格：NULL = 未设及格线或未判分；0/1 由 {@link com.survey.common.Grader} 判定。 */
     private Integer isPassed;
 
+    /** 是否已签到：0=未签到（默认），1=已签到。★ 只有问卷启用签到核销后作者才会改它。 */
+    private Integer checkedIn;
+
+    /** 签到时间：取消签到时置回 NULL。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime checkedInAt;
+
     public Integer getId() { return id; }
     public void setId(Integer id) { this.id = id; }
 
@@ -73,4 +80,10 @@ public class Answer {
 
     public Integer getIsPassed() { return isPassed; }
     public void setIsPassed(Integer isPassed) { this.isPassed = isPassed; }
+
+    public Integer getCheckedIn() { return checkedIn; }
+    public void setCheckedIn(Integer checkedIn) { this.checkedIn = checkedIn; }
+
+    public LocalDateTime getCheckedInAt() { return checkedInAt; }
+    public void setCheckedInAt(LocalDateTime checkedInAt) { this.checkedInAt = checkedInAt; }
 }

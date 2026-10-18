@@ -416,6 +416,10 @@ public class SurveyService {
 
         // ★ 是否仅限登录用户填写：只认 0/1，默认 0（老问卷与老客户端都不传 → 保持匿名，零影响）。
         survey.setRequireLogin(survey.getRequireLogin() != null && survey.getRequireLogin() == 1 ? 1 : 0);
+
+        // ★ 签到核销 / 公开报名名单：默认都关闭（0），老问卷零影响。
+        survey.setCheckinEnabled(survey.getCheckinEnabled() != null && survey.getCheckinEnabled() == 1 ? 1 : 0);
+        survey.setShowParticipants(survey.getShowParticipants() != null && survey.getShowParticipants() == 1 ? 1 : 0);
     }
 
     /** 去空白；空串返回 null（"清空"在库里统一表示为 NULL） */

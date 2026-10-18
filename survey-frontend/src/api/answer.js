@@ -66,6 +66,16 @@ export default {
   myDetail: (answerId) => http.get(`/api/answer/my/${answerId}`),
 
   /**
+   * 公开报名名单（接龙用，前 50 位）。
+   * ★ 作者没开启「公开报名名单」时后端 400；页面静默不显示即可。
+   */
+  participants: (shareCode) => http.get(`/api/answer/participants/${shareCode}`),
+
+  /** 签到 / 取消签到（作者；问卷需在设置里启用签到核销） */
+  checkin: (answerId, checkedIn = true) =>
+    http.put(`/api/answer/checkin/${answerId}?checkedIn=${checkedIn}`),
+
+  /**
    * 查**我**在某份问卷的成绩（登录用户；考试问卷才有）。
    *
    * ★ 只按 `surveyId + 当前登录用户` 定位，不接受 answerId ——

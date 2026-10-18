@@ -28,7 +28,8 @@ public record SurveyStatisticsDTO(
         String title,
         int answerCount,
         List<QuestionStats> questions,
-        ScoreSummary scoreSummary) {
+        ScoreSummary scoreSummary,
+        boolean checkinEnabled) {
 
     /**
      * 判分摘要（只有开启了考试模式的问卷才有值，其它问卷为 null）。
@@ -72,6 +73,6 @@ public record SurveyStatisticsDTO(
                         .map(q -> new QuestionStats(q.question(), q.chartData(), null))
                         .collect(java.util.stream.Collectors.toList());
         // ★ scoreSummary 原样保留：平均分/及格率是**聚合值**，不含任何个人信息，公开结果页可以展示。
-        return new SurveyStatisticsDTO(surveyId, title, answerCount, sanitized, scoreSummary);
+        return new SurveyStatisticsDTO(surveyId, title, answerCount, sanitized, scoreSummary, checkinEnabled);
     }
 }

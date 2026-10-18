@@ -240,6 +240,7 @@ public class JwtAuthFilter implements Filter {
                 || uri.startsWith("/api/survey/view/")
                 || uri.startsWith("/api/question/list/")
                 || uri.startsWith("/api/answer/submit-share/")
+                || uri.startsWith("/api/answer/participants/")
                 || uri.startsWith("/api/announcement/active")
                 || uri.startsWith("/api/health");
     }

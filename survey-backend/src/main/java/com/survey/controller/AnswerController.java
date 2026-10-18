@@ -16,6 +16,7 @@ import com.survey.dto.SubmitResult;
 import com.survey.dto.MyScoreDTO;
 import com.survey.dto.MyAnswerItem;
 import com.survey.dto.MyAnswerDetailDTO;
+import com.survey.dto.ParticipantItem;
 import com.survey.entity.Survey;
 import com.survey.service.AnswerQualityService;
 import com.survey.service.AnswerService;
@@ -345,6 +346,43 @@ public class AnswerController {
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize) {
         return answerService.myAnswers(userId, pageNum, pageSize);
+    }
+
+    /**
+     * 签到 / 取消签到（作者或管理员）。
+     *
+     * ★ 归属校验复用作者侧同一套（`requireSurveyOwnership`：admin 放行）。
+     * ★ 问卷没启用签到核销时 400 —— 避免在没有签到的问卷上误点。
+     */
+    @Operation(summary = "签到 / 取消签到（作者）")
+    @PutMapping("/checkin/{answerId}")
+    public String checkin(@PathVariable Integer answerId,
+                          @RequestParam(defaultValue = "true") boolean checkedIn,
+                          @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+                          @RequestHeader(value = "X-User-Role", required = false) String role) {
+        Answer answer = answerService.getAnswerById(answerId);
+        if (answer == null) {
+            throw new BizException("答卷不存在");
+        }
+        requireSurveyOwnership(answer.getSurveyId(), userId, role);
+        return answerService.setCheckedIn(answerId, checkedIn) ? "已签到" : "已取消签到";
+    }
+
+    /**
+     * 公开报名名单（前 50 位，按接龙顺序）。
+     *
+     * ★ **公开档**（白名单）：接龙名单就是要给报名人看的，不要求登录。
+     * ★ 作者没开启"公开报名名单"时 400 —— 默认不公开，避免把答卷里的姓名默认暴露。
+     * ★ 只返回称呼与时间，不返回手机号等其它答案。
+     */
+    @Operation(summary = "公开报名名单（前 50 位）")
+    @GetMapping("/participants/{shareCode}")
+    public List<ParticipantItem> participants(@PathVariable String shareCode) {
+        Survey survey = surveyService.getByShareCode(shareCode);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        return answerService.listParticipants(survey);
     }
 
     /**

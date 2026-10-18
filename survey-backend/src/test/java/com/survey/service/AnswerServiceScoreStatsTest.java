@@ -264,4 +264,65 @@ class AnswerServiceScoreStatsTest {
         MyAnswerDetailDTO dto = answerService.getMyAnswerDetail(9, 56);
         assertEquals(List.of("A"), dto.questions().get(0).correctAnswers());
     }
+
+    @Test
+    @DisplayName("签到：未启用 → 400；启用 → 写库并返回状态")
+    void checkin_requiresEnabledAndUpdates() {
+        Answer a = new Answer();
+        a.setId(60);
+        a.setSurveyId(SURVEY_ID);
+        when(answerMapper.findById(60)).thenReturn(a);
+
+        Survey disabled = survey(0, null);
+        disabled.setCheckinEnabled(0);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(disabled);
+        assertThrows(BizException.class, () -> answerService.setCheckedIn(60, true));
+
+        Survey enabled = survey(0, null);
+        enabled.setCheckinEnabled(1);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(enabled);
+        assertTrue(answerService.setCheckedIn(60, true));
+        verify(answerMapper).updateCheckedIn(60, 1);
+        assertFalse(answerService.setCheckedIn(60, false));
+        verify(answerMapper).updateCheckedIn(60, 0);
+    }
+
+    @Test
+    @DisplayName("报名名单：未公开 → 400；公开 → 按顺序给称呼与时间")
+    void participants_requiresPublicAndMapsName() {
+        Survey hidden = survey(0, null);
+        hidden.setShowParticipants(0);
+        assertThrows(BizException.class, () -> answerService.listParticipants(hidden));
+
+        Survey open = survey(0, null);
+        open.setShowParticipants(1);
+        Question nameQ = new Question();
+        nameQ.setId(11);
+        nameQ.setSurveyId(SURVEY_ID);
+        nameQ.setType(3);
+        nameQ.setTitle("姓名");
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(nameQ));
+        Answer a1 = new Answer();
+        a1.setId(71);
+        a1.setSurveyId(SURVEY_ID);
+        a1.setSubmitTime(java.time.LocalDateTime.now());
+        Answer a2 = new Answer();
+        a2.setId(72);
+        a2.setSurveyId(SURVEY_ID);
+        a2.setSubmitTime(java.time.LocalDateTime.now());
+        when(answerMapper.findFirstBySurveyId(SURVEY_ID, 50)).thenReturn(List.of(a1, a2));
+        java.util.Map<String, Object> row1 = new java.util.HashMap<>();
+        row1.put("aid", 71);
+        row1.put("content", "张三");
+        java.util.Map<String, Object> row2 = new java.util.HashMap<>();
+        row2.put("aid", 72);
+        row2.put("content", "李四");
+        when(answerMapper.findContentsByAnswerIds(11, List.of(71, 72))).thenReturn(List.of(row1, row2));
+
+        List<com.survey.dto.ParticipantItem> list = answerService.listParticipants(open);
+        assertEquals(2, list.size());
+        assertEquals("张三", list.get(0).name());
+        assertEquals(1, list.get(0).seq());
+        assertEquals("李四", list.get(1).name());
+    }
 }

@@ -87,6 +87,8 @@ CREATE TABLE `t_answer` (
   `total_score` int DEFAULT NULL COMMENT '本次答卷总分（提交那一刻的分值快照）；NULL=未判分',
   `earned_score` int DEFAULT NULL COMMENT '本次得分；NULL=未判分（普通问卷，或判分上线前的历史答卷）★ 统计一律只算非 NULL 的行',
   `is_passed` tinyint DEFAULT NULL COMMENT '是否及格：NULL=未设及格线或未判分；0=不及格；1=及格（得分 >= 及格分）',
+  `checked_in` tinyint NOT NULL DEFAULT '0' COMMENT '是否已签到：0=未签到（默认），1=已签到',
+  `checked_in_at` datetime DEFAULT NULL COMMENT '签到时间：取消签到时置回 NULL',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_survey_user` (`survey_id`,`user_id`),
   -- ★ 答卷列表分页 / 质控样本 / 导出预检：都是 "WHERE survey_id = ? ORDER BY submit_time DESC"。
@@ -249,6 +251,8 @@ CREATE TABLE `t_survey` (
   `time_limit_seconds` int DEFAULT NULL COMMENT '答题限时（秒）：NULL=不限；前端倒计时，服务端按上报 duration_ms + 10s 宽限校验（非防作弊）',
   `show_answer_after_submit` tinyint NOT NULL DEFAULT '0' COMMENT '提交后是否展示正确答案：0=否（只出分），1=是；只在 grade_enabled=1 时有意义',
   `require_login` tinyint NOT NULL DEFAULT '0' COMMENT '是否仅限登录用户填写：0=匿名可填（默认），1=必须先登录；开启后只收带 token 的 POST /answer/submit',
+  `checkin_enabled` tinyint NOT NULL DEFAULT '0' COMMENT '是否启用签到核销：0=否（默认），1=是；作者在答卷列表里打勾',
+  `show_participants` tinyint NOT NULL DEFAULT '0' COMMENT '是否公开报名名单：0=否（默认），1=是；开启后填写页显示前 50 位报名者',
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',

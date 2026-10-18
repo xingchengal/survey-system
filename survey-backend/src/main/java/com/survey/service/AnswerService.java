@@ -16,6 +16,7 @@ import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.dto.MyAnswerItem;
+import com.survey.dto.ParticipantItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
 import com.survey.entity.Survey;
@@ -129,6 +130,9 @@ public class AnswerService {
      * 卡得太死会把"刚好最后一秒点提交"的人误判成超时。
      */
     private static final long TIME_LIMIT_GRACE_MS = 10_000L;
+
+    /** 公开报名名单最多展示多少位（接龙通常几十人，再多页面也没人看）。 */
+    private static final int MAX_PARTICIPANTS = 50;
 
     /** 日期题的格式（value-format 统一为 yyyy-MM-dd，避免客户端时区把日期差一天） */
     private static final java.util.regex.Pattern DATE_PATTERN =
@@ -966,7 +970,8 @@ public class AnswerService {
             }
         }
         return new SurveyStatisticsDTO(surveyId, survey.getTitle(), countResponses(surveyId),
-                items, scoreSummary);
+                items, scoreSummary,
+                survey.getCheckinEnabled() != null && survey.getCheckinEnabled() == 1);
     }
 
     /** 保留一位小数（平均分 / 及格率都用它，避免前端出现 76.66666666）。 */
@@ -1072,6 +1077,80 @@ public class AnswerService {
         return new MyAnswerDetailDTO(answer.getId(), answer.getSurveyId(), survey.getTitle(),
                 answer.getSubmitTime(), answer.getTotalScore(), answer.getEarnedScore(),
                 survey.getPassScore(), answer.getIsPassed(), items);
+    }
+
+    /**
+     * 签到 / 取消签到（作者或管理员调用；归属校验在 Controller）。
+     * ★ 只有启用签到核销的问卷才允许改；取消时 SQL 里同时清空签到时间。
+     *
+     * @return true = 已签到，false = 已取消
+     */
+    public boolean setCheckedIn(Integer answerId, boolean checkedIn) {
+        Answer answer = answerMapper.findById(answerId);
+        if (answer == null) {
+            throw new BizException("答卷不存在");
+        }
+        Survey survey = surveyMapper.findById(answer.getSurveyId());
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (survey.getCheckinEnabled() == null || survey.getCheckinEnabled() != 1) {
+            throw new BizException("该问卷未启用签到核销");
+        }
+        answerMapper.updateCheckedIn(answerId, checkedIn ? 1 : 0);
+        return checkedIn;
+    }
+
+    /**
+     * 公开报名名单（前 50 位，按接龙顺序 = 提交时间正序）。
+     *
+     * ★ 只有作者开启 show_participants 才返回，否则 400 —— 名单是作者决定公开的，不是默认公开。
+     * ★ 称呼取**第一道单行文本题**（接龙/报名模板的第一题就是姓名），没有则显示"匿名"；
+     *   一次批量查出所有称呼，避免 N+1。
+     * ★ 只暴露称呼与时间，不暴露手机号等其它答案。
+     */
+    public List<ParticipantItem> listParticipants(Survey survey) {
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (survey.getShowParticipants() == null || survey.getShowParticipants() != 1) {
+            throw new BizException("作者未公开报名名单");
+        }
+        List<Question> questions = questionMapper.findBySurveyId(survey.getId());
+        Integer nameQuestionId = questions.stream()
+                .filter(q -> QuestionType.isText(q.getType()) && q.getId() != null)
+                .map(Question::getId).findFirst()
+                .orElseGet(() -> questions.stream()
+                        .filter(q -> QuestionType.isTextarea(q.getType()) && q.getId() != null)
+                        .map(Question::getId).findFirst().orElse(null));
+
+        List<Answer> answers = answerMapper.findFirstBySurveyId(survey.getId(), MAX_PARTICIPANTS);
+        if (answers.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, String> nameByAnswer = new HashMap<>();
+        if (nameQuestionId != null) {
+            List<Integer> answerIds = answers.stream().map(Answer::getId)
+                    .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+            if (!answerIds.isEmpty()) {
+                for (Map<String, Object> row : answerMapper.findContentsByAnswerIds(nameQuestionId, answerIds)) {
+                    Object aid = row.get("aid");
+                    Object content = row.get("content");
+                    if (aid instanceof Number n) {
+                        nameByAnswer.put(n.intValue(), content == null ? "" : content.toString());
+                    }
+                }
+            }
+        }
+        List<ParticipantItem> list = new ArrayList<>(answers.size());
+        int seq = 1;
+        for (Answer a : answers) {
+            String name = nameByAnswer.get(a.getId());
+            list.add(new ParticipantItem(seq++,
+                    name == null || name.isBlank() ? "匿名" : name.trim(),
+                    a.getSubmitTime()));
+        }
+        return list;
     }
 
     /** 某问卷的**全部**答卷明细（统计页做整体分析用，注意数据量）。 */
