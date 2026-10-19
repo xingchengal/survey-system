@@ -13,6 +13,7 @@ import com.survey.service.AnswerService;
 import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyCollaboratorService;
 import com.survey.service.SurveyService;
+import com.survey.service.TemplateCategoryService;
 import com.survey.service.UserService;
 import com.survey.service.WalletService;
 import com.survey.common.OwnershipGuard;
@@ -36,7 +37,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 问卷管理：问卷的增删改查、发布、复制、回收站、模板、统计。共 **20** 个端点。
+ * 问卷管理：问卷的增删改查、发布、复制、回收站、模板、统计。共 **22** 个端点。
  * （★ 另有 4 个被其它端点完全覆盖的单词式端点（GET /list、GET /statistics、GET /recycle、
  *   DELETE /delete/{id}）已下线，它们的 URL 仍由 REMOVED_LITERAL_PATHS 显式挡着 ——
  *   不挡就会被 /{id} 吞掉，见 getOne() 上方注释。）
@@ -88,6 +89,10 @@ public class SurveyController {
     /** 公开结果页要复用统计（只读），直接调 AnswerService */
     @Autowired
     private AnswerService answerService;
+
+    /** 模板分类清单（管理端「模板管理」与「设为模板」共用）。 */
+    @Autowired
+    private TemplateCategoryService templateCategoryService;
 
     // ==================== 基础 CRUD ====================
 
@@ -574,6 +579,37 @@ public class SurveyController {
         int r = surveyService.setTemplate(id, isTemplate, category);
         if (r <= 0) throw new BizException("操作失败");
         return "操作成功";
+    }
+
+    /**
+     * 模板分类清单（管理员）。
+     *
+     * ★ 为什么单独开一条 GET：分类现在可以**独立于模板存在**（模板管理页的「+ 新增分类」），
+     *   前端不能再从"现有模板里出现过哪些分类"反推；而模板广场那条公开接口只返回模板列表，
+     *   没有承载"空分类"的位置。
+     * ★ 管理档而不是公开档：清单本身不敏感，但只有管理端需要它；
+     *   放管理档可以避免普通用户多一条无意义入口。
+     */
+    @Operation(summary = "模板分类清单（管理员）")
+    @GetMapping("/template-categories")
+    @RequireAdmin
+    public List<String> templateCategories() {
+        return templateCategoryService.listNames();
+    }
+
+    /**
+     * 新增模板分类（管理员）。
+     *
+     * ★ name 声明为**非必填**再在 Service 里判空：必填 @RequestParam 会在 @RequireAdmin
+     *   切面之前抛 400，普通用户拿到的就不是 403 了（交接文档约定 1 / 审计表里有同款坑）。
+     * ★ 返回**新增后的完整清单**：前端拿到就能直接刷新下拉，不用再发一次 GET。
+     */
+    @OperationLog("新增模板分类")
+    @Operation(summary = "新增模板分类（管理员）")
+    @PostMapping("/template-categories")
+    @RequireAdmin
+    public List<String> addTemplateCategory(@RequestParam(required = false) String name) {
+        return templateCategoryService.add(name);
     }
 
     /**

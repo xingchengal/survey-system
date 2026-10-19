@@ -406,6 +406,32 @@ CREATE TABLE `t_survey_review` (
   KEY `idx_reporter` (`reporter_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷举报表';
 
+-- ==================== 模板分类清单 ====================
+-- ★ 分类允许"暂时没有模板"：模板管理页的「+ 新增分类」就是往这张表写。
+-- ★ 与 t_survey.template_category 的关系：那个字段仍决定"这份模板属于哪个分类"；
+--   本表只提供"有哪些可选分类、按什么顺序展示"，不反向约束 t_survey。
+CREATE TABLE `t_template_category` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(50) NOT NULL COMMENT '分类名（全表唯一）',
+  `sort_order` int NOT NULL DEFAULT 0 COMMENT '展示顺序，小的在前；新增追加到末尾',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_template_category_name` (`name`),
+  KEY `idx_template_category_sort` (`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='模板分类清单';
+
+-- 7 个预置分类（与 TemplateSeederService 的预置模板分类一致；已有则跳过）
+INSERT IGNORE INTO `t_template_category` (`name`, `sort_order`) VALUES
+  ('满意度', 1), ('报名', 2), ('反馈', 3), ('调研', 4),
+  ('健康', 5), ('教育', 6), ('其他', 7);
+
+-- 把库里已经用过、但不在上面 7 类里的分类补进来（老库升级后清单不缺项）
+INSERT IGNORE INTO `t_template_category` (`name`, `sort_order`)
+SELECT DISTINCT `template_category`, 100
+FROM `t_survey`
+WHERE `is_template` = 1 AND `deleted` = 0
+  AND `template_category` IS NOT NULL AND TRIM(`template_category`) <> '';
+
 -- ==================== IP 限制（高级设置包） ====================
 -- ★ 唯一键(survey_id, ip) 才是并发防线；记录与答卷同事务写入。
 CREATE TABLE `t_survey_ip` (

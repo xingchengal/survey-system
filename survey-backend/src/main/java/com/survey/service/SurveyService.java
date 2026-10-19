@@ -104,6 +104,13 @@ public class SurveyService {
     private NotificationService notificationService;
 
     /**
+     * 模板分类清单：设为模板时把"现场输入的新分类"自动登记进清单。
+     * ★ 不在这里做权限/长度判断 —— 统一走 TemplateCategoryService，两条入口同一套规则。
+     */
+    @Autowired
+    private TemplateCategoryService templateCategoryService;
+
+    /**
      * 彻底删除时要清理的"后加子表"。
      * ★ 这 4 张表是本项目后续几轮才出现的（版本快照/协作者/IP/举报），
      *   早期的 cascadeDeleteSurvey 只认识"题目/选项/答卷/明细"，于是彻底删除会留下孤儿行
@@ -901,7 +908,9 @@ public class SurveyService {
      * ★ 仍然**有意允许**把"未发布的草稿"设为模板（管理员可能想先备好模板内容）——
      *   但调用方要清楚这等于**公开它**：模板广场对全部登录用户可见，
      *   /from-template/{id} 也能被任何登录用户克隆。
+     * ★ 事务：设为模板现在会"登记分类 + 更新问卷"两次写，必须一起成功/失败。
      */
+    @Transactional
     public int setTemplate(Integer id, Integer isTemplate, String category) {
         Survey survey = surveyMapper.findById(id);
         if (survey == null) {
@@ -916,6 +925,24 @@ public class SurveyService {
         //   但库里会同时存在 NULL 与 '' 两种"没有分类"，以后按分类统计/筛选就会分裂成两组。
         //   归一之后再落库，口径只有一种。
         String normalizedCategory = (category == null || category.isBlank()) ? null : category.trim();
+        // ★ 取消模板时**无条件清空分类**：即使调用方误传了 category，也不能留下
+        //   "不是模板、却还挂着某个分类"的脏数据（模板广场不查它，但按分类统计会多出一组）。
+        if (isTemplate != null && isTemplate == 0) {
+            normalizedCategory = null;
+        }
+        // ★ 设为模板必须有分类：模板广场按分类聚合，NULL 分类会显示成"通用/其他"，
+        //   与"作者压根没分类"混在一起，之后按分类统计就分裂了。
+        //   （历史数据里已有的 NULL 分类模板不受影响；这条只挡新的"设为模板"动作。）
+        if (isTemplate != null && isTemplate == 1 && normalizedCategory == null) {
+            throw new BizException("设为模板时必须选择模板分类");
+        }
+        // ★ 设为模板时把分类自动登记进 t_template_category：
+        //   前端两个入口都允许现场输入新分类（allow-create），不登记的话"模板管理"的分类清单
+        //   会永远缺这个新分类，下次给别的模板设分类时又得重新手输。
+        //   ★ 只在 isTemplate=1 时登记：取消模板时分类会被清空，不该往清单里写东西。
+        if (isTemplate != null && isTemplate == 1) {
+            templateCategoryService.ensure(normalizedCategory);
+        }
         return surveyMapper.setTemplate(id, isTemplate, normalizedCategory);
     }
 

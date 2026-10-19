@@ -227,6 +227,33 @@ public class Survey {
     public void setCollaboratorCount(Integer collaboratorCount) { this.collaboratorCount = collaboratorCount; }
 
     /**
+     * 共享列表里的**作者**信息（只在 GET /api/collaborator/shared 填充，其它接口为 null）。
+     * ★ 一个用户可能同时是多个作者的协作者；前端要按作者分组，必须知道"这份是谁的"。
+     * ★ 用的是 JOIN 出来的别名，不是 t_survey 的列（t_survey 只有 user_id）。
+     */
+    private String ownerUsername;
+    private String ownerNickname;
+
+    /** 我在这份问卷上的协作者角色：viewer / editor / analyst（只在共享列表填充）。 */
+    private String myCollaboratorRole;
+
+    /** 这份问卷是什么时候共享给我的（t_survey_collaborator.created_time，只在共享列表填充）。 */
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private java.time.LocalDateTime sharedTime;
+
+    public String getOwnerUsername() { return ownerUsername; }
+    public void setOwnerUsername(String ownerUsername) { this.ownerUsername = ownerUsername; }
+
+    public String getOwnerNickname() { return ownerNickname; }
+    public void setOwnerNickname(String ownerNickname) { this.ownerNickname = ownerNickname; }
+
+    public String getMyCollaboratorRole() { return myCollaboratorRole; }
+    public void setMyCollaboratorRole(String myCollaboratorRole) { this.myCollaboratorRole = myCollaboratorRole; }
+
+    public java.time.LocalDateTime getSharedTime() { return sharedTime; }
+    public void setSharedTime(java.time.LocalDateTime sharedTime) { this.sharedTime = sharedTime; }
+
+    /**
      * 业务生命周期（DRAFT/PUBLISHED/SUSPENDED/ENDED/ARCHIVED），与 status 并存。
      * ★ 由三条状态 SQL 与举报下架共同维护；读取方**不要**自己拼，用 common/SurveyLifecycle。
      */

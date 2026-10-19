@@ -57,7 +57,7 @@
     </div>
 
     <!-- 分类概览：点一下即筛选，避免只靠下拉框"猜"每个分类有多少模板 -->
-    <div v-if="templates.length" class="category-chips">
+    <div v-if="templates.length || templateCategories.length" class="category-chips">
       <button
         type="button"
         class="cat-chip"
@@ -76,13 +76,18 @@
       >
         {{ item.name }} <b>{{ item.count }}</b>
       </button>
+      <!-- ★ 新增分类：分类清单是独立表，可以是 0 个模板的"空分类" -->
+      <button type="button" class="cat-chip cat-chip-add" title="新增一个模板分类" @click="openAddCategory">
+        <el-icon><component :is="Plus" /></el-icon>
+        <span>新增分类</span>
+      </button>
     </div>
 
     <div class="table-card">
       <el-table
         v-loading="loading"
         :data="filtered"
-        empty-text="还没有模板"
+        :empty-text="categoryFilter ? '该分类下还没有模板，可把现有模板『改分类』过来' : '还没有模板'"
         :default-sort="{ prop: 'templateUseCount', order: 'descending' }"
       >
         <el-table-column prop="id" label="ID" width="70" align="center" />
@@ -137,6 +142,24 @@
       </template>
     </el-dialog>
 
+    <!-- 新增分类：分类清单独立于模板，允许先建一个暂时没有模板的分类 -->
+    <el-dialog v-model="categoryAddVisible" title="新增模板分类" width="440px">
+      <el-input
+        v-model="newCategoryName"
+        maxlength="50"
+        show-word-limit
+        placeholder="例如：培训反馈"
+        @keyup.enter="submitCategory"
+      />
+      <p class="dialog-tip">
+        新分类会立即出现在「设为模板」「改分类」的可选列表里；暂时没有模板也会保留。
+      </p>
+      <template #footer>
+        <el-button @click="categoryAddVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addingCategory" @click="submitCategory">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 新建模板：先建一份草稿问卷，再打上模板身份，然后直接进模板编辑器加题目。
          ★ 不走「我的问卷」的新建流程 —— 管理员只维护模板，不碰用户侧页面。 -->
     <el-dialog v-model="createVisible" title="新建模板" width="520px">
@@ -172,7 +195,7 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import api from '../api'
 
 export default {
@@ -180,6 +203,12 @@ export default {
   data() {
     return {
       templates: [],
+      /**
+       * 后端维护的分类清单（t_template_category）。
+       * ★ 它和 templates 里出现过的分类是**两件事**：清单可以含"暂时没有模板"的空分类，
+       *   这正是「+ 新增分类」存在的意义；展示时把两者合并，空分类显示 0。
+       */
+      templateCategories: [],
       loading: false,
       keyword: '',
       /** 分类筛选（空 = 全部） */
@@ -187,23 +216,39 @@ export default {
       categoryVisible: false,
       categoryForm: { id: null, title: '', category: '' },
       saving: false,
+      // 新增分类弹窗
+      categoryAddVisible: false,
+      newCategoryName: '',
+      addingCategory: false,
       // 新建模板弹窗
       createVisible: false,
       createForm: { title: '', description: '', category: '通用' },
       creating: false,
       // ★ :prefix-icon 用的是**变量**，不是 <Search /> 标签；
       //   直接放进 data（markRaw 避免被 Vue 变成响应式代理）
-      Search: markRaw(Search)
+      Search: markRaw(Search),
+      Plus: markRaw(Plus)
     }
   },
   computed: {
-    /** 现有模板里出现过的分类（筛选下拉用） */
+    /**
+     * 可选分类 = 后端清单 ∪ 现有模板里出现过的分类。
+     * ★ 后者是防御性的：老模板可能带着一个还没进清单的 template_category
+     *   （例如手工 SQL 改过），合并后至少筛选下拉里不会凭空少一项。
+     */
     categories() {
-      return [...new Set(this.templates.map((t) => t.templateCategory || '通用'))].sort()
+      const set = new Set(this.templateCategories)
+      this.templates.forEach((t) => set.add(t.templateCategory || '通用'))
+      return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'))
     },
-    /** 分类分布：按模板数降序（分类概览 chips 用） */
+    /**
+     * 分类分布：先给后端清单里的每个分类放一个 0，再按模板数累加。
+     * ★ 必须从清单初始化，否则"暂时没有模板的新分类"根本不会出现在 chips 里 ——
+     *   用户刚点「+」建完分类，页面却看不到它，会以为没成功。
+     */
     categoryStats() {
       const map = new Map()
+      this.templateCategories.forEach((name) => map.set(name, 0))
       this.templates.forEach((t) => {
         const category = t.templateCategory || '通用'
         map.set(category, (map.get(category) || 0) + 1)
@@ -216,7 +261,7 @@ export default {
     totalUsage() {
       return this.templates.reduce((sum, t) => sum + (Number(t.templateUseCount) || 0), 0)
     },
-    /** 改分类时可选的候选：常见分类 + 现有分类（allow-create 仍可输入新值） */
+    /** 改分类时可选的候选：常见分类 + 清单 + 现有分类（allow-create 仍可输入新值） */
     categoryOptions() {
       const base = ['通用', '满意度调查', '员工调研', '课程评价', '活动反馈', '产品反馈']
       return [...new Set([...base, ...this.categories])]
@@ -229,6 +274,7 @@ export default {
   },
   mounted() {
     this.load()
+    this.loadCategories()
   },
   methods: {
     /** 某个分类下有多少模板（筛选下拉的文案用） */
@@ -246,6 +292,48 @@ export default {
         this.templates = []
       } finally {
         this.loading = false
+      }
+    },
+
+    /**
+     * 拉后端分类清单。
+     * ★ 失败不阻断页面：退回"从模板里推导分类"，只是「+ 新增分类」暂时不可用。
+     */
+    async loadCategories() {
+      try {
+        const list = await api.survey.templateCategories({ silent: true })
+        this.templateCategories = Array.isArray(list) ? list : []
+      } catch {
+        this.templateCategories = []
+      }
+    },
+
+    openAddCategory() {
+      this.newCategoryName = ''
+      this.categoryAddVisible = true
+    },
+
+    /**
+     * 新增分类：POST /api/survey/template-categories?name=...
+     * ★ 后端返回完整清单，直接覆盖本地；不用再 loadCategories()。
+     */
+    async submitCategory() {
+      const name = (this.newCategoryName || '').trim()
+      if (!name) {
+        ElMessage.warning('请输入分类名称')
+        return
+      }
+      this.addingCategory = true
+      try {
+        const list = await api.survey.addTemplateCategory(name)
+        if (Array.isArray(list)) this.templateCategories = list
+        else await this.loadCategories()
+        ElMessage.success('分类已新增')
+        this.categoryAddVisible = false
+      } catch {
+        // 失败提示由接口层统一弹出（如「模板分类「X」已存在」）
+      } finally {
+        this.addingCategory = false
       }
     },
 
@@ -312,7 +400,9 @@ export default {
         await api.survey.setTemplate(this.categoryForm.id, 1, category)
         ElMessage.success('分类已更新')
         this.categoryVisible = false
+        // 现场输入的新分类会被后端自动登记，刷新清单后其他模板也能直接选
         this.load()
+        this.loadCategories()
       } catch {
         // 失败提示由接口层统一弹出
       } finally {
@@ -409,6 +499,18 @@ export default {
 }
 .cat-chip.active b {
   color: var(--sky-600, #2563eb);
+}
+/* 「+ 新增分类」：虚线边框，和可筛选的分类 chip 区分开（它是动作，不是筛选项） */
+.cat-chip-add {
+  border-style: dashed;
+  color: var(--ink-3);
+  gap: 4px;
+}
+.cat-chip-add:hover {
+  border-style: dashed;
+  border-color: var(--sky-400, #60a5fa);
+  color: var(--sky-600, #2563eb);
+  background: var(--sky-50, #eff6ff);
 }
 
 /* 使用次数：>0 用暖色小胶囊，0 用灰色破折号 */

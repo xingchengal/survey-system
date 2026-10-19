@@ -123,9 +123,24 @@ export default {
   /** 从模板创建问卷 */
   fromTemplate: (templateId) => http.post(`/api/survey/from-template/${templateId}`),
 
-  /** 设为/取消模板（管理员） */
+  /** 设为/取消模板（管理员）；设为模板时必须带 category */
   setTemplate: (id, isTemplate, category) =>
     http.put(`/api/survey/set-template/${id}`, null, { params: { isTemplate, category } }),
+
+  /**
+   * 模板分类清单（管理员）。
+   * ★ 分类可以独立于模板存在（模板管理的「+ 新增分类」），所以不能从模板列表反推。
+   * ★ opts 可传 { silent: true }：页面初始化时拉清单属于"锦上添花"，
+   *   后端没重启/接口暂时不可用不该在页面上弹红字（页面会退回从模板推导分类）。
+   */
+  templateCategories: (opts) => http.get('/api/survey/template-categories', null, opts),
+
+  /**
+   * 新增模板分类（管理员）。
+   * ★ 后端返回**新增后的完整清单**，调用方可直接覆盖本地下拉，不必再 GET 一次。
+   */
+  addTemplateCategory: (name) =>
+    http.post('/api/survey/template-categories', null, { params: { name } }),
 
   /** 系统总览（管理员）：含用户数、访客次数 */
   systemOverview: () => http.get('/api/survey/system-overview'),

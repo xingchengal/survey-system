@@ -20,6 +20,7 @@ import com.survey.mapper.SurveyCollaboratorMapper;
 import com.survey.mapper.SurveyIpMapper;
 import com.survey.mapper.SurveyReviewMapper;
 import com.survey.mapper.SurveyVersionMapper;
+import com.survey.mapper.TemplateCategoryMapper;
 import com.survey.mapper.UserMapper;
 import com.survey.mapper.WalletMapper;
 import com.survey.mapper.WalletTransactionMapper;
@@ -83,7 +84,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   {@code mock-maker-subclass}（沙箱禁 Attach API）。Mapper 全是接口，不受影响。
  *
  * ── 维护口径 ───────────────────────────────────────────
- *   ALL_ENDPOINTS 是"103"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
+ *   ALL_ENDPOINTS 是"105"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
  *   docs/问卷系统-端点权限审计表.md 与《交接文档》的端点数。
  */
@@ -102,7 +103,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EndpointAuthMatrixTest {
 
-    // ==================== 一、103 个端点的三档分类（与审计表逐条对应） ====================
+    // ==================== 一、105 个端点的三档分类（与审计表逐条对应） ====================
 
     /** 公开档 13 条（JwtAuthFilter 白名单）。 */
     private static final Set<String> PUBLIC = Set.of(
@@ -121,7 +122,7 @@ class EndpointAuthMatrixTest {
             "GET /api/health"
     );
 
-    /** 管理档 30 条（@RequireAdmin，类级或方法级）。 */
+    /** 管理档 32 条（@RequireAdmin，类级或方法级）。 */
     private static final Set<String> ADMIN = Set.of(
             "GET /api/wallet/admin/page",
             "POST /api/wallet/admin/adjust",
@@ -140,6 +141,8 @@ class EndpointAuthMatrixTest {
             "GET /api/survey/list-with-response-count",
             "GET /api/survey/system-overview",
             "PUT /api/survey/set-template/{id}",
+            "GET /api/survey/template-categories",
+            "POST /api/survey/template-categories",
             "GET /api/log/page",
             "GET /api/log/export",
             "GET /api/error-log/page",
@@ -155,7 +158,7 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 103 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 105 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
             "GET /api/wallet",
             "GET /api/wallet/pricing",
@@ -217,6 +220,7 @@ class EndpointAuthMatrixTest {
             "GET /api/survey/result/{shareCode}",
             "GET /api/survey/share/{shareCode}",
             "GET /api/survey/system-overview",
+            "GET /api/survey/template-categories",
             "GET /api/survey/templates",
             "GET /api/survey/version/diff/{fromId}/{toId}",
             "GET /api/survey/version/list/{surveyId}",
@@ -238,6 +242,7 @@ class EndpointAuthMatrixTest {
             "POST /api/survey/copy/{id}",
             "POST /api/survey/from-template/{templateId}",
             "POST /api/survey/publish/{id}",
+            "POST /api/survey/template-categories",
             "POST /api/survey/{id}/request-restore",
             "POST /api/survey/version/rollback/{versionId}",
             "POST /api/survey/view/{shareCode}",
@@ -323,6 +328,14 @@ class EndpointAuthMatrixTest {
     private SurveyReviewMapper surveyReviewMapper;
     @MockitoBean
     private SurveyIpMapper surveyIpMapper;
+
+    /**
+     * ★ 模板分类清单（新增）：GET /survey/template-categories 会经 TemplateCategoryService
+     *   读这张表。不 mock 的话它会拿真实代理去访问被 mock 掉的数据源 ——
+     *   admin 只读用例会以 500 收场，看起来像权限坏了。
+     */
+    @MockitoBean
+    private TemplateCategoryMapper templateCategoryMapper;
 
     /**
      * ★ H5 新增：钱包相关 Mapper 也要 mock。
@@ -411,18 +424,18 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 103；且公开 13 + 管理 30 + 其余 60")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 105；且公开 13 + 管理 32 + 其余 60")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(103, registered.size(),
+        assertEquals(105, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
         assertEquals(13, PUBLIC.size(), "公开档固定 13 条（新增 GET /api/survey/result/{shareCode}）");
-        assertEquals(30, ADMIN.size(), "管理档固定 30 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
-        assertEquals(103 - 13 - 30, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
+        assertEquals(32, ADMIN.size(), "管理档固定 32 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
+        assertEquals(105 - 13 - 32, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
         // 两档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");
@@ -442,7 +455,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 非公开的 82 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
+    @DisplayName("★ 非公开的 92 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
     void protectedEndpoints_withoutToken_shouldBe401() throws Exception {
         for (String endpoint : ALL_ENDPOINTS) {
             if (PUBLIC.contains(endpoint)) {
@@ -455,7 +468,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 管理档 30 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
+    @DisplayName("★ 管理档 32 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
     void adminEndpoints_withNormalUser_shouldBe403Forbidden() throws Exception {
         for (String endpoint : ADMIN) {
             MvcResult r = mvc.perform(build(endpoint).header("Authorization", "Bearer " + userToken))
@@ -480,6 +493,7 @@ class EndpointAuthMatrixTest {
                 "GET /api/survey/page",
                 "GET /api/survey/list-with-response-count",
                 "GET /api/survey/system-overview",
+                "GET /api/survey/template-categories",
                 "GET /api/log/page",
                 "GET /api/error-log/page",
                 "GET /api/error-log/count",

@@ -178,48 +178,99 @@
           </el-button>
           <!-- ★ 低频/危险操作收进「更多」：6 个彩色胶囊一字排开会把整行挤满，
                视觉上没有主次。复制/协作/删除留在菜单里，主区只留最常用的编辑/发布/分享/统计。 -->
-          <el-dropdown
+          <!-- ★ 下拉内容改成与行内按钮同款的彩色胶囊（原来是白底菜单行，视觉上和左侧胶囊断层）。
+               仍用 popover 而不是 dropdown：dropdown 的菜单项样式很难覆盖成胶囊，
+               而 popover 的内容就是普通 DOM，直接复用了 .row-btn 的四套配色。 -->
+          <el-popover
+            v-model:visible="moreOpen[row.id]"
             class="row-more"
             trigger="click"
             placement="bottom-end"
-            @command="cmd => handleMoreCommand(cmd, row)"
+            :width="156"
+            popper-class="survey-more-popover"
           >
-            <el-button class="row-btn rb-more" :icon="MoreFilled" title="更多操作">
-              <span class="btn-label">更多</span>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="copy" :icon="CopyDocument">复制问卷</el-dropdown-item>
-                <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
-                <el-dropdown-item
-                  v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'"
-                  command="collab"
-                  :icon="Connection"
-                >
-                  协作成员
-                </el-dropdown-item>
-                <el-dropdown-item command="delete" :icon="Delete" divided style="color: #dc2626;">
-                  移入回收站
-                </el-dropdown-item>
-              </el-dropdown-menu>
+            <template #reference>
+              <el-button class="row-btn rb-more" :icon="MoreFilled" title="更多操作">
+                <span class="btn-label">更多</span>
+              </el-button>
             </template>
-          </el-dropdown>
+            <div class="more-panel">
+              <button type="button" class="row-btn rb-copy more-pill" @click="handleMoreCommand('copy', row)">
+                <el-icon><component :is="CopyDocument" /></el-icon>
+                <span>复制问卷</span>
+              </button>
+              <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
+              <button
+                v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'"
+                type="button"
+                class="row-btn rb-collab more-pill"
+                @click="handleMoreCommand('collab', row)"
+              >
+                <el-icon><component :is="Connection" /></el-icon>
+                <span>协作成员</span>
+              </button>
+              <button type="button" class="row-btn rb-delete more-pill" @click="handleMoreCommand('delete', row)">
+                <el-icon><component :is="Delete" /></el-icon>
+                <span>移入回收站</span>
+              </button>
+            </div>
+          </el-popover>
         </div>
       </div>
     </div>
 
-    <!-- ★ 共享给我的问卷（H2 协作）：没有这块，被邀请的人根本找不到入口 -->
+    <!-- ★ 共享给我的问卷（H2 协作）：按作者分组，避免"多个作者 × 多份问卷"时一锅粥 -->
     <div v-if="sharedSurveys.length" class="shared-block mb-16">
-      <div class="shared-title">🤝 共享给我的问卷（{{ sharedSurveys.length }}）</div>
-      <div v-for="item in sharedSurveys" :key="item.id" class="shared-row">
-        <span class="shared-name">{{ item.title }}<span class="id-badge">#{{ item.id }}</span></span>
-        <!-- ★ 下架后协作者只能看数据/退出：不能再进编辑器改内容，也不再受理"申请权限" -->
-        <span v-if="item.lifecycle === 'SUSPENDED'" class="shared-role suspended">已下架</span>
-        <span v-else class="shared-role">{{ item.status === 1 ? '已发布' : '未发布' }}</span>
-        <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
-        <el-button size="small" @click="handleStatistics(item)">统计</el-button>
-        <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
-        <el-button size="small" type="danger" plain @click="leaveCollaboration(item)">退出</el-button>
+      <div class="shared-head">
+        <div class="shared-title">🤝 共享给我的问卷（{{ sharedSurveys.length }}）</div>
+        <div class="shared-controls">
+          <el-select v-model="sharedRoleFilter" size="small" style="width: 118px;">
+            <el-option label="全部角色" value="all" />
+            <el-option label="可编辑" value="editor" />
+            <el-option label="仅看数据" value="analyst" />
+            <el-option label="只读" value="viewer" />
+          </el-select>
+          <el-input
+            v-model="sharedKeyword"
+            size="small"
+            clearable
+            placeholder="搜索共享问卷..."
+            :prefix-icon="Search"
+            style="width: 210px;"
+          />
+        </div>
+      </div>
+
+      <div v-if="sharedGroups.length === 0" class="shared-empty">没有匹配的共享问卷</div>
+
+      <div v-for="group in sharedGroups" :key="group.ownerId === null ? 'unknown' : group.ownerId" class="shared-group">
+        <div class="shared-owner">
+          <div class="owner-avatar">{{ (group.ownerName || '协').charAt(0) }}</div>
+          <div class="owner-text">
+            <div class="owner-name">{{ group.ownerName }}</div>
+            <div class="owner-sub">
+              <span v-if="group.ownerAccount">@{{ group.ownerAccount }} · </span>{{ group.items.length }} 份
+            </div>
+          </div>
+        </div>
+
+        <div v-for="item in group.items" :key="item.id" class="shared-row">
+          <span class="shared-name">{{ item.title }}<span class="id-badge">#{{ item.id }}</span></span>
+          <el-tag size="small" :type="sharedRoleTagType(item.myCollaboratorRole)" effect="light" round>
+            {{ sharedRoleLabel(item.myCollaboratorRole) }}
+          </el-tag>
+          <el-tag size="small" :type="sharedStatusTagType(item)" effect="plain" round>
+            {{ sharedStatusLabel(item) }}
+          </el-tag>
+          <span class="shared-time">{{ item.sharedTime ? item.sharedTime.slice(0, 10) : '' }}</span>
+          <div class="shared-actions">
+            <!-- ★ 下架后协作者只能看数据/退出：不能再进编辑器改内容，也不再受理"申请权限" -->
+            <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
+            <el-button size="small" @click="handleStatistics(item)">统计</el-button>
+            <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
+            <el-button size="small" type="danger" plain @click="leaveCollaboration(item)">退出</el-button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -647,10 +698,15 @@ export default {
   data() {
     return {
       surveys: [],
+      /** 「更多」popover 的展开状态（按问卷 id 存；每行独立，互不影响） */
+      moreOpen: {},
       /** 首次加载骨架屏（数据回来即关，失败也关，避免一直闪） */
       loading: true,
       /** 共享给我的问卷（H2） */
       sharedSurveys: [],
+      /** 共享列表的筛选：角色（all/editor/analyst/viewer）+ 标题搜索 */
+      sharedRoleFilter: 'all',
+      sharedKeyword: '',
       /** 协作者弹窗 */
       collabVisible: false,
       collabSurveyId: null,
@@ -737,6 +793,46 @@ export default {
         return this.sortOrder === 'desc' ? tb - ta : ta - tb
       })
       return list
+    },
+    /** 共享问卷：先按角色 + 标题过滤（分类/排序由共享区自己的控件负责） */
+    filteredSharedSurveys() {
+      const role = this.sharedRoleFilter
+      const kw = (this.sharedKeyword || '').trim().toLowerCase()
+      return this.sharedSurveys.filter(item => {
+        if (role !== 'all' && item.myCollaboratorRole !== role) return false
+        if (kw && !(item.title || '').toLowerCase().includes(kw)) return false
+        return true
+      })
+    },
+    /**
+     * 共享问卷按「作者」分组。
+     * ★ 一个用户可能被多个作者邀请；平铺列表会让人分不清"哪份是谁的"，
+     *   所以按 owner（s.userId）聚合，组内按共享时间倒序。
+     * ★ 作者昵称为空时退回账号，再退回用户 id，保证组头永远有名字。
+     */
+    sharedGroups() {
+      const groups = new Map()
+      for (const item of this.filteredSharedSurveys) {
+        const ownerId = item.userId
+        const key = ownerId == null ? 'unknown' : String(ownerId)
+        if (!groups.has(key)) {
+          groups.set(key, {
+            ownerId,
+            ownerName: item.ownerNickname || item.ownerUsername || (ownerId == null ? '未知作者' : `用户 #${ownerId}`),
+            ownerAccount: item.ownerUsername || '',
+            items: []
+          })
+        }
+        groups.get(key).items.push(item)
+      }
+      const list = [...groups.values()]
+      list.forEach(g => g.items.sort((a, b) => {
+        const ta = new Date((a.sharedTime || '').replace(/-/g, '/')).getTime() || 0
+        const tb = new Date((b.sharedTime || '').replace(/-/g, '/')).getTime() || 0
+        return tb - ta || Number(b.id) - Number(a.id)
+      }))
+      return list.sort((a, b) => b.items.length - a.items.length ||
+        a.ownerName.localeCompare(b.ownerName, 'zh-CN'))
     },
     templateCategories() {
       const map = {}
@@ -868,6 +964,29 @@ export default {
       } catch {
         this.sharedSurveys = []
       }
+    },
+
+    /** 我在共享问卷里的协作者角色 → 中文标签 */
+    sharedRoleLabel(role) {
+      const map = { editor: '可编辑', analyst: '仅看数据', viewer: '只读' }
+      return map[role] || '协作者'
+    },
+    sharedRoleTagType(role) {
+      const map = { editor: 'success', analyst: 'warning', viewer: 'info' }
+      return map[role] || 'info'
+    },
+    /** 共享问卷的状态：下架优先，其次按 status（NULL 视为草稿） */
+    sharedStatusLabel(item) {
+      if (item.lifecycle === 'SUSPENDED') return '已下架'
+      if (item.status === 1) return '已发布'
+      if (item.status === 2) return '已结束'
+      return '草稿'
+    },
+    sharedStatusTagType(item) {
+      if (item.lifecycle === 'SUSPENDED') return 'danger'
+      if (item.status === 1) return 'success'
+      if (item.status === 2) return 'info'
+      return 'info'
     },
 
     async openCollaborators(row) {
@@ -1221,6 +1340,8 @@ export default {
     },
 
     handleMoreCommand(command, row) {
+      // popover 不像 dropdown 的菜单项那样点完自动收起，必须手动关
+      this.moreOpen[row.id] = false
       if (command === 'copy') this.handleCopy(row)
       else if (command === 'collab') this.openCollaborators(row)
       else if (command === 'delete') this.handleDelete(row)
@@ -1369,29 +1490,84 @@ export default {
   box-shadow: var(--shadow-sm);
 }
 
-/* ==================== 共享给我的问卷（H2） ==================== */
+/* ==================== 共享给我的问卷（H2 / 按作者分组） ==================== */
 .shared-block {
   padding: 14px 18px;
   border: 1px solid var(--stroke);
   border-radius: var(--r-md);
   background: linear-gradient(180deg, #f8fbff, #f2f8ff);
 }
+.shared-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
 .shared-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--ink);
-  margin-bottom: 10px;
+}
+.shared-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shared-group {
+  padding-top: 10px;
+  border-top: 1px solid var(--stroke);
+  margin-top: 8px;
+}
+.shared-group:first-of-type {
+  border-top: none;
+  margin-top: 0;
+}
+.shared-owner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0 6px;
+}
+.owner-avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--sky-400, #38bdf8), var(--sky-600, #0284c7));
+}
+.owner-text { min-width: 0; }
+.owner-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.3;
+}
+.owner-sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  line-height: 1.4;
 }
 .shared-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 8px 0;
   border-top: 1px dashed var(--stroke);
+  flex-wrap: wrap;
 }
-.shared-row:first-of-type { border-top: none; }
+.shared-group .shared-owner + .shared-row {
+  border-top: none;
+}
 .shared-name {
-  flex: 1;
+  flex: 1 1 240px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1400,13 +1576,23 @@ export default {
   color: var(--ink);
 }
 .shared-name .id-badge { margin-left: 8px; }
-.shared-role { font-size: 12px; color: var(--ink-3); }
-.shared-role.suspended {
-  color: #dc2626;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 999px;
-  padding: 1px 8px;
+.shared-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.shared-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.shared-empty {
+  padding: 14px 0 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: center;
 }
 
 .list-header {
@@ -1756,6 +1942,26 @@ export default {
   color: #334155;
   border-color: #cbd5e1;
   box-shadow: 0 4px 10px rgba(100, 116, 139, 0.16);
+}
+
+/* 「更多」弹层：与行内操作完全同款的胶囊，只是纵向排列 */
+.more-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+.more-pill {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.more-pill:hover {
+  transform: translateY(-1px);
 }
 
 /* ============== 模板弹窗：工具栏 + 卡片 ============== */

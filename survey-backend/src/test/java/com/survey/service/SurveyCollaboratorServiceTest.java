@@ -14,6 +14,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -170,5 +172,31 @@ class SurveyCollaboratorServiceTest {
     void listDelegatesToMapper() {
         service.list(survey());
         verify(collaboratorMapper).listBySurveyId(SURVEY_ID);
+    }
+
+    @Test
+    @DisplayName("共享列表：保留作者/我的角色，但必须清空答题密码")
+    void sharedListKeepsOwnerFieldsButHidesPassword() {
+        Survey shared = survey();
+        shared.setTitle("共享问卷");
+        shared.setAccessPassword("123456");
+        shared.setOwnerUsername("owner_acc");
+        shared.setOwnerNickname("作者昵称");
+        shared.setMyCollaboratorRole("editor");
+        shared.setSharedTime(java.time.LocalDateTime.of(2026, 10, 19, 10, 0));
+        when(collaboratorMapper.findSharedSurveys(TARGET)).thenReturn(List.of(shared));
+
+        var list = service.listSharedWithMe(TARGET);
+
+        assertEquals(1, list.size());
+        Survey item = list.get(0);
+        // 作者/角色是前端分组与筛选的依据，不能被脱敏误伤
+        assertEquals("owner_acc", item.getOwnerUsername());
+        assertEquals("作者昵称", item.getOwnerNickname());
+        assertEquals("editor", item.getMyCollaboratorRole());
+        assertEquals(java.time.LocalDateTime.of(2026, 10, 19, 10, 0), item.getSharedTime());
+        // 密码只用于填写人进门，协作者不该看到；hasPassword 保留给前端提示
+        assertNull(item.getAccessPassword());
+        assertTrue(item.getHasPassword());
     }
 }

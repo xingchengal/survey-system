@@ -158,12 +158,16 @@
 
     <!-- 设为模板 / 取消模板（管理员）。
          ★ 为什么要弹窗而不是直接调：模板的"分类"是必填信息（模板广场按它聚合），
-         否则直接调会把分类写成 NULL，模板广场里就会显示成"通用/其他"。 -->
-    <el-dialog v-model="templateDialogVisible" :title="templateForm.isTemplate === 1 ? '取消模板' : '设为模板'" width="480px">
-      <p class="text-secondary" v-if="templateForm.isTemplate === 1">
-        确定取消「{{ templateForm.title }}」的模板身份吗？取消后它会从模板广场消失，回到「全部问卷」列表。
-      </p>
-      <template v-else>
+          否则直接调会把分类写成 NULL，模板广场里就会显示成"通用/其他"。
+         ★★ 文案方向必须跟 templateForm.targetIsTemplate 走（1=接下来要设为模板，0=要取消）：
+          原来这里把 1 当成"当前已是模板"，于是点「设为模板」反而弹出「取消模板」，
+          还顺手把分类选择框藏了起来 —— 用户看到的就是"点了设为模板却问我要不要取消"。 -->
+    <el-dialog
+      v-model="templateDialogVisible"
+      :title="templateForm.targetIsTemplate === 1 ? '设为模板' : '取消模板'"
+      width="480px"
+    >
+      <template v-if="templateForm.targetIsTemplate === 1">
         <p class="text-secondary">
           「{{ templateForm.title }}」将出现在<strong>所有登录用户</strong>都能看到的模板广场，并可被任何人「从模板创建」。
         </p>
@@ -175,13 +179,19 @@
             <el-select v-model="templateForm.category" placeholder="请选择或输入分类" allow-create filterable class="w-full">
               <el-option v-for="cat in templateCategoryOptions" :key="cat" :label="cat" :value="cat" />
             </el-select>
+            <div class="text-secondary" style="font-size: 12px; margin-top: 4px;">
+              分类决定模板广场里的筛选分组；可直接输入新分类，保存后会自动进入分类清单。
+            </div>
           </el-form-item>
         </el-form>
       </template>
+      <p v-else class="text-secondary">
+        确定取消「{{ templateForm.title }}」的模板身份吗？取消后它会从模板广场消失，回到「全部问卷」列表。
+      </p>
       <template #footer>
         <el-button @click="templateDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="templateSubmitting" @click="submitTemplate">
-          {{ templateForm.isTemplate === 1 ? '确定取消' : '确定设为模板' }}
+          {{ templateForm.targetIsTemplate === 1 ? '确定设为模板' : '确定取消' }}
         </el-button>
       </template>
     </el-dialog>
@@ -293,10 +303,11 @@ export default {
       // ===== 设为/取消模板 =====
       templateDialogVisible: false,
       templateSubmitting: false,
-      // title 只用于弹窗文案；isTemplate 决定是"设为"还是"取消"
-      templateForm: { id: null, title: '', category: '', isTemplate: 0 },
-      // 与 TemplateSeederService 的 7 大分类一致（那 31 个预置模板就是这么分的）；
-      // 用 allow-create 允许管理员新建分类，前端不做白名单校验（后端也没有分类白名单）。
+      // title 只用于弹窗文案；targetIsTemplate 是**目标状态**：
+      //   1 = 这次要设为模板（显示分类选择），0 = 这次要取消模板
+      templateForm: { id: null, title: '', category: '', targetIsTemplate: 0 },
+      // 初始兜底 7 类；mounted 时用后端 /survey/template-categories 覆盖，
+      // 这样「模板管理」里新增的分类会立刻出现在这里（allow-create 仍可现场输入新分类）。
       templateCategoryOptions: ['满意度', '报名', '反馈', '调研', '教育', '健康', '其他'],
       Search: markRaw(Search),
       Refresh: markRaw(Refresh),
@@ -335,6 +346,7 @@ export default {
     // 恢复上次停留的页码
     this.pageNum = readPageNum(PAGE_KEY)
     this.loadSurveys()
+    this.loadTemplateCategories()
   },
   methods: {
     // ===== 分页加载全部问卷（管理员）=====
@@ -511,8 +523,21 @@ export default {
     // 关联：PUT /api/survey/set-template/{id}?isTemplate=0|1&category=xxx
     //   · 后端已把 isTemplate 收成只允许 0/1；category 只在"设为模板"时有意义
     //   · 后端还会挡"回收站里的问卷"（400），失败提示由 http.js 统一弹出
+    //   · 分类清单来自 GET /api/survey/template-categories（与「模板管理」共用一份，
+    //     后端在 setTemplate 时会把新输入的分类自动登记，所以两边不会各有一份白名单）
+    async loadTemplateCategories() {
+      try {
+        const list = await api.survey.templateCategories({ silent: true })
+        if (Array.isArray(list) && list.length) this.templateCategoryOptions = list
+      } catch {
+        // 分类清单拉不到时保留内置 7 类，不影响「设为模板」主流程
+      }
+    },
+
     handleTemplate(row) {
-      const isTemplate = row.isTemplate === 1 ? 0 : 1
+      // ★ targetIsTemplate 是**目标状态**，不是当前状态：
+      //   当前是模板 → 目标 0（取消）；当前不是 → 目标 1（设为）。
+      const targetIsTemplate = row.isTemplate === 1 ? 0 : 1
       this.templateForm = {
         id: row.id,
         title: row.title,
@@ -520,25 +545,27 @@ export default {
         //   否则库里会留下 template_category='其他'，与既有的 NULL 混成两种"没有分类" ——
         //   前端展示恰好都显示成"通用/其他"，表面看不出问题，但按分类统计会分裂成两组。
         // 设为模板时预填原分类或"其他"，便于快速确认。
-        category: isTemplate === 1 ? (row.templateCategory || '其他') : '',
-        isTemplate
+        category: targetIsTemplate === 1 ? (row.templateCategory || '其他') : '',
+        targetIsTemplate
       }
       this.templateDialogVisible = true
     },
 
     async submitTemplate() {
-      const { id, isTemplate, category } = this.templateForm
-      // 设为模板时分类必填：留空会让模板广场把它显示成"通用/其他"（后端不做非空校验）
-      if (isTemplate === 1 && !String(category || '').trim()) {
+      const { id, targetIsTemplate, category } = this.templateForm
+      // 设为模板时分类必填：留空会让模板广场把它显示成"通用/其他"
+      if (targetIsTemplate === 1 && !String(category || '').trim()) {
         ElMessage.warning('请选择或输入模板分类')
         return
       }
       this.templateSubmitting = true
       try {
-        await api.survey.setTemplate(id, isTemplate, category)
-        ElMessage.success(isTemplate === 1 ? '已设为模板' : '已取消模板')
+        await api.survey.setTemplate(id, targetIsTemplate, category)
+        ElMessage.success(targetIsTemplate === 1 ? '已设为模板' : '已取消模板')
         this.templateDialogVisible = false
         this.loadSurveys()
+        // 新输入的分类会被后端自动登记，刷新一次让下次弹窗直接可选
+        this.loadTemplateCategories()
       } catch {
         // 失败提示已由 http.js 统一弹出（如"问卷已在回收站中，请先恢复再设为模板"）
       } finally {

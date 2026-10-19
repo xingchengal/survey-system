@@ -49,11 +49,17 @@ public interface SurveyCollaboratorMapper {
      * 共享给我的问卷（我作为协作者参与、且不在回收站）。
      * ★ 只按 user_id 过滤，不接受"查别人"的参数 —— 这类"我的"列表永远不该能越权查。
      * ★ 返回整行 Survey（含 access_password），**由 Service 负责脱敏**（置空并给出 hasPassword）。
+     * ★ 额外 JOIN 出作者昵称/账号、我的协作者角色、共享时间：
+     *   一个人可能被多个作者邀请，前端要按作者分组、按角色筛选，没有这三个字段只能靠猜。
+     * ★ 作者账号即使已注销也照常 JOIN（问卷还在，作者名仍要能显示）；不显示已注销状态。
      */
-    @Select("SELECT s.* FROM t_survey s "
+    @Select("SELECT s.*, u.username AS ownerUsername, u.nickname AS ownerNickname, "
+            + "c.collaborator_role AS myCollaboratorRole, c.created_time AS sharedTime "
+            + "FROM t_survey s "
             + "JOIN t_survey_collaborator c ON c.survey_id = s.id "
+            + "JOIN t_user u ON u.id = s.user_id "
             + "WHERE c.user_id = #{userId} AND s.deleted = 0 "
-            + "ORDER BY c.created_time DESC, s.id DESC")
+            + "ORDER BY u.nickname, c.created_time DESC, s.id DESC")
     List<Survey> findSharedSurveys(@Param("userId") Integer userId);
 
     /**

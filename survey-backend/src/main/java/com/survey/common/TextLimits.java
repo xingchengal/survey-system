@@ -41,6 +41,13 @@ public final class TextLimits {
     /** t_user.username / t_user.nickname —— varchar(50) */
     public static final int USER_NAME = 50;
 
+    /**
+     * t_template_category.name —— varchar(50)
+     * ★ 与 t_survey.template_category 同宽：分类名最终会写进那份问卷的 template_category 列，
+     *   两处列宽必须一致，否则"清单里能存、模板上存不下"会变成 500。
+     */
+    public static final int TEMPLATE_CATEGORY = 50;
+
     /** t_announcement.title —— varchar(200) */
     public static final int ANNOUNCEMENT_TITLE = 200;
 

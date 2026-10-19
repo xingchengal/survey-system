@@ -27,6 +27,7 @@ class TextLimitsTest {
         assertEquals(500, TextLimits.OPTION_CONTENT, "t_option.content varchar(500)");
         assertEquals(1000, TextLimits.ANSWER_CONTENT, "t_answer_detail.content varchar(1000)");
         assertEquals(50, TextLimits.USER_NAME, "t_user.username / nickname varchar(50)");
+        assertEquals(50, TextLimits.TEMPLATE_CATEGORY, "t_template_category.name / t_survey.template_category varchar(50)");
         assertEquals(200, TextLimits.ANNOUNCEMENT_TITLE, "t_announcement.title varchar(200)");
         // text 列按**字节**算，这里取的是保守值（详见常量注释）
         assertEquals(16000, TextLimits.ANNOUNCEMENT_CONTENT, "t_announcement.content text(65535 字节)");
