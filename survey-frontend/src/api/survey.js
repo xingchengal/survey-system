@@ -22,6 +22,7 @@ export default {
 
   /**
    * 全部问卷 + 每份的答卷数（管理员，一次请求）。
+   * 口径不含模板，与「系统总览」的问卷总数一致（模板数由总览的 templates 给出）。
    * 一次 GROUP BY 算完；不要改成对每份问卷串行调 answer.count(id)（N+1）。
    */
   listWithResponseCount: () => http.get('/api/survey/list-with-response-count'),

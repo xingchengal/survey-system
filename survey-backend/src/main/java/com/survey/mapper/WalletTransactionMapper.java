@@ -9,6 +9,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 额度流水（t_wallet_transaction）—— 只追加的账本。
@@ -40,4 +41,15 @@ public interface WalletTransactionMapper {
     /** 我的流水（按 user_id 分页，分页交给 PageHelper，这里不带 LIMIT）。 */
     @Select("SELECT * FROM t_wallet_transaction WHERE user_id = #{userId} ORDER BY id DESC")
     List<WalletTransaction> findByUser(@Param("userId") Integer userId);
+
+    /** 今日全站入账 / 出账 / 笔数（amount 有符号：入账正、出账负）。 */
+    @Select("SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS income, "
+            + "COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS expense, "
+            + "COUNT(*) AS cnt FROM t_wallet_transaction WHERE created_time >= CURDATE()")
+    Map<String, Object> sumToday();
+
+    /** 全站流水按类型汇总（统计页「流水构成」）。 */
+    @Select("SELECT type, COUNT(*) AS cnt, COALESCE(SUM(amount), 0) AS amount "
+            + "FROM t_wallet_transaction GROUP BY type ORDER BY cnt DESC")
+    List<Map<String, Object>> sumByType();
 }

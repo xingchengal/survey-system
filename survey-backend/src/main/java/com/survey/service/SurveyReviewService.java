@@ -1,11 +1,13 @@
 package com.survey.service;
 
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.common.SurveyStatus;
 import com.survey.entity.Survey;
 import com.survey.common.SurveyLifecycle;
 import com.survey.mapper.SurveyMapper;
 import com.survey.mapper.SurveyReviewMapper;
+import com.survey.mapper.UserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +34,10 @@ public class SurveyReviewService {
     @Autowired
     private NotificationService notificationService;
 
+    /** 举报通知按 review:handle 发，不能发给全部管理员。 */
+    @Autowired
+    private UserMapper userMapper;
+
     /** 提交举报：只能举报已发布的他人问卷，同一人同一问卷只允许一条待处理举报，理由 1~500 字。 */
     public void report(Survey survey, Integer reporterId, String reason) {
         if (survey == null) {
@@ -54,6 +60,12 @@ public class SurveyReviewService {
             throw new BizException("你对该问卷的举报还在处理中，请等待结果");
         }
         reviewMapper.insert(survey.getId(), reporterId, text);
+        // 通知有 review:handle 的人：超管 + 被授权审核的次级管理员；没权限的不打扰。
+        for (Integer staffId : userMapper.findStaffIdsByPermission(Permission.REVIEW_HANDLE)) {
+            notificationService.send(staffId, "新的举报",
+                    "《" + survey.getTitle() + "》被举报：" + text,
+                    "review", "/admin/reviews");
+        }
     }
 
     /** 管理端列表（status 为 null 表示全部） */

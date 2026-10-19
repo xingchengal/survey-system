@@ -50,7 +50,7 @@ public final class Permission {
     /** 处理反馈与客服工单 */
     public static final String FEEDBACK_HANDLE = "feedback:handle";
 
-    /** 系统总览 / 系统统计 */
+    /** 系统级资源视图（统计页「资源」模块：数据库大小 / 表行数 / 版本快照）；不再等于全站业务数据 */
     public static final String SYSTEM_VIEW = "system:view";
 
     /**

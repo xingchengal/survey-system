@@ -67,8 +67,8 @@
 
       <!-- 右侧：管理员内容 -->
       <el-col :span="16" :xs="24" :sm="24" :md="16">
-        <!-- 系统管理视图 -->
-        <el-card class="mb-20">
+        <!-- 系统管理视图：只显示已授权模块的数字（没权限的卡不渲染） -->
+        <el-card v-if="canUserManage || canSurveyManage" class="mb-20">
           <template #header>
             <div class="flex-between">
               <span class="text-bold">🛡️ 系统管理视图</span>
@@ -76,28 +76,28 @@
             </div>
           </template>
           <el-row :gutter="12">
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
+            <el-col v-if="canUserManage" :span="6" :xs="12" :sm="12" :md="6">
               <div class="mini-card mini-blue">
                 <el-icon :size="22" color="#2f80ed"><UserFilled /></el-icon>
                 <div class="mini-value color-primary">{{ sysStats.users }}</div>
                 <div class="mini-label">普通用户</div>
               </div>
             </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
+            <el-col v-if="canSurveyManage" :span="6" :xs="12" :sm="12" :md="6">
               <div class="mini-card mini-green">
                 <el-icon :size="22" color="#16a34a"><Document /></el-icon>
                 <div class="mini-value color-success">{{ sysStats.total }}</div>
                 <div class="mini-label">总问卷数</div>
               </div>
             </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
+            <el-col v-if="canSurveyManage" :span="6" :xs="12" :sm="12" :md="6">
               <div class="mini-card mini-amber">
                 <el-icon :size="22" color="#d97706"><ChatDotRound /></el-icon>
                 <div class="mini-value color-danger">{{ sysStats.responses }}</div>
                 <div class="mini-label">总答卷数</div>
               </div>
             </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
+            <el-col v-if="canSurveyManage" :span="6" :xs="12" :sm="12" :md="6">
               <div class="mini-card mini-violet">
                 <el-icon :size="22" color="#7c3aed"><View /></el-icon>
                 <div class="mini-value color-purple">{{ sysStats.views }}</div>
@@ -107,59 +107,24 @@
           </el-row>
         </el-card>
 
-        <!-- 管理快捷入口 -->
-        <el-card class="mb-20">
+        <!-- 管理快捷入口：只显示已有权限的入口，避免点进去被守卫踢回 -->
+        <el-card v-if="visibleQuickActions.length" class="mb-20">
           <template #header>
             <span class="text-bold">⚡ 管理快捷入口</span>
           </template>
           <el-row :gutter="12">
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/users')">
-                <el-icon :size="26" color="#409eff"><UserFilled /></el-icon>
-                <div class="qa-title">用户管理</div>
-                <div class="qa-desc">查看 / 删除</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/admin/surveys')">
-                <el-icon :size="26" color="#67c23a"><Document /></el-icon>
-                <div class="qa-title">全部问卷</div>
-                <div class="qa-desc">管理 / 模板</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/statistics')">
-                <el-icon :size="26" color="#e6a23c"><PieChart /></el-icon>
-                <div class="qa-title">系统统计</div>
-                <div class="qa-desc">图表 / 排行</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/admin/logs')">
-                <el-icon :size="26" color="#f56c6c"><Memo /></el-icon>
-                <div class="qa-title">操作日志</div>
-                <div class="qa-desc">操作追溯</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/admin/recycle')">
-                <el-icon :size="26" color="#ef4444"><Delete /></el-icon>
-                <div class="qa-title">回收站</div>
-                <div class="qa-desc">全部用户的删除记录</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/admin/announcements')">
-                <el-icon :size="26" color="#e6a23c"><Bell /></el-icon>
-                <div class="qa-title">公告管理</div>
-                <div class="qa-desc">发布 / 下架</div>
-              </div>
-            </el-col>
-            <el-col :span="6" :xs="12" :sm="12" :md="6">
-              <div class="quick-action" @click="$router.push('/admin/demo')">
-                <el-icon :size="26" color="#8e44ad"><MagicStick /></el-icon>
-                <div class="qa-title">演示数据</div>
-                <div class="qa-desc">生成 / 重置</div>
+            <el-col
+              v-for="action in visibleQuickActions"
+              :key="action.path"
+              :span="6"
+              :xs="12"
+              :sm="12"
+              :md="6"
+            >
+              <div class="quick-action" @click="$router.push(action.path)">
+                <el-icon :size="26" :color="action.color"><component :is="action.icon" /></el-icon>
+                <div class="qa-title">{{ action.title }}</div>
+                <div class="qa-desc">{{ action.desc }}</div>
               </div>
             </el-col>
           </el-row>
@@ -386,6 +351,30 @@ export default {
     isSuper() {
       return this.user.role === 'admin'
     },
+    /** 系统管理视图按模块权限显隐：没权限的卡不渲染，也不发请求 */
+    canUserManage() {
+      return this.isSuper || hasPermission('user:manage')
+    },
+    canSurveyManage() {
+      return this.isSuper || hasPermission('survey:manage')
+    },
+    /** 管理快捷入口：按权限过滤；演示数据只给超管（路由 roles=['admin']） */
+    visibleQuickActions() {
+      const actions = [
+        { permission: 'user:manage', title: '用户管理', desc: '查看 / 删除', path: '/users', icon: 'UserFilled', color: '#409eff' },
+        { permission: 'survey:manage', title: '全部问卷', desc: '管理 / 模板', path: '/admin/surveys', icon: 'Document', color: '#67c23a' },
+        { permission: null, title: '系统统计', desc: '图表 / 排行', path: '/statistics', icon: 'PieChart', color: '#e6a23c' },
+        { permission: 'log:view', title: '操作日志', desc: '操作追溯', path: '/admin/logs', icon: 'Memo', color: '#f56c6c' },
+        { permission: 'survey:manage', title: '回收站', desc: '全部用户的删除记录', path: '/admin/recycle', icon: 'Delete', color: '#ef4444' },
+        { permission: 'announcement:manage', title: '公告管理', desc: '发布 / 下架', path: '/admin/announcements', icon: 'Bell', color: '#e6a23c' },
+        { permission: 'superOnly', title: '演示数据', desc: '生成 / 重置', path: '/admin/demo', icon: 'MagicStick', color: '#8e44ad' }
+      ]
+      return actions.filter(a => {
+        if (a.permission === 'superOnly') return this.isSuper
+        if (!a.permission) return true
+        return this.isSuper || hasPermission(a.permission)
+      })
+    },
     avatarText() {
       const name = this.user.nickname || this.user.username || '管'
       return name.charAt(0).toUpperCase()
@@ -407,7 +396,7 @@ export default {
         this.profileForm.nickname = this.user.nickname || ''
         this.contactForm.phone = this.user.phone || ''
         this.contactForm.email = this.user.email || ''
-        if (hasPermission('system:view')) this.loadSysStats()
+        if (this.canUserManage || this.canSurveyManage) this.loadSysStats()
         this.loadLoginLogs()
         if (hasPermission('log:view')) this.loadRecentLogs()
       } catch {

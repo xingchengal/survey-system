@@ -76,13 +76,6 @@ const routes = [
         meta: { title: '个人中心', roles: STAFF }
       },
       {
-        // 次级管理员首页：只显示被分配的模块，避免落到没有权限的 /dashboard
-        path: 'admin/workbench',
-        name: 'AdminWorkbench',
-        component: () => import('../views/AdminWorkbench.vue'),
-        meta: { title: '管理工作台', roles: STAFF }
-      },
-      {
         // 超管专属：选定/授权/降级次级管理员
         path: 'admin/sub-admins',
         name: 'SubAdminManage',
@@ -90,10 +83,11 @@ const routes = [
         meta: { title: '次级管理员', roles: ['admin'] }
       },
       {
+        // 总览对 staff 全开：次级管理员没有 system:view 也能进，字段由后端按模块权限裁剪
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('../views/Dashboard.vue'),
-        meta: { title: '系统总览', roles: STAFF, permission: 'system:view' }
+        meta: { title: '系统总览', roles: STAFF }
       },
       {
         path: 'users',
@@ -115,10 +109,11 @@ const routes = [
         meta: { title: '模板管理', roles: STAFF, permission: 'template:manage' }
       },
       {
+        // 统计页对 staff 全开：没有 system:view 也能进，模块由后端按权限裁剪
         path: 'statistics',
         name: 'SystemStatistics',
         component: () => import('../views/SystemStatistics.vue'),
-        meta: { title: '系统统计', roles: STAFF, permission: 'system:view' }
+        meta: { title: '系统统计', roles: STAFF }
       },
       {
         path: 'admin/recycle',

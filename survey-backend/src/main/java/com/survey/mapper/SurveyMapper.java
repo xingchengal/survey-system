@@ -78,9 +78,10 @@ public interface SurveyMapper {
     @Update("UPDATE t_survey SET view_count = #{viewCount} WHERE id = #{id}")
     int updateViewCount(@Param("id") Integer id, @Param("viewCount") Integer viewCount);
 
-    /** 全部正常问卷（含模板），管理员统计用。 */
-    @Select("SELECT * FROM t_survey WHERE deleted = 0 ORDER BY created_time DESC")
-    List<Survey> findAll();
+    /** 统计口径：与 getSystemOverview() 同源，排除模板，否则答卷量分布/趋势会混进模板。 */
+    @Select("SELECT * FROM t_survey WHERE deleted = 0 AND (is_template IS NULL OR is_template = 0) " +
+            "ORDER BY created_time DESC")
+    List<Survey> findNormal();
 
     /** 某用户的问卷（我的问卷，不含回收站）。必须与个人统计同口径排除模板，否则两处数字对不上。 */
     @Select("SELECT * FROM t_survey WHERE user_id = #{userId} AND deleted = 0 " +
@@ -196,6 +197,12 @@ public interface SurveyMapper {
     /** 模板总数（模板广场在架模板） */
     @Select("SELECT COUNT(*) FROM t_survey WHERE is_template = 1 AND deleted = 0")
     int countTemplates();
+
+    /** 模板使用榜：按「从模板创建」的次数倒序，同分按 id 保证顺序稳定。 */
+    @Select("SELECT title, template_use_count AS useCount FROM t_survey "
+            + "WHERE is_template = 1 AND deleted = 0 "
+            + "ORDER BY template_use_count DESC, id LIMIT #{limit}")
+    List<Map<String, Object>> findTopTemplates(@Param("limit") int limit);
 
     /** 回收站里的问卷数（含模板；管理员看板要看到"待清理"的量） */
     @Select("SELECT COUNT(*) FROM t_survey WHERE deleted = 1")

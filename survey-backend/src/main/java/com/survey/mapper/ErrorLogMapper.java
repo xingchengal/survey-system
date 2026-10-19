@@ -37,6 +37,10 @@ public interface ErrorLogMapper {
     @Select("SELECT COUNT(*) FROM t_error_log")
     int count();
 
+    /** 今日新增异常数（统计页「日志」模块）。 */
+    @Select("SELECT COUNT(*) FROM t_error_log WHERE create_time >= CURDATE()")
+    int countToday();
+
     /** 删除单条。管理端清理动作，不可恢复。 */
     @Delete("DELETE FROM t_error_log WHERE id = #{id}")
     int deleteById(Integer id);

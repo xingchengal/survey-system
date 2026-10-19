@@ -4,6 +4,7 @@ import com.survey.common.BizException;
 import com.survey.entity.Survey;
 import com.survey.mapper.SurveyMapper;
 import com.survey.mapper.SurveyReviewMapper;
+import com.survey.mapper.UserMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,8 @@ class SurveyReviewServiceTest {
     private SurveyMapper surveyMapper;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private UserMapper userMapper;
 
     @InjectMocks
     private SurveyReviewService service;
@@ -52,8 +55,24 @@ class SurveyReviewServiceTest {
     @Test
     @DisplayName("正常举报：写入 survey_id / reporter_id / 去空白的理由")
     void reportInserts() {
+        when(userMapper.findStaffIdsByPermission("review:handle")).thenReturn(java.util.List.of(1, 2));
+
         service.report(survey(1), REPORTER, "  内容违规  ");
+
         verify(reviewMapper).insert(874, REPORTER, "内容违规");
+        // ★ 只通知有 review:handle 的 staff，不是"所有管理员"
+        verify(notificationService).send(eq(1), eq("新的举报"), anyString(), eq("review"), eq("/admin/reviews"));
+        verify(notificationService).send(eq(2), eq("新的举报"), anyString(), eq("review"), eq("/admin/reviews"));
+    }
+
+    @Test
+    @DisplayName("★ 举报通知按权限点取人：名单为空时不发通知")
+    void reportNotifiesOnlyStaffWithReviewPermission() {
+        when(userMapper.findStaffIdsByPermission("review:handle")).thenReturn(java.util.List.of());
+
+        service.report(survey(1), REPORTER, "内容违规");
+
+        verify(notificationService, never()).send(anyInt(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test

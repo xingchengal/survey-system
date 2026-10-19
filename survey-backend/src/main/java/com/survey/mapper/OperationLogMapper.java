@@ -64,4 +64,25 @@ public interface OperationLogMapper {
                                      @Param("role") String role,
                                      @Param("startTime") java.time.LocalDateTime startTime,
                                      @Param("endTime") java.time.LocalDateTime endTime);
+
+    /**
+     * 总览「最近动态」：只取最近 N 条，不做分页。
+     * limit 由调用方写死（不来自请求参数），避免被当成翻页入口。
+     */
+    @Select("SELECT * FROM t_operation_log ORDER BY create_time DESC LIMIT #{limit}")
+    List<OperationLog> findRecent(@Param("limit") int limit);
+
+    /** 操作日志总条数（统计页「日志」模块）。 */
+    @Select("SELECT COUNT(*) FROM t_operation_log")
+    int count();
+
+    /** 今日操作条数。 */
+    @Select("SELECT COUNT(*) FROM t_operation_log WHERE create_time >= CURDATE()")
+    int countToday();
+
+    /** 近 7 天每日操作条数；数据库只返回有数据的日子，由 Service 补齐。 */
+    @Select("SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS d, COUNT(*) AS cnt FROM t_operation_log "
+            + "WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) "
+            + "GROUP BY DATE_FORMAT(create_time, '%Y-%m-%d')")
+    List<java.util.Map<String, Object>> countDaily();
 }

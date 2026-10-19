@@ -173,7 +173,7 @@ export default {
       //   后端没有该字段时 → setPermissions(undefined) 清空，hasPermission 走角色兜底。
       setPermissions(res.permissions)
 
-        // 首页统一由 homePathFor 按角色决定（subadmin → /admin/workbench）；
+        // 首页统一由 homePathFor 按角色决定（subadmin → /dashboard，只显示已授权模块）；
         //   这里不判断 success —— 后端失败是非 2xx，http.js 已抛 ApiError，走不到这行。
         ElMessage.success('登录成功')
         // redirect 只接受站内路径（单个 / 开头），挡掉 //evil.com 这类协议相对跳转

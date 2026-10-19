@@ -5,10 +5,12 @@ import com.survey.common.SurveyStatus;
 import com.survey.annotation.RequirePermission;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
+import com.survey.common.ForbiddenException;
 import com.survey.common.Permission;
 import com.survey.common.PageResult;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Survey;
+import com.survey.mapper.RoleMapper;
 import com.survey.service.AnswerService;
 import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyCollaboratorService;
@@ -31,6 +33,7 @@ import java.net.URLEncoder;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +43,8 @@ import java.util.Set;
  * 问卷管理：增删改查、发布、复制、回收站、模板、统计与导出。
  * 权限矩阵：公开 = /share/{code}、/view/{code}；需登录 = /add、/my、/my-statistics、/templates、
  * /from-template/{id}、/recycle/page、/{id}/request-restore；需登录+归属 = /update、/publish/{id}、/copy/{id}、
- * 回收站三个、GET /{id}；管理员 = /list-with-response-count、/page、/export、/system-overview、/set-template/{id}。
+ * 回收站三个、GET /{id}；管理员 = /list-with-response-count、/page、/export、/set-template/{id}；
+ * 管理端人员 = /system-overview（staff 可进，字段按模块权限裁剪）。
  * ★ 归属以登录身份为准：/add 用 X-User-Id 覆盖请求体 userId，/update 沿用库里的 userId 与 shareCode。
  * ★ 权限失败统一抛异常（GlobalExceptionHandler → 400 + 统一 JSON），不要 return null。
  */
@@ -72,6 +76,10 @@ public class SurveyController {
     /** 模板分类清单（管理端「模板管理」与「设为模板」共用）。 */
     @Autowired
     private TemplateCategoryService templateCategoryService;
+
+    /** 系统总览按模块权限裁剪字段：只读该用户的权限点，不做授权变更。 */
+    @Autowired
+    private RoleMapper roleMapper;
 
     // ==================== 基础 CRUD ====================
 
@@ -125,13 +133,14 @@ public class SurveyController {
     // 不要再加"不分页列出全部问卷"的端点：系统统计走 /list-with-response-count，筛选走 /page。
     /**
      * 问卷列表 + 每份答卷数（管理员）：整页 SQL 恒为 2 条（列表 1 + GROUP BY 1），与问卷数量无关。
-     * 列表含模板，与 getSystemOverview() 同源；responseCount 只有本端点赋值。
+     * 口径不含模板，与 getSystemOverview() 的问卷总数一致；模板数量单独由总览的 templates 给出。
+     * responseCount 只有本端点赋值。
      */
     @Operation(summary = "问卷列表（含每份答卷数，管理员）")
     @GetMapping("/list-with-response-count")
-    @RequirePermission(Permission.SYSTEM_VIEW)
+    @RequirePermission(Permission.SURVEY_MANAGE)
     public List<Map<String, Object>> listWithResponseCount() {
-        List<Survey> surveys = surveyService.listAll();
+        List<Survey> surveys = surveyService.listNormal();
         // 一次 GROUP BY 拿全部答卷数；没有答卷的问卷不在 Map 里，取值必须 getOrDefault。
         Map<Integer, Integer> counts = surveyService.countResponsesBySurveyIds(surveys);
 
@@ -360,12 +369,29 @@ public class SurveyController {
     // ==================== 统计 ====================
 
     // 不要再加"系统统计"独立端点：它是 /system-overview 的真子集（少 views/users），多一个入口多一份要同步的口径。
-    @Operation(summary = "系统总览（含用户数、访客次数）")
+    /**
+     * 系统总览：管理端人员（超管 + 次级管理员）均可访问，字段按模块权限返回。
+     * 次级管理员没有任何模块权限时返回空对象，前端显示"联系超管授权"。
+     */
+    @Operation(summary = "系统总览（管理端人员，按模块权限返回字段）")
     @GetMapping("/system-overview")
-    @RequirePermission(Permission.SYSTEM_VIEW)
-    public Map<String, Object> systemOverview() {
-        Map<String, Object> result = surveyService.getSystemOverview();
-        result.put("users", userService.countNormalUsers());
+    public Map<String, Object> systemOverview(@RequestHeader("X-User-Id") Integer userId,
+                                              @RequestHeader("X-User-Role") String role) {
+        if (!Role.isStaff(role)) {
+            throw new ForbiddenException("无权限");
+        }
+        Set<String> permissions;
+        if (Role.isAdmin(role)) {
+            permissions = Permission.ALL;
+        } else {
+            List<String> codes = roleMapper.findPermissionCodesByUserId(userId);
+            permissions = codes == null || codes.isEmpty() ? Set.of() : new HashSet<>(codes);
+        }
+        Map<String, Object> result = surveyService.getSystemOverview(permissions);
+        // 用户数是 user:manage 模块的字段：没有该权限就不返回，不靠前端隐藏
+        if (permissions.contains(Permission.USER_MANAGE)) {
+            result.put("users", userService.countNormalUsers());
+        }
         return result;
     }
 

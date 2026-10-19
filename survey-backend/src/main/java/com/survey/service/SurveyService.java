@@ -11,9 +11,11 @@ import com.survey.common.BizException;
 import com.survey.common.DateRanges;
 import com.survey.common.Grader;
 import com.survey.common.PageParams;
+import com.survey.common.Permission;
 import com.survey.common.SqlLikeEscaper;
 import com.survey.common.PageResult;
 import com.survey.common.Role;
+import com.survey.entity.OperationLog;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.entity.Survey;
@@ -21,6 +23,7 @@ import com.survey.mapper.AnswerDetailMapper;
 import com.survey.mapper.UserMapper;
 import com.survey.service.NotificationService;
 import com.survey.mapper.AnswerMapper;
+import com.survey.mapper.OperationLogMapper;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
 import com.survey.mapper.SurveyCollaboratorMapper;
@@ -96,6 +99,10 @@ public class SurveyService {
     /** 管理端总览「额度总量」卡片（只读汇总） */
     @Autowired
     private WalletMapper walletMapper;
+
+    /** 总览「最近动态」：只读最近 5 条操作日志，写入口仍在 LogAspect。 */
+    @Autowired
+    private OperationLogMapper operationLogMapper;
 
     // ===== 分享码生成 =====
 
@@ -309,9 +316,9 @@ public class SurveyService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    /** 全部问卷（含模板）：list-with-response-count 与 getSystemOverview 的数据源，不要删。 */
-    public List<Survey> listAll() {
-        return surveyMapper.findAll();
+    /** 系统统计列表口径（不含模板）：与 getSystemOverview 的问卷总数保持一致。 */
+    public List<Survey> listNormal() {
+        return surveyMapper.findNormal();
     }
 
     /** 我的问卷：用一次 GROUP BY 批量回填答卷数（responseCount 非数据库字段，只有这里赋值）。 */
@@ -394,8 +401,9 @@ public class SurveyService {
             throw new BizException("只能为自己的问卷申请恢复");
         }
         // link 带 ?status=APPROVED：不带筛选会落在"待处理"空列表，管理员找不到这份问卷。
-        for (Integer adminId : userMapper.findAdminIds()) {
-            notificationService.send(adminId, "恢复上架申请",
+        // 只发给有 review:handle 的 staff：没权限的次级管理员收到这条通知也只能干瞪眼。
+        for (Integer staffId : userMapper.findStaffIdsByPermission(Permission.REVIEW_HANDLE)) {
+            notificationService.send(staffId, "恢复上架申请",
                     "作者申请恢复《" + survey.getTitle() + "》，请到举报审核页处理",
                     "review", "/admin/reviews?status=APPROVED");
         }
@@ -807,102 +815,70 @@ public class SurveyService {
     }
 
     /**
-     * 全站总览（管理员看板）：问卷/状态/答卷/访客，外加模板、回收站、待审、钱包、今日、7 天趋势、TOP 5。
+     * 全站总览（管理端人员）：按模块权限返回字段，没权限的模块连查询都不做。
+     * ★ `system:view` **不再**等于全站业务数据：它只解锁系统统计页的资源模块；
+     *   想看问卷/用户/模板/举报/钱包/日志，必须分别拥有对应模块权限。
+     * users 由 Controller 按 user:manage 补。
+     * 字段 → 权限：问卷/答卷/访客/回收站/今日=survey:manage · 模板=template:manage ·
+     * 待审=review:handle · 钱包=wallet:manage · 最近动态=log:view。
      */
-    public Map<String, Object> getSystemOverview() {
-        List<Survey> all = surveyMapper.findAll();
-        List<Survey> normalSurveys = all.stream()
-                .filter(s -> s.getIsTemplate() == null || s.getIsTemplate() == 0)
-                .collect(Collectors.toList());
-
-        StatusCounts c = countByStatus(normalSurveys);
-
-        // 批量查一次，不能逐份循环（N+1）。
-        Map<Integer, Integer> responseCounts = countResponsesBySurveyIds(normalSurveys);
-        int responses = 0;
-        for (Survey s : normalSurveys) {
-            responses += responseCounts.getOrDefault(s.getId(), 0);
-        }
-
-        int views = surveyMapper.sumViewCount();
-
-        // 全站计数：全部单条聚合 SQL，不按问卷循环。
-        int templates = surveyMapper.countTemplates();
-        int recycled = surveyMapper.countRecycled();
-        int pendingReviews = surveyReviewMapper.countPendingAll();
-        long walletBalance = walletMapper.sumBalance();
-        // >0 表示流水汇总与余额对不上，必须人工核对。
-        int walletMismatches = walletMapper.countMismatches();
-        int todaySurveys = surveyMapper.countCreatedToday();
-        int todayAnswers = answerMapper.countToday();
-
-        // 日期补齐成连续 7 天（没数据的那天补 0）。
-        Map<String, Integer> dailySurveys = new HashMap<>();
-        for (Map<String, Object> row : surveyMapper.countDailyCreated()) {
-            Object d = row.get("d");
-            Object cnt = row.get("cnt");
-            if (d != null && cnt instanceof Number) {
-                dailySurveys.put(d.toString(), ((Number) cnt).intValue());
-            }
-        }
-        Map<String, Integer> dailyAnswers = new HashMap<>();
-        for (Map<String, Object> row : answerMapper.countDailyAll()) {
-            Object d = row.get("d");
-            Object cnt = row.get("cnt");
-            if (d != null && cnt instanceof Number) {
-                dailyAnswers.put(d.toString(), ((Number) cnt).intValue());
-            }
-        }
-        List<String> trendDates = new ArrayList<>(7);
-        List<Integer> trendSurveys = new ArrayList<>(7);
-        List<Integer> trendAnswers = new ArrayList<>(7);
-        LocalDate today = LocalDate.now();
-        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-        for (int i = 6; i >= 0; i--) {
-            String key = today.minusDays(i).format(fmt);
-            trendDates.add(key);
-            trendSurveys.add(dailySurveys.getOrDefault(key, 0));
-            trendAnswers.add(dailyAnswers.getOrDefault(key, 0));
-        }
-
-        // TOP 5：答卷数降序，同分按 id 升序（顺序稳定）。
-        List<Survey> ranked = new ArrayList<>(normalSurveys);
-        ranked.sort((a, b) -> {
-            int diff = responseCounts.getOrDefault(b.getId(), 0) - responseCounts.getOrDefault(a.getId(), 0);
-            return diff != 0 ? diff : Integer.compare(a.getId(), b.getId());
-        });
-        if (ranked.size() > 5) {
-            ranked = ranked.subList(0, 5);
-        }
-        List<Map<String, Object>> topSurveys = new ArrayList<>(ranked.size());
-        for (Survey s : ranked) {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", s.getId());
-            item.put("title", s.getTitle());
-            item.put("status", s.getStatus());
-            item.put("responses", responseCounts.getOrDefault(s.getId(), 0));
-            topSurveys.add(item);
-        }
+    public Map<String, Object> getSystemOverview(Set<String> permissions) {
+        Set<String> perms = permissions == null ? Set.of() : permissions;
 
         Map<String, Object> result = new HashMap<>();
-        result.put("total", c.total());
-        result.put("published", c.published());
-        result.put("draft", c.draft());
-        result.put("ended", c.ended());
-        result.put("responses", responses);
-        result.put("views", views);
-        result.put("templates", templates);
-        result.put("recycled", recycled);
-        result.put("pendingReviews", pendingReviews);
-        result.put("walletBalance", walletBalance);
-        result.put("walletMismatches", walletMismatches);
-        result.put("todaySurveys", todaySurveys);
-        result.put("todayAnswers", todayAnswers);
-        result.put("trendDates", trendDates);
-        result.put("trendSurveys", trendSurveys);
-        result.put("trendAnswers", trendAnswers);
-        result.put("topSurveys", topSurveys);
+
+        if (perms.contains(Permission.SURVEY_MANAGE)) {
+            List<Survey> normalSurveys = surveyMapper.findNormal();
+            StatusCounts c = countByStatus(normalSurveys);
+
+            // 批量查一次，不能逐份循环（N+1）。
+            Map<Integer, Integer> responseCounts = countResponsesBySurveyIds(normalSurveys);
+            int responses = 0;
+            for (Survey s : normalSurveys) {
+                responses += responseCounts.getOrDefault(s.getId(), 0);
+            }
+
+            result.put("total", c.total());
+            result.put("published", c.published());
+            result.put("draft", c.draft());
+            result.put("ended", c.ended());
+            result.put("responses", responses);
+            result.put("views", surveyMapper.sumViewCount());
+            result.put("recycled", surveyMapper.countRecycled());
+            result.put("todaySurveys", surveyMapper.countCreatedToday());
+            result.put("todayAnswers", answerMapper.countToday());
+        }
+
+        if (perms.contains(Permission.TEMPLATE_MANAGE)) {
+            result.put("templates", surveyMapper.countTemplates());
+        }
+        if (perms.contains(Permission.REVIEW_HANDLE)) {
+            result.put("pendingReviews", surveyReviewMapper.countPendingAll());
+        }
+        if (perms.contains(Permission.WALLET_MANAGE)) {
+            result.put("walletBalance", walletMapper.sumBalance());
+            // >0 表示流水汇总与余额对不上，必须人工核对。
+            result.put("walletMismatches", walletMapper.countMismatches());
+        }
+        if (perms.contains(Permission.LOG_VIEW)) {
+            result.put("recentActivities", recentActivities());
+        }
         return result;
+    }
+
+    /** 总览「最近动态」：最近 5 条操作日志，时间格式与其它列表接口一致。 */
+    private List<Map<String, Object>> recentActivities() {
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (OperationLog log : operationLogMapper.findRecent(5)) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", log.getId());
+            item.put("username", log.getUsername());
+            item.put("operation", log.getOperation());
+            item.put("createTime", log.getCreateTime() == null ? null : log.getCreateTime().format(fmt));
+            rows.add(item);
+        }
+        return rows;
     }
 
     // ===== 定时任务 =====

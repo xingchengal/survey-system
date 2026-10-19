@@ -20,11 +20,7 @@
         >
           <!-- ===== 管理端菜单（超管 + 次级管理员；按权限点过滤） ===== -->
           <template v-if="isStaff">
-            <el-menu-item v-if="!isSuper" index="/admin/workbench">
-              <el-icon><HomeFilled /></el-icon>
-              <span>管理工作台</span>
-            </el-menu-item>
-            <el-menu-item v-if="can('system:view')" index="/dashboard">
+            <el-menu-item index="/dashboard">
               <el-icon><DataBoard /></el-icon>
               <span>系统总览</span>
             </el-menu-item>
@@ -40,7 +36,7 @@
               <el-icon><DocumentCopy /></el-icon>
               <span>模板管理</span>
             </el-menu-item>
-            <el-menu-item v-if="can('system:view')" index="/statistics">
+            <el-menu-item index="/statistics">
               <el-icon><PieChart /></el-icon>
               <span>系统统计</span>
             </el-menu-item>

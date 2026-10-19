@@ -141,11 +141,10 @@ export function isSuperAdmin(role) {
 
 /**
  * 按角色算首页路径（路由守卫与登录跳转共用）：
- * admin → 系统总览，subadmin → /admin/workbench，其余 → 个人数据看板。
+ * admin / subadmin → 系统总览（subadmin 只看已授权模块），其余 → 个人数据看板。
  */
 export function homePathFor(role) {
-  if (role === 'admin') return '/dashboard'
-  if (role === 'subadmin') return '/admin/workbench'
+  if (role === 'admin' || role === 'subadmin') return '/dashboard'
   return '/my/dashboard'
 }
 

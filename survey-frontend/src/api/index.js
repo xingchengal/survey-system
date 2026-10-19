@@ -16,6 +16,7 @@ import { operationLog, errorLog } from './log'
 import { demo, misc } from './demo'
 import captcha from './captcha'
 import admin from './admin'
+import system from './system'
 
 const api = {
   http,
@@ -31,7 +32,8 @@ const api = {
   demo, // api.demo.init() / reset()
   misc, // api.misc.health() / seedTemplates()
   captcha, // api.captcha.slider()
-  admin // api.admin.subAdmins() / promote() / updatePermissions() / demote()
+  admin, // api.admin.subAdmins() / promote() / updatePermissions() / demote()
+  system // api.system.statistics()
 }
 
 export { http, ApiError, request, toQuery, notifyError, download }
@@ -48,6 +50,7 @@ export {
   demo,
   misc,
   captcha,
-  admin
+  admin,
+  system
 }
 export default api

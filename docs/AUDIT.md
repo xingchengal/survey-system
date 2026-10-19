@@ -1,4 +1,4 @@
-# AUDIT · 端点权限与事实矩阵（全量 **110** 个方法级端点）
+# AUDIT · 端点权限与事实矩阵（全量 **115** 个方法级端点）
 
 > **定位**：四份主文档之一，**项目数字的唯一出处**（端点 / 表 / 测试 / 页面）。
 > **用途**：动任何 Controller 之前，先在下面四张明细表里找到那个端点，
@@ -7,7 +7,7 @@
 > （问卷是否已发布 / 是否在回收站 / 是否已结束……）。
 > **端点变更历史**（哪一轮加了哪几条、分档怎么订正）见 `HISTORY.md`；本文件只写**现状**。
 >
-> **当前口径（2026-10-19 按代码重核，四处一致）**：**110** 端点 = 公开 **13** + 需登录 **34** + 归属 **26** + 管理 **37**；
+> **当前口径（2026-10-19 按代码重核，四处一致）**：**115** 端点 = 公开 **13** + 需登录 **39** + 归属 **27** + 管理 **36**；
 > Controller **18**；复核命令见 §八，**改动端点后必须重跑**。
 >
 > ★ 改这张表时必须守的规矩：
@@ -41,24 +41,24 @@
 
 | 项 | 值 | 复核方式 |
 |---|---|---|
-| 方法级端点 | **110** | §八 注解计数 |
-| 分档 | 公开 **13** / 需登录 **34** / 归属 **26** / 管理 **37** | §三~§六 活行 |
-| Controller | **18** | `controller/*.java` |
+| 方法级端点 | **115** | §八 注解计数 |
+| 分档 | 公开 **13** / 需登录 **39** / 归属 **27** / 管理 **36** | §三~§六 活行 |
+| Controller | **19** | `controller/*.java` |
 | 数据库表 | **23** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **440 例 / 49 类** | `mvnw -o test` |
-| 前端页面 | **25** | `src/views/**/*.vue` |
-| 前端 API 模块 | **16** | `src/api/*.js` |
-| 具名路由 | **27** | `router/index.js` |
+| 后端测试 | **459 例 / 50 类** | `mvnw -o test` |
+| 前端页面 | **24** | `src/views/**/*.vue` |
+| 前端 API 模块 | **17** | `src/api/*.js` |
+| 具名路由 | **26** | `router/index.js` |
 
 ### 2.2 端点分档
 
 | 应当的权限 | 端点数 |
 |---|---|
 | 公开（白名单，不需登录） | **13** |
-| 需要登录（只能碰自己的数据） | **34** |
-| 需要登录 **+ 归属校验** | **26** |
-| 需要**管理员** | **37** |
-| **合计** | **110** |
+| 需要登录（只能碰自己的数据） | **39** |
+| 需要登录 **+ 归属校验** | **27** |
+| 需要**管理员** | **36** |
+| **合计** | **115** |
 
 > ★ 历史分档订正（“总数对、分档错”、明细表漏登记 12 条等）见 `HISTORY.md` 的「审计」条目；
 >   本表只写当前口径。
@@ -89,7 +89,7 @@
 
 ---
 
-## 四、需要管理员（**37 个**）
+## 四、需要管理员（**36 个**）
 
 > ★ 第四十二轮（G3）：+4 条管理端点 —— `PUT /user/{id}/disabled`、`GET /user/export`、
 >   `GET /survey/export`、`GET /log/export`（详见变更摘要）。
@@ -111,9 +111,8 @@
 | `GET /api/user/export` | `@RequirePermission("user:manage")` | ✅ **第四十二轮（G3）新增**：用户列表导出 Excel（`deleted=true` 导「已注销」视图；筛选与 `/page` 同一套）。★ 上限 10000 行，**超出明确拒绝**而不是静默截断（静默截断会让管理员以为导出全了）。★ 不导头像（mediumtext，单张可达 2MB） |
 | `GET /api/survey/page` | `@RequirePermission("survey:manage")` | ✅ ★ **第四十二轮（G3）**新增可选筛选 `startDate`/`endDate`（`yyyy-MM-dd`，闭区间，结束补到 `23:59:59`；格式错 → 400 而不是 500）。★ 用 `created_time >= / <=` 直接比列，不包 `DATE()`（列上有索引） |
 | `GET /api/survey/export` | `@RequirePermission("survey:manage")` | ✅ **第四十二轮（G3）新增**：问卷列表导出 Excel，筛选条件与 `/survey/page` **完全一致**，口径是「全部问卷」（**不含模板**，与 page 的 SQL 一致）。★ 答卷数用一次 `GROUP BY` 补齐，不逐份 count |
-| `GET /api/survey/list-with-response-count` | `@RequirePermission("system:view")` | ✅ ★ 第十九轮复核时**补登记**：这个方法本来就有（第十二轮加的），但此前只在本表正文里被"提了一嘴"，行始终没进表 —— 四张明细表因此少了 1 条，正是"合计对不上"的一半原因 |
+| `GET /api/survey/list-with-response-count` | `@RequirePermission("survey:manage")` | ✅ ★ 第十九轮复核时**补登记**：这个方法本来就有（第十二轮加的），但此前只在本表正文里被"提了一嘴"，行始终没进表 —— 四张明细表因此少了 1 条，正是"合计对不上"的一半原因。★ 口径是问卷数据，权限点跟随 `survey:manage`（不是 `system:view`） |
 | ~~`GET /api/survey/statistics`~~ | 🛠 前几轮修过；**第十六轮已删除**（前端零调用，是 `/system-overview` 的真子集） |
-| `GET /api/survey/system-overview` | `@RequirePermission("system:view")` | 🛠 前几轮修（同上） |
 | `PUT /api/survey/set-template/{id}` | `@RequirePermission("template:manage")` | ✅ |
 | `GET /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ **第四十六轮新增**：模板分类清单。★ 分类可以独立于模板存在（模板管理页「+ 新增分类」），所以不能从模板列表反推；管理档，因为只有管理端需要。 |
 | `POST /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ **第四十六轮新增**：新增分类（`name` 参数）。★ 非必填声明 + Service 判空：必填 `@RequestParam` 会在 `@RequireAdmin` 切面之前抛 400，普通用户拿到的就不是 403（同 `PUT /user/{id}/disabled` 的坑）。★ 返回新增后的完整清单，前端不用再 GET 一次。 |
@@ -144,7 +143,7 @@
 
 ---
 
-## 五、需要登录 + 归属校验（**26 个**）
+## 五、需要登录 + 归属校验（**27 个**）
 
 > ★ 第十九轮订正：表头原写 16，表体活行是 **15** —— 表头与表体不一致时**以表体为准**（同样要复核）。
 > ★ 第二十四轮：新增 `GET /api/answer/statistics/survey/{surveyId}`（整份问卷统计，一次取回）⇒ 15 → **16**。
@@ -183,12 +182,13 @@
 | `POST /api/survey/{surveyId}/collaborators` | **第三十四轮新增**：按用户名邀请协作者（viewer/editor/analyst）。★ 用户名不存在 / 已是协作者 / 邀请自己 → 400；邀请成功给对方发站内通知 | ✅ 同上；被邀请人**不会**因此获得 `t_user.role` 的任何变化 |
 | `PUT /api/survey/{surveyId}/collaborators/{targetUserId}` | **第三十四轮新增**：改协作者角色。★ 只改 `t_survey_collaborator.role`，与系统角色 `t_user.role` 是两套东西 | ✅ 同上 |
 | `DELETE /api/survey/{surveyId}/collaborators/{targetUserId}` | **第三十四轮新增**：移除协作者（作者/管理员）。★ 与下面「本人退出」是两条权限不同的路径 | ✅ 同上 |
+| `POST /api/survey/{surveyId}/collaborators/{targetUserId}/revoke` | 撤销未接受的邀请（作者/管理员）：`PENDING → REVOKED`。★ 只改状态、不删行；撤销后对方再点接受一律 400 | ✅ |
 
 **这几处原来是这么越权的**：`AnswerController` 的这 7 个端点方法签名里**只有 id、没有当前用户**，结构上就没法校验 —— 所以前几轮给它们加了 `requireSurveyOwnership()` / 反查 surveyId 的逻辑（admin 放行，避免弄坏管理员的系统统计页）。
 
 ---
 
-## 六、需要登录（**34 个**，只碰自己的数据）
+## 六、需要登录（**39 个**，其中 2 条限管理端人员）
 
 > ★ 第二十轮·续（第二轮）：`PUT /api/user/profile-public` **已删除**（需求撤销）⇒ 本档 **22 → 21**。
 > ★ 第二十轮·续：21 → **22**（新增 `DELETE /api/user/account`）。
@@ -199,6 +199,11 @@
 | 端点 | 说明 | 状态 |
 |---|---|---|
 | `POST /api/user/logout` | 登出（清 `doc_token` Cookie） | ✅ |
+| `GET /api/survey/system-overview` | 系统总览。★ **管理端人员**（admin / subadmin）均可访问，方法内判 `Role.isStaff`；普通用户 403。★ 字段按模块权限裁剪：`user:manage` → users、`survey:manage` → 问卷/答卷/访客/回收站/今日、`template:manage` → templates、`review:handle` → pendingReviews、`wallet:manage` → 钱包、`log:view` → recentActivities；`system:view` 只解锁统计页资源模块，不再给业务字段。没有任何模块权限时返回空对象，前端显示「联系超管授权」 | ✅ |
+| `GET /api/system/statistics` | 系统统计（按模块）。★ **管理端人员**（admin / subadmin）均可访问，方法内判 `Role.isStaff`；普通用户 403。★ 模块字段按权限裁剪：`survey:manage` → survey、`user:manage` → user、`template:manage` → template、`review:handle` → review、`wallet:manage` → wallet、`log:view` → log；`system:view` → 只解锁 resource（数据库/表行数/版本快照占用）。没权限的模块不查库也不返回 | ✅ |
+| `GET /api/collaborator/invitations` | 我的待接受邀请。★ 只按 `X-User-Id` 查，不接受 userId 参数；带问卷标题与作者昵称 | ✅ |
+| `POST /api/collaborator/invitations/{id}/accept` | 接受邀请（`PENDING → ACCEPTED`）。★ 归属按 `invitation.user_id` 校验；名额费在这一步扣，余额不足则保持 PENDING | ✅ |
+| `POST /api/collaborator/invitations/{id}/reject` | 拒绝邀请（`PENDING → REJECTED`）。★ 只作用于自己的邀请；不占名额、不扣费 | ✅ |
 | `GET /api/user/profile` | 我的资料（★ 会带出 `deletedAt`/`tokenValidAfter` 两个第二十轮新增字段） | ✅ |
 | `DELETE /api/user/account` | ✅ **第二十轮·续新增**：注销**自己**的账号（需求 三.5，**软删除**）。★ 必须带密码确认；★ 身份只取 `X-User-Id`，没有任何可传的 id（否则就是"能注销别人"的接口）；★ 与管理员那条物理删除**刻意分成两个路径** |
 | ~~`PUT /api/user/profile-public`~~ | ❌ **第二十轮·续第二轮已删除**：原「资料公开开关」（需求 三.4）。需求方明确"不需要这个需求了，对应代码也剔除" —— 端点、Service、Mapper、实体字段、前端开关与 api 封装一并删除；库里那一列保留未删 |

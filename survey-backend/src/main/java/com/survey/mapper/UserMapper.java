@@ -4,6 +4,7 @@ import com.survey.entity.User;
 import org.apache.ibatis.annotations.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用户表（t_user）的数据访问层。deleted_at：NULL=正常，非 NULL=已注销；disabled 是管理员标记，不参与查询过滤。
@@ -17,6 +18,20 @@ public interface UserMapper {
     /** 所有有效管理员的 id（恢复上架申请要通知他们）。必须带 deleted_at IS NULL。 */
     @Select("SELECT id FROM t_user WHERE role = 'admin' AND deleted_at IS NULL")
     java.util.List<Integer> findAdminIds();
+
+    /**
+     * 拥有某权限点的管理端人员：超管 + 被授予该权限点的次级管理员（未注销、未禁用）。
+     * ★ 通知按权限分发时用它，不要再用"全部管理员"——否则没该模块权限的次级管理员也会收到无关通知。
+     * ★ 超管直接命中 role='admin'；subadmin 走 t_user_permission（直接授权）或角色权限。
+     */
+    @Select("SELECT DISTINCT u.id FROM t_user u "
+            + "WHERE u.deleted_at IS NULL AND u.disabled = 0 AND u.role IN ('admin', 'subadmin') "
+            + "AND (u.role = 'admin' "
+            + "OR EXISTS (SELECT 1 FROM t_user_permission up "
+            + "           WHERE up.user_id = u.id AND up.permission_code = #{code}) "
+            + "OR EXISTS (SELECT 1 FROM t_user_role ur JOIN t_role_permission rp ON rp.role_id = ur.role_id "
+            + "           WHERE ur.user_id = u.id AND rp.permission_code = #{code}))")
+    java.util.List<Integer> findStaffIdsByPermission(@Param("code") String code);
 
     /** 按用户名查（登录用）。必须带 deleted_at IS NULL：已注销账号登不进去，且失败路径与"密码错"完全一致。 */
     @Select("SELECT * FROM t_user WHERE username = #{username} AND deleted_at IS NULL")
@@ -117,6 +132,20 @@ public interface UserMapper {
      */
     @Select("SELECT COUNT(*) FROM t_user WHERE role = 'admin' AND deleted_at IS NULL AND disabled = 0")
     int countActiveAdmins();
+
+    /** 今日注册的账号数（未注销）。 */
+    @Select("SELECT COUNT(*) FROM t_user WHERE deleted_at IS NULL AND created_time >= CURDATE()")
+    int countCreatedToday();
+
+    /** 被禁用账号数（未注销）；解禁入口在用户管理页。 */
+    @Select("SELECT COUNT(*) FROM t_user WHERE deleted_at IS NULL AND disabled = 1")
+    int countDisabled();
+
+    /** 近 7 天每日注册数（未注销）；数据库只返回有数据的日子，由 Service 补齐。 */
+    @Select("SELECT DATE_FORMAT(created_time, '%Y-%m-%d') AS d, COUNT(*) AS cnt FROM t_user "
+            + "WHERE deleted_at IS NULL AND created_time >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) "
+            + "GROUP BY DATE_FORMAT(created_time, '%Y-%m-%d')")
+    List<Map<String, Object>> countDailyCreated();
 
     /**
      * 按 id 查（取当前用户、归属校验、刷新令牌）。带 deleted_at IS NULL，注销后未过期的 JWT 立即失效。

@@ -64,6 +64,10 @@ public interface SurveyReviewMapper {
     @Select("SELECT COUNT(*) FROM t_survey_review WHERE status = 'PENDING'")
     int countPendingAll();
 
+    /** 全站举报按状态分组（PENDING / APPROVED / REJECTED），统计页用。 */
+    @Select("SELECT status, COUNT(*) AS cnt FROM t_survey_review GROUP BY status")
+    List<Map<String, Object>> countByStatus();
+
     /**
      * 彻底删除问卷时清空它的举报记录。
      * 问卷行没了，留下的只是审核台里"标题为空"的孤儿行；要保留审计价值应在删除前归档到独立审计表。

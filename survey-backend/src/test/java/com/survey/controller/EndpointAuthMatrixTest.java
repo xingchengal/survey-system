@@ -19,6 +19,7 @@ import com.survey.mapper.RoleMapper;
 import com.survey.mapper.SurveyCollaboratorMapper;
 import com.survey.mapper.SurveyIpMapper;
 import com.survey.mapper.SurveyReviewMapper;
+import com.survey.mapper.SystemResourceMapper;
 import com.survey.mapper.SurveyVersionMapper;
 import com.survey.mapper.TemplateCategoryMapper;
 import com.survey.mapper.UserMapper;
@@ -45,6 +46,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -84,7 +86,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   {@code mock-maker-subclass}（沙箱禁 Attach API）。Mapper 全是接口，不受影响。
  *
  * ── 维护口径 ───────────────────────────────────────────
- *   ALL_ENDPOINTS 是"110"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
+ *   ALL_ENDPOINTS 是"115"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
  *   docs/AUDIT.md 与《交接文档》的端点数。
  */
@@ -103,7 +105,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EndpointAuthMatrixTest {
 
-    // ==================== 一、110 个端点的三档分类（与审计表逐条对应） ====================
+    // ==================== 一、115 个端点的三档分类（与审计表逐条对应） ====================
 
     /** 公开档 13 条（JwtAuthFilter 白名单）。 */
     private static final Set<String> PUBLIC = Set.of(
@@ -122,7 +124,7 @@ class EndpointAuthMatrixTest {
             "GET /api/health"
     );
 
-    /** 管理档 37 条（@RequireAdmin，类级或方法级）。 */
+    /** 管理档 36 条（@RequireAdmin，类级或方法级）。 */
     private static final Set<String> ADMIN = Set.of(
             "GET /api/admin/permissions",
             "GET /api/admin/sub-admins",
@@ -144,7 +146,6 @@ class EndpointAuthMatrixTest {
             "GET /api/survey/page",
             "GET /api/survey/export",
             "GET /api/survey/list-with-response-count",
-            "GET /api/survey/system-overview",
             "PUT /api/survey/set-template/{id}",
             "GET /api/survey/template-categories",
             "POST /api/survey/template-categories",
@@ -163,7 +164,16 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 110 条（= 审计表的活行；顺序无关）。 */
+    /**
+     * 管理端人员档 2 条：普通用户 403，但超管与次级管理员都能进（字段按模块权限裁剪）。
+     * ★ 与 ADMIN 分开：它们没有 @RequireAdmin / @RequirePermission，闸门在方法里判 staff。
+     */
+    private static final Set<String> STAFF_ONLY = Set.of(
+            "GET /api/survey/system-overview",
+            "GET /api/system/statistics"
+    );
+
+    /** 全部 115 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
             "GET /api/admin/permissions",
             "GET /api/admin/sub-admins",
@@ -179,6 +189,9 @@ class EndpointAuthMatrixTest {
             "POST /api/wallet/recharge",
             "DELETE /api/collaborator/self/{surveyId}",
             "POST /api/collaborator/self/{surveyId}/apply",
+            "GET /api/collaborator/invitations",
+            "POST /api/collaborator/invitations/{id}/accept",
+            "POST /api/collaborator/invitations/{id}/reject",
             "GET /api/review/list",
             "POST /api/review/{id}/handle",
             "GET /api/review/my",
@@ -188,6 +201,7 @@ class EndpointAuthMatrixTest {
             "GET /api/collaborator/shared",
             "GET /api/survey/{surveyId}/collaborators",
             "POST /api/survey/{surveyId}/collaborators",
+            "POST /api/survey/{surveyId}/collaborators/{targetUserId}/revoke",
             "PUT /api/survey/{surveyId}/collaborators/{targetUserId}",
             "DELETE /api/announcement/delete/{id}",
             "DELETE /api/demo/reset",
@@ -230,6 +244,7 @@ class EndpointAuthMatrixTest {
             "GET /api/survey/result/{shareCode}",
             "GET /api/survey/share/{shareCode}",
             "GET /api/survey/system-overview",
+            "GET /api/system/statistics",
             "GET /api/survey/template-categories",
             "GET /api/survey/templates",
             "GET /api/survey/version/diff/{fromId}/{toId}",
@@ -355,6 +370,13 @@ class EndpointAuthMatrixTest {
     private TemplateCategoryMapper templateCategoryMapper;
 
     /**
+     * ★ 系统统计（资源维度）新增：/api/system/statistics 会读 information_schema 与主要业务表。
+     *   不 mock 的话它拿真实代理访问被 mock 掉的数据源 → 500，看起来像权限坏了。
+     */
+    @MockitoBean
+    private SystemResourceMapper systemResourceMapper;
+
+    /**
      * ★ H5 新增：钱包相关 Mapper 也要 mock。
      *   SurveyService / UserService 现在依赖 WalletService（它再依赖这两个 Mapper），
      *   不 mock 的话它们会拿真实代理去访问被 mock 掉的数据源 —— 一旦某条用例
@@ -368,12 +390,15 @@ class EndpointAuthMatrixTest {
     private String userToken;
     private String otherUserToken;
     private String adminToken;
+    /** 次级管理员：总览按模块权限裁剪字段的用例。 */
+    private String subadminToken;
 
     private static final int USER_ID = 1;
     private static final int OTHER_ID = 2;
     private static final int ADMIN_ID = 3;
     private static final int DELETED_ID = 4;
     private static final int STALE_TOKEN_ID = 5;
+    private static final int SUBADMIN_ID = 8;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -384,6 +409,7 @@ class EndpointAuthMatrixTest {
                 case USER_ID -> user(USER_ID, "user1", "user", null);
                 case OTHER_ID -> user(OTHER_ID, "user2", "user", null);
                 case ADMIN_ID -> user(ADMIN_ID, "admin1", "admin", null);
+                case SUBADMIN_ID -> user(SUBADMIN_ID, "sub1", "subadmin", null);
                 // 已注销 / 已物理删除：findById 查不到 → 过滤器必须 401
                 case DELETED_ID -> null;
                 // 改过密码：token_valid_after 晚于这枚 token 的 iat → 过滤器必须 401
@@ -436,26 +462,33 @@ class EndpointAuthMatrixTest {
         userToken = jwtUtil.generateToken(USER_ID, "user1", "user");
         otherUserToken = jwtUtil.generateToken(OTHER_ID, "user2", "user");
         adminToken = jwtUtil.generateToken(ADMIN_ID, "admin1", "admin");
+        subadminToken = jwtUtil.generateToken(SUBADMIN_ID, "sub1", "subadmin");
     }
 
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 110；且公开 13 + 管理 37 + 其余 60")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 115；且公开 13 + 管理 36 + 管理端人员 2 + 其余 64")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(110, registered.size(),
+        assertEquals(115, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/AUDIT.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
         assertEquals(13, PUBLIC.size(), "公开档固定 13 条（新增 GET /api/survey/result/{shareCode}）");
-        assertEquals(37, ADMIN.size(), "管理档固定 37 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
-        assertEquals(110 - 13 - 37, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
-        // 两档不能交叉
+        assertEquals(36, ADMIN.size(), "管理档固定 36 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
+        assertEquals(2, STAFF_ONLY.size(), "管理端人员档固定 2 条（系统总览 + 系统统计）");
+        assertEquals(115 - 13 - 36 - 2,
+                ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size() - STAFF_ONLY.size());
+        // 三档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");
+            assertFalse(STAFF_ONLY.contains(p), p + " 不能同时属于公开档与管理端人员档");
+        }
+        for (String p : STAFF_ONLY) {
+            assertFalse(ADMIN.contains(p), p + " 不能同时属于管理档与管理端人员档");
         }
     }
 
@@ -472,7 +505,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 非公开的 97 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
+    @DisplayName("★ 非公开的 102 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
     void protectedEndpoints_withoutToken_shouldBe401() throws Exception {
         for (String endpoint : ALL_ENDPOINTS) {
             if (PUBLIC.contains(endpoint)) {
@@ -485,9 +518,11 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 管理档 37 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
+    @DisplayName("★ 管理档 36 + 管理端人员档 1：普通用户 token → 403 +「无权限」（切面/方法闸门真的生效了）")
     void adminEndpoints_withNormalUser_shouldBe403Forbidden() throws Exception {
-        for (String endpoint : ADMIN) {
+        List<String> restricted = new ArrayList<>(ADMIN);
+        restricted.addAll(STAFF_ONLY);
+        for (String endpoint : restricted) {
             MvcResult r = mvc.perform(build(endpoint).header("Authorization", "Bearer " + userToken))
                     .andReturn();
             assertEquals(403, r.getResponse().getStatus(),
@@ -512,6 +547,7 @@ class EndpointAuthMatrixTest {
                 "GET /api/survey/page",
                 "GET /api/survey/list-with-response-count",
                 "GET /api/survey/system-overview",
+                "GET /api/system/statistics",
                 "GET /api/survey/template-categories",
                 "GET /api/log/page",
                 "GET /api/error-log/page",
@@ -522,6 +558,50 @@ class EndpointAuthMatrixTest {
             mvc.perform(build(endpoint).header("Authorization", "Bearer " + adminToken))
                     .andExpect(status().isOk());
         }
+    }
+
+    @Test
+    @DisplayName("★ system-overview：subadmin 无模块权限 → 200 空对象；有 survey:manage → 只带问卷字段")
+    void systemOverview_subadminFieldsFollowPermissions() throws Exception {
+        // 没有任何模块权限：staff 仍可进，只是没有字段
+        mvc.perform(get("/api/survey/system-overview")
+                        .header("Authorization", "Bearer " + subadminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").doesNotExist())
+                .andExpect(jsonPath("$.users").doesNotExist());
+
+        // 授予 survey:manage：只出现问卷模块字段，用户/模板/钱包都不返回
+        when(roleMapper.findPermissionCodesByUserId(SUBADMIN_ID))
+                .thenReturn(List.of("survey:manage"));
+
+        mvc.perform(get("/api/survey/system-overview")
+                        .header("Authorization", "Bearer " + subadminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.templates").doesNotExist())
+                .andExpect(jsonPath("$.users").doesNotExist())
+                .andExpect(jsonPath("$.walletBalance").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("★ system/statistics：subadmin 无模块权限 → 200 空对象；有 survey:manage → 只有 survey 模块")
+    void systemStatistics_subadminFieldsFollowPermissions() throws Exception {
+        mvc.perform(get("/api/system/statistics")
+                        .header("Authorization", "Bearer " + subadminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.survey").doesNotExist())
+                .andExpect(jsonPath("$.resource").doesNotExist());
+
+        when(roleMapper.findPermissionCodesByUserId(SUBADMIN_ID))
+                .thenReturn(List.of("survey:manage"));
+
+        mvc.perform(get("/api/system/statistics")
+                        .header("Authorization", "Bearer " + subadminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.survey").exists())
+                .andExpect(jsonPath("$.user").doesNotExist())
+                .andExpect(jsonPath("$.wallet").doesNotExist())
+                .andExpect(jsonPath("$.resource").doesNotExist());
     }
 
     // ==================== 五、身份头不可伪造 ====================
