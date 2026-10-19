@@ -145,15 +145,18 @@
         </div>
       </el-card>
 
-      <!-- 接龙报名名单：只显示称呼与时间（后端只返回这两个字段），不暴露其它答案 -->
+      <!-- 接龙报名名单：只显示称呼、时间与签到状态（后端只返回这几个字段），不暴露其它答案 -->
       <el-card v-if="participants.length" class="mb-20 participants-card">
         <div class="participants-head">
           📋 报名名单（{{ participants.length }} 位）
-          <span class="participants-tip">按报名先后排列</span>
+          <span class="participants-tip">
+            按报名先后排列<template v-if="participants.length >= 50">，仅显示前 50 位</template>
+          </span>
         </div>
         <div v-for="p in participants" :key="p.seq" class="participant-row">
           <span class="participant-seq">{{ p.seq }}</span>
           <span class="participant-name">{{ p.name }}</span>
+          <el-tag v-if="p.checkedIn === 1" type="success" size="small" effect="plain">已签到</el-tag>
           <span class="participant-time">{{ p.submitTime }}</span>
         </div>
       </el-card>

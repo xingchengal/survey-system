@@ -664,6 +664,8 @@ const SCENE_TEMPLATES = [
     code: 'relay', emoji: '🔗', name: '接龙', desc: '姓名 + 联系方式 + 人数',
     title: '活动接龙',
     description: '按顺序接龙报名，填好信息即可；人数或备注有变请重新提交一份。',
+    // 接龙的核心就是公开名单：创建时直接打开，否则用户还得进设置手动开
+    showParticipants: 1,
     questions: [
       { type: 3, title: '姓名', required: 1 },
       { type: 3, title: '手机号', required: 1 },
@@ -675,6 +677,9 @@ const SCENE_TEMPLATES = [
     code: 'checkin', emoji: '🎟️', name: '报名签到', desc: '姓名 + 手机号 + 场次',
     title: '活动报名签到',
     description: '请先填写报名信息；到场后向工作人员报手机号完成签到。',
+    // 报名签到同时要名单（谁报了）与核销（谁到了）
+    checkinEnabled: 1,
+    showParticipants: 1,
     questions: [
       { type: 3, title: '姓名', required: 1 },
       { type: 3, title: '手机号', required: 1 },
@@ -739,7 +744,7 @@ export default {
       visibilityHandler: null,
       createDialogVisible: false,
       createTab: 'blank',
-      newForm: { title: '', description: '', scene: 'basic' },
+      newForm: { title: '', description: '', scene: 'basic', checkinEnabled: 0, showParticipants: 0 },
       /** 场景模板目录（纯前端预设，选择后预填标题/描述/题目） */
       sceneTemplates: SCENE_TEMPLATES,
       /** 当前场景带出的题目（创建时随问卷一起保存） */
@@ -1151,11 +1156,14 @@ export default {
       this.templateCategory = '全部'
     },
 
-    /** 选场景：预填标题/描述与题目（基础问卷 = 全部清空） */
+    /** 选场景：预填标题/描述与题目（基础问卷 = 全部清空），并带上该场景需要的开关 */
     pickScene(scene) {
       this.newForm.scene = scene.code
       this.newForm.title = scene.title || ''
       this.newForm.description = scene.description || ''
+      // 接龙 / 报名签到场景在创建时就打开对应开关；其余场景归零
+      this.newForm.checkinEnabled = scene.checkinEnabled || 0
+      this.newForm.showParticipants = scene.showParticipants || 0
       this.sceneQuestions = (scene.questions || []).map((q) => ({
         ...q,
         options: [...(q.options || [])]
@@ -1186,7 +1194,10 @@ export default {
         // 其余服务端强制字段（status/shareCode/isTemplate/deleted）也不传，避免误以为客户端能指定。
         const data = await api.survey.add({
           title: this.newForm.title,
-          description: this.newForm.description
+          description: this.newForm.description,
+          // 场景模板自带的开关：接龙开公开名单、报名签到再加签到核销
+          checkinEnabled: this.newForm.checkinEnabled,
+          showParticipants: this.newForm.showParticipants
         })
         if (data.id) {
           // 场景模板：把预设题目一并落库（失败不阻塞进入编辑器，用户还能手动加题）

@@ -1,4 +1,4 @@
-# AUDIT · 端点权限与事实矩阵（全量 **126** 个方法级端点）
+# AUDIT · 端点权限与事实矩阵（全量 **127** 个方法级端点）
 
 > **定位**：四份主文档之一，**项目数字的唯一出处**（端点 / 表 / 测试 / 页面）。
 > **用途**：动任何 Controller 之前，先在下面四张明细表里找到那个端点，
@@ -7,7 +7,7 @@
 > （问卷是否已发布 / 是否在回收站 / 是否已结束……）。
 > **端点变更历史**（哪一轮加了哪几条、分档怎么订正）见 `HISTORY.md`；本文件只写**现状**。
 >
-> **当前口径（2026-10-19 按代码重核，四处一致）**：**126** 端点 = 公开 **13** + 需登录 **42** + 归属 **31** + 管理 **40**；
+> **当前口径（2026-10-19 按代码重核，四处一致）**：**127** 端点 = 公开 **13** + 需登录 **42** + 归属 **32** + 管理 **40**；
 > Controller **18**；复核命令见 §八，**改动端点后必须重跑**。
 >
 > ★ 改这张表时必须守的规矩：
@@ -41,11 +41,11 @@
 
 | 项 | 值 | 复核方式 |
 |---|---|---|
-| 方法级端点 | **126** | §八 注解计数 |
-| 分档 | 公开 **13** / 需登录 **42** / 归属 **31** / 管理 **40** | §三~§六 活行 |
+| 方法级端点 | **127** | §八 注解计数 |
+| 分档 | 公开 **13** / 需登录 **42** / 归属 **32** / 管理 **40** | §三~§六 活行 |
 | Controller | **20** | `controller/*.java` |
 | 数据库表 | **25** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **471 例 / 51 类** | `mvnw -o test` |
+| 后端测试 | **473 例 / 51 类** | `mvnw -o test` |
 | 前端页面 | **27** | `src/views/**/*.vue` |
 | 前端 API 模块 | **18** | `src/api/*.js` |
 | 具名路由 | **29** | `router/index.js` |
@@ -56,9 +56,9 @@
 |---|---|
 | 公开（白名单，不需登录） | **13** |
 | 需要登录（只能碰自己的数据） | **42** |
-| 需要登录 **+ 归属校验** | **31** |
+| 需要登录 **+ 归属校验** | **32** |
 | 需要**管理员** | **40** |
-| **合计** | **126** |
+| **合计** | **127** |
 
 > ★ 历史分档订正（“总数对、分档错”、明细表漏登记 12 条等）见 `HISTORY.md` 的「审计」条目；
 >   本表只写当前口径。
@@ -147,7 +147,7 @@
 
 ---
 
-## 五、需要登录 + 归属校验（**31 个**）
+## 五、需要登录 + 归属校验（**32 个**）
 
 > ★ 第十九轮订正：表头原写 16，表体活行是 **15** —— 表头与表体不一致时**以表体为准**（同样要复核）。
 > ★ 第二十四轮：新增 `GET /api/answer/statistics/survey/{surveyId}`（整份问卷统计，一次取回）⇒ 15 → **16**。
@@ -178,6 +178,7 @@
 | `GET /api/answer/statistics/survey/{surveyId}` | 整份问卷统计（一次取回：题目 + 每题分布/文本 + 答卷数） | ✅ `requireSurveyOwnership` 与上面几条同一口径（admin 放行） |
 | `GET /api/answer/quality/{surveyId}` | 答卷质控摘要（可疑份数 / 原因分布 / 最近 50 条样本） | ✅ `requireSurveyOwnership` 同一口径。★ 只打标、不删除 |
 | `PUT /api/answer/checkin/{answerId}` | 签到 / 取消签到（`?checkedIn=true|false`）。★ `requireSurveyOwnership`（admin 放行）；问卷未启用签到（`checkin_enabled=1`）→ 400；只改签到状态与时间，不动答卷内容与分数 | ✅ |
+| `GET /api/answer/participants/manage/{surveyId}` | 作者端报名 / 签到名单（最多 500 条，含签到状态与签到时间）。★ 归属校验（`requireSurveyOwnership`，admin 放行），不要求作者开启「公开报名名单」——那是给访客看的前 50 位。★ `JwtAuthFilter` 白名单前缀必须排除 `participants/manage/`，否则未登录会 400 而不是 401 | ✅ |
 | `GET /api/survey/version/list/{surveyId}` | 版本列表（新的在前，**不含**题目快照 JSON） | ✅ `OwnershipGuard.requireOwnerOrAdmin`（admin 放行） |
 | `GET /api/survey/version/{versionId}` | 单个版本详情（**含**题目快照 JSON） | ✅ 同上（先按版本反查 surveyId，再校归属） |
 | `GET /api/survey/version/diff/{fromId}/{toId}` | 两个版本的差异 | ✅ 同上；service 还会再校验"两个版本属于同一份问卷" |
@@ -231,7 +232,7 @@
 | `POST /api/survey/from-template/{templateId}` | 从模板创建 | ✅ |
 | `POST /api/answer/submit/{surveyId}` | 登录态提交。★ **「仅限登录用户填写」的问卷只接受这条路径**（`require_login=1`）：`submit-share` 的 userId 恒为 null，会被 400 拒收。它同时是唯一能把答题人身份写进 `t_answer.user_id` 的路径，实名答卷因此受 `uk_survey_user`（一人一份）约束。第十六轮曾按"前端零调用"删除、随即恢复，理由见 `AnswerController.submit` 的 javadoc |
 | `GET /api/answer/score/{surveyId}` | 查**自己**在某份问卷的成绩（`{totalScore,earnedScore,passScore,passed,submittedAt}`）。★ 只按 `surveyId + X-User-Id` 定位，不接受 answerId / 不带 userId 参数；匿名答卷（`user_id IS NULL`）查不到 → 400「你还没有提交过这份问卷」；未开判分的问卷 → 400。 |
-| `GET /api/answer/my` | 我答过的问卷（**分页**：`pageNum`/`pageSize`，默认 1/10、上限 100）。★ 只按 `X-User-Id` 查，不接受 userId 参数；匿名答卷没有身份可回溯、不会出现；已删除/已结束的问卷仍保留记录（前端按 `deleted`/`status` 禁用入口）。 |
+| `GET /api/answer/my` | 我答过的问卷（**分页**：`pageNum`/`pageSize`，默认 1/10、上限 100）。★ 只按 `X-User-Id` 查，不接受 userId 参数；匿名答卷没有身份可回溯、不会出现；已删除/已结束的问卷仍保留记录（前端按 `deleted`/`status` 禁用入口）。★ 可选筛选 `keyword`（问卷标题模糊）与 `startDate`/`endDate`（提交日期，闭区间），总数与列表同一 WHERE 口径。 |
 | `GET /api/answer/my/{answerId}` | 我的某份答卷详情（逐题回放：题目、我的答案、对错、正确答案）。★ 权限按**答卷归属**校验（`answer.userId == 当前用户`），不是问卷归属 —— 答题人不是作者，不能复用 `/answer/detail/{answerId}`；别人的 answerId 一律 400「无权查看该答卷」。★ `correctAnswers` 只在作者开启「提交后显示答案」时返回。 |
 | `POST /api/ai/generate` | AI 生成问卷 | ✅（正确用 `X-User-Id`，是已修归属时的现成模板） |
 | `GET /api/notification/list` | 我的通知 | ✅ |

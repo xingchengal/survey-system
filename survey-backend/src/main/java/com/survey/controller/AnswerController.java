@@ -247,14 +247,18 @@ public class AnswerController {
     /**
      * 我答过的问卷（分页）：只查自己的，不接受 userId 参数。
      * 匿名答卷查不到（没有身份就没有"我的记录"）；标题/分数由一条 JOIN 取回，前端不再 N+1。
+     * 可选筛选：问卷标题关键词 + 提交日期范围（yyyy-MM-dd，闭区间）。
      */
     @Operation(summary = "我答过的问卷（分页）")
     @GetMapping("/my")
     public PageResult<MyAnswerItem> myAnswers(
             @RequestHeader(value = "X-User-Id", required = false) Integer userId,
             @RequestParam(defaultValue = "1") int pageNum,
-            @RequestParam(defaultValue = "10") int pageSize) {
-        return answerService.myAnswers(userId, pageNum, pageSize);
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        return answerService.myAnswers(userId, pageNum, pageSize, keyword, startDate, endDate);
     }
 
     /**
@@ -287,6 +291,20 @@ public class AnswerController {
             throw new BizException("问卷不存在");
         }
         return answerService.listParticipants(survey);
+    }
+
+    /**
+     * 作者端报名 / 签到名单（最多 500 条）：归属复用 requireSurveyOwnership（admin 放行）。
+     * 与公开名单分开：这里带签到状态与签到时间，且不要求作者开启「公开报名名单」。
+     */
+    @Operation(summary = "报名 / 签到名单（作者）")
+    @GetMapping("/participants/manage/{surveyId}")
+    public Map<String, Object> manageParticipants(
+            @PathVariable Integer surveyId,
+            @RequestHeader(value = "X-User-Id", required = false) Integer userId,
+            @RequestHeader(value = "X-User-Role", required = false) String role) {
+        requireSurveyOwnership(surveyId, userId, role);
+        return answerService.listParticipantsForOwner(surveyId);
     }
 
     /**

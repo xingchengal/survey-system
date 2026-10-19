@@ -168,6 +168,10 @@
             @click="publishSurvey"
           >{{ surveyInfo.status === 2 ? '重新发布' : '立即发布' }}</el-button>
           <el-tag v-else-if="surveyInfo.status === 1" type="success" effect="light" round>已发布（可继续修改）</el-tag>
+          <!-- 考试总分常驻在操作栏：不用打开设置也能看到当前分值合计 -->
+          <el-tag v-if="surveyInfo.gradeEnabled === 1" type="warning" effect="light" round>
+            考试总分 {{ examTotalScore }} 分
+          </el-tag>
           <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
           <el-button :disabled="inRecycleBin || !canEditSurvey" @click="settingsVisible = true">设置</el-button>
         </template>
@@ -243,8 +247,8 @@
           {{ qTypeLabel(q.type) }}
         </el-tag>
         <el-checkbox class="ml-10" v-model="q.required" :true-value="1" :false-value="0">必填</el-checkbox>
-        <!-- 分值：0 = 不参与判分；只有单选/多选/下拉显示 -->
-        <div v-if="qIsGradable(q.type)" class="q-score">
+        <!-- 分值：只在开启考试模式时出现；0 = 不参与判分 -->
+        <div v-if="qIsGradable(q.type) && surveyInfo.gradeEnabled === 1" class="q-score">
           <span class="q-score-label">分值</span>
           <el-input-number
             v-model="q.score"

@@ -10,6 +10,30 @@
     </div>
 
     <el-card class="mb-16">
+      <!-- 筛选：标题关键词 + 提交日期（闭区间），改条件后回到第 1 页 -->
+      <div class="filter-bar">
+        <el-input
+          v-model="filters.keyword"
+          placeholder="按问卷标题搜索"
+          clearable
+          style="width: 220px;"
+          @keyup.enter="search"
+          @clear="search"
+        />
+        <el-date-picker
+          v-model="filters.range"
+          type="daterange"
+          value-format="yyyy-MM-dd"
+          range-separator="至"
+          start-placeholder="提交开始"
+          end-placeholder="提交结束"
+          style="width: 260px;"
+          @change="search"
+        />
+        <el-button type="primary" @click="search">查询</el-button>
+        <el-button @click="reset">重置</el-button>
+      </div>
+
       <el-skeleton v-if="loading" :rows="5" animated />
       <el-table
         v-else
@@ -121,6 +145,10 @@ export default {
       total: 0,
       pageNum: 1,
       pageSize: 10,
+      /** 筛选条件：关键词 + 日期范围（value-format=yyyy-MM-dd） */
+      filters: { keyword: '', range: [] },
+      /** 请求序号：日期控件 change 与重置会连续发请求，慢响应不能覆盖新结果 */
+      loadSeq: 0,
       detailVisible: false,
       detailLoading: false,
       detail: null
@@ -131,9 +159,16 @@ export default {
   },
   methods: {
     async load() {
+      const seq = ++this.loadSeq
       this.loading = true
       try {
-        const data = await api.answer.my(this.pageNum, this.pageSize)
+        const range = this.filters.range || []
+        const data = await api.answer.my(this.pageNum, this.pageSize, {
+          keyword: this.filters.keyword.trim(),
+          startDate: range[0] || undefined,
+          endDate: range[1] || undefined
+        })
+        if (seq !== this.loadSeq) return
         this.rows = data.list || []
         this.total = data.total || 0
         // ★ 后端把页码夹在 [1,10000]；当前页超界（数据被删）时回退第 1 页，否则会停在空页
@@ -144,8 +179,17 @@ export default {
       } catch {
         // 失败提示由 http.js 统一弹出；保持当前列表即可
       } finally {
-        this.loading = false
+        if (seq === this.loadSeq) this.loading = false
       }
+    },
+    search() {
+      this.pageNum = 1
+      this.load()
+    },
+    reset() {
+      this.filters = { keyword: '', range: [] }
+      this.pageNum = 1
+      this.load()
     },
     onPageChange(page) {
       this.pageNum = page
@@ -187,6 +231,13 @@ export default {
   margin: 0 0 16px;
   color: var(--ink-3, #64748b);
   font-size: 13px;
+}
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
 }
 .muted {
   color: var(--ink-3, #94a3b8);

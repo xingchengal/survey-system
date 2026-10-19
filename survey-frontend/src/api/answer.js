@@ -44,9 +44,15 @@ export default {
    * 我答过的问卷（分页）。
    * 只返回登录态提交的记录：匿名答卷没有 user_id，永远查不到。
    * 返回 `{ total, list, pageNum, pageSize }`；list 项含问卷标题、分数、状态与 shareCode。
+   * filters 可选：`{ keyword, startDate, endDate }`（日期 yyyy-MM-dd，闭区间）。
    */
-  my: (pageNum = 1, pageSize = 10) =>
-    http.get(`/api/answer/my?pageNum=${pageNum}&pageSize=${pageSize}`),
+  my: (pageNum = 1, pageSize = 10, filters = {}) => {
+    const params = { pageNum, pageSize }
+    if (filters.keyword) params.keyword = filters.keyword
+    if (filters.startDate) params.startDate = filters.startDate
+    if (filters.endDate) params.endDate = filters.endDate
+    return http.get('/api/answer/my', params)
+  },
 
   /**
    * 我某份答卷的详情（逐题回放）。
@@ -57,6 +63,9 @@ export default {
 
   /** 公开报名名单（接龙用，前 50 位）。作者没开启时后端 400，页面静默不显示即可 */
   participants: (shareCode) => http.get(`/api/answer/participants/${shareCode}`),
+
+  /** 作者端报名 / 签到名单：`{ total, checkedInCount, list }`（问卷归属，最多 500 条） */
+  ownerParticipants: (surveyId) => http.get(`/api/answer/participants/manage/${surveyId}`),
 
   /** 签到 / 取消签到（作者；问卷需在设置里启用签到核销） */
   checkin: (answerId, checkedIn = true) =>

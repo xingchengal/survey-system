@@ -76,6 +76,49 @@
         </div>
       </div>
 
+      <!-- 报名 / 签到名单：启用签到核销后给作者看全量名单（公开页只显示前 50 位） -->
+      <el-card v-if="checkinEnabled" class="mb-20 roster-card">
+        <template #header>
+          <div class="flex-between">
+            <span class="text-bold">📋 报名 / 签到名单</span>
+            <div class="roster-summary">
+              <el-tag size="small" effect="plain">报名 {{ roster.total }}</el-tag>
+              <el-tag size="small" type="success" effect="plain">已签到 {{ roster.checkedInCount }}</el-tag>
+              <el-tag size="small" type="info" effect="plain">签到率 {{ rosterRate }}%</el-tag>
+              <el-button link type="primary" size="small" :loading="rosterLoading" @click="loadRoster">刷新</el-button>
+            </div>
+          </div>
+        </template>
+        <el-empty v-if="roster.list.length === 0" description="还没有报名记录" :image-size="70" />
+        <el-table v-else :data="roster.list" max-height="320" size="small">
+          <el-table-column prop="seq" label="#" width="56" align="center" />
+          <el-table-column prop="name" label="称呼" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="submitTime" label="报名时间" width="180" />
+          <el-table-column label="签到" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.checkedIn === 1" type="success" size="small">已签到</el-tag>
+              <span v-else class="text-gray">未签到</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="签到时间" width="180">
+            <template #default="{ row }">{{ row.checkedInAt || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="96" align="center">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                plain
+                :type="row.checkedIn === 1 ? 'info' : 'primary'"
+                @click="toggleRosterCheckin(row)"
+              >{{ row.checkedIn === 1 ? '取消' : '签到' }}</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="roster-tip">
+          按报名先后排列，最多显示 500 位；这里的签到状态与「查看答卷」里的核销是同一份数据。
+        </p>
+      </el-card>
+
       <!-- 题目列表 -->
       <el-empty v-if="questions.length === 0" description="该问卷还没有题目" />
 
@@ -322,6 +365,9 @@ export default {
       scoreSummary: null,
       /** 问卷是否启用签到核销（决定答卷列表显不显示签到列） */
       checkinEnabled: false,
+      /** 作者端报名 / 签到名单：{ total, checkedInCount, list } */
+      roster: { total: 0, checkedInCount: 0, list: [] },
+      rosterLoading: false,
       questions: [],
       chartInstances: {},
       /** 首屏 / 切换口径时的骨架屏 */
@@ -351,6 +397,11 @@ export default {
     }
   },
   computed: {
+    /** 签到率：报名 0 人时给 0，不显示 NaN */
+    rosterRate() {
+      if (!this.roster.total) return 0
+      return Math.round((this.roster.checkedInCount / this.roster.total) * 100)
+    },
     /** 顶部概览卡（普通问卷 4 张；考试问卷再加「平均分 / 及格率」两张） */
     tiles() {
       const suspicious = this.quality ? this.quality.suspicious : 0
@@ -438,6 +489,7 @@ export default {
         // 判分摘要：普通问卷后端给 null，这里不做兜底数字
         this.scoreSummary = data.scoreSummary || null
         this.checkinEnabled = data.checkinEnabled === true
+        if (this.checkinEnabled) this.loadRoster()
 
         // 后端每题返回 { question, chartData, textAnswers }，摊平成模板用的结构。
         this.questions = (data.questions || []).map(item => ({
@@ -806,10 +858,60 @@ export default {
       try {
         await api.answer.checkin(row.id, next)
         row.checkedIn = next ? 1 : 0
+        // 名单卡里的同一份答卷也同步，避免两处显示不一致
+        const rosterRow = this.roster.list.find(p => p.answerId === row.id)
+        if (rosterRow) {
+          rosterRow.checkedIn = row.checkedIn
+          rosterRow.checkedInAt = next ? this.nowDateTime() : null
+          this.roster.checkedInCount = Math.max(0, this.roster.checkedInCount + (next ? 1 : -1))
+        }
         ElMessage.success(next ? '已签到' : '已取消签到')
       } catch {
         // 失败提示由 http.js 统一弹出（如"该问卷未启用签到核销"）
       }
+    },
+
+    /** 作者端名单：启用签到核销时加载（失败静默，名单只是辅助信息） */
+    async loadRoster() {
+      this.rosterLoading = true
+      try {
+        const data = await api.answer.ownerParticipants(this.surveyId)
+        this.roster = {
+          total: data.total || 0,
+          checkedInCount: data.checkedInCount || 0,
+          list: data.list || []
+        }
+      } catch {
+        // 失败静默：不影响统计主体
+      } finally {
+        this.rosterLoading = false
+      }
+    },
+
+    /** 在名单卡里签到 / 取消（与答卷弹窗共用同一个核销接口） */
+    async toggleRosterCheckin(row) {
+      const next = row.checkedIn !== 1
+      try {
+        await api.answer.checkin(row.answerId, next)
+        row.checkedIn = next ? 1 : 0
+        row.checkedInAt = next ? this.nowDateTime() : null
+        this.roster.checkedInCount = Math.max(0, this.roster.checkedInCount + (next ? 1 : -1))
+        // 答卷弹窗里同一行也同步
+        const answerRow = this.answers.find(a => a.id === row.answerId)
+        if (answerRow) {
+          answerRow.checkedIn = row.checkedIn
+        }
+        ElMessage.success(next ? '已签到' : '已取消签到')
+      } catch {
+        // 失败提示由 http.js 统一弹出
+      }
+    },
+
+    /** 本地生成 `yyyy-MM-dd HH:mm:ss`，只用于核销后立即回显（刷新以后端为准） */
+    nowDateTime() {
+      const d = new Date()
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
     },
 
     /** 某题在答卷详情里的第一行下标（逐题对错标签只在第一行显示一次） */
@@ -1354,5 +1456,20 @@ html[data-theme="dark"] .rank-bar-wrap {
   font-size: 12px;
   color: var(--ink-3);
   line-height: 1.6;
+}
+/* 报名 / 签到名单 */
+.roster-card :deep(.el-card__body) {
+  padding-top: 10px;
+}
+.roster-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.roster-tip {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
 }
 </style>

@@ -147,7 +147,9 @@ public class JwtAuthFilter implements Filter {
                 || uri.startsWith("/api/survey/view/")
                 || uri.startsWith("/api/question/list/")
                 || uri.startsWith("/api/answer/submit-share/")
-                || uri.startsWith("/api/answer/participants/")
+                // manage 子路径是作者端名单（需登录 + 归属校验），不能被公开名单的前缀一起放行
+                || (uri.startsWith("/api/answer/participants/")
+                    && !uri.startsWith("/api/answer/participants/manage/"))
                 || uri.startsWith("/api/announcement/active")
                 || uri.startsWith("/api/health");
     }

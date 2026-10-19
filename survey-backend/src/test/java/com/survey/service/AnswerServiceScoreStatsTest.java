@@ -5,6 +5,7 @@ import com.survey.common.PageResult;
 import com.survey.common.SurveyStatus;
 import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.dto.MyAnswerItem;
+import com.survey.dto.OwnerParticipantItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.entity.Answer;
 import com.survey.entity.AnswerDetail;
@@ -188,22 +189,72 @@ class AnswerServiceScoreStatsTest {
     @Test
     @DisplayName("我的答题记录：按当前用户分页（offset=(页-1)×条数）；无记录不查列表；匿名为 400")
     void myAnswers_paginationAndIdentity() {
-        when(answerMapper.countByUser(9)).thenReturn(0);
-        PageResult<MyAnswerItem> empty = answerService.myAnswers(9, 1, 10);
+        when(answerMapper.countByUser(9, null, null, null)).thenReturn(0);
+        PageResult<MyAnswerItem> empty = answerService.myAnswers(9, 1, 10, null, null, null);
         assertEquals(0, empty.getTotal());
-        verify(answerMapper, never()).pageByUser(any(), anyLong(), anyInt());
+        verify(answerMapper, never()).pageByUser(any(), any(), any(), any(), anyLong(), anyInt());
 
-        when(answerMapper.countByUser(9)).thenReturn(25);
+        when(answerMapper.countByUser(9, null, null, null)).thenReturn(25);
         MyAnswerItem item = new MyAnswerItem();
         item.setSurveyTitle("期中测验");
-        when(answerMapper.pageByUser(eq(9), eq(20L), eq(10))).thenReturn(List.of(item));
+        when(answerMapper.pageByUser(eq(9), any(), any(), any(), eq(20L), eq(10))).thenReturn(List.of(item));
 
-        PageResult<MyAnswerItem> page = answerService.myAnswers(9, 3, 10);
+        PageResult<MyAnswerItem> page = answerService.myAnswers(9, 3, 10, null, null, null);
         assertEquals(25, page.getTotal());
         assertEquals(3, page.getPageNum());
         assertEquals(1, page.getList().size(), "第 3 页的 offset 必须是 20");
 
-        assertThrows(BizException.class, () -> answerService.myAnswers(null, 1, 10));
+        assertThrows(BizException.class, () -> answerService.myAnswers(null, 1, 10, null, null, null));
+    }
+
+    @Test
+    @DisplayName("我的答题记录：关键词去空白、日期按闭区间解析；日期格式非法 400")
+    void myAnswers_appliesFilters() {
+        LocalDateTime start = LocalDateTime.of(2026, 10, 1, 0, 0, 0);
+        LocalDateTime end = LocalDateTime.of(2026, 10, 31, 23, 59, 59);
+        when(answerMapper.countByUser(9, "期中", start, end)).thenReturn(0);
+
+        PageResult<MyAnswerItem> empty = answerService.myAnswers(9, 1, 10, "  期中  ", "2026-10-01", "2026-10-31");
+
+        assertEquals(0, empty.getTotal());
+        verify(answerMapper).countByUser(9, "期中", start, end);
+        assertThrows(BizException.class,
+                () -> answerService.myAnswers(9, 1, 10, null, "2026/10/01", null));
+    }
+
+    @Test
+    @DisplayName("作者端名单：报名/签到数走聚合，名单按接龙顺序带签到状态")
+    @SuppressWarnings("unchecked")
+    void ownerParticipants_summaryAndCheckin() {
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(survey(1, 0));
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("total", 25);
+        summary.put("checkedIn", 7);
+        when(answerMapper.countParticipants(SURVEY_ID)).thenReturn(summary);
+
+        Answer first = new Answer();
+        first.setId(1);
+        first.setSurveyId(SURVEY_ID);
+        first.setSubmitTime(LocalDateTime.of(2026, 10, 19, 9, 0));
+        first.setCheckedIn(1);
+        first.setCheckedInAt(LocalDateTime.of(2026, 10, 19, 9, 5));
+        Answer second = new Answer();
+        second.setId(2);
+        second.setSurveyId(SURVEY_ID);
+        second.setSubmitTime(LocalDateTime.of(2026, 10, 19, 9, 1));
+        second.setCheckedIn(0);
+        when(answerMapper.findFirstBySurveyId(SURVEY_ID, 500)).thenReturn(List.of(first, second));
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of());
+
+        Map<String, Object> result = answerService.listParticipantsForOwner(SURVEY_ID);
+
+        assertEquals(25, result.get("total"));
+        assertEquals(7, result.get("checkedInCount"));
+        List<OwnerParticipantItem> list = (List<OwnerParticipantItem>) result.get("list");
+        assertEquals(2, list.size());
+        assertEquals("匿名", list.get(0).name(), "没有文本题时称呼兜底为匿名");
+        assertEquals(1, list.get(0).checkedIn());
+        assertEquals(0, list.get(1).checkedIn());
     }
 
     @Test

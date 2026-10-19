@@ -4,6 +4,7 @@ import com.survey.entity.Answer;
 import com.survey.dto.MyAnswerItem;
 import org.apache.ibatis.annotations.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -116,22 +117,37 @@ public interface AnswerMapper {
     /**
      * 「我答过的问卷」分页：一条 JOIN 取回答卷 + 问卷标题/分数/状态，避免逐条再查问卷。
      * 排序带 id DESC 保证同秒提交时顺序确定；包含已删除/已结束问卷，由前端显示并禁用"去填写"。
+     * 可选按问卷标题关键词与提交时间筛选，三个条件都写在 WHERE 里，总数查询必须同口径。
      * @param offset 由 common.PageParams.offset 算好传入（防溢出/深翻页）
      */
-    @Select("SELECT a.id AS answer_id, a.survey_id, s.title AS survey_title, a.submit_time, " +
+    @Select("<script>SELECT a.id AS answer_id, a.survey_id, s.title AS survey_title, a.submit_time, " +
             "a.total_score, a.earned_score, a.is_passed, s.pass_score, s.grade_enabled, " +
             "s.share_code, s.status, s.deleted " +
             "FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
             "WHERE a.user_id = #{userId} " +
+            "<if test='keyword != null and keyword != \"\"'>AND s.title LIKE CONCAT('%', #{keyword}, '%') </if>" +
+            "<if test='startTime != null'>AND a.submit_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND a.submit_time &lt;= #{endTime} </if>" +
             "ORDER BY a.submit_time DESC, a.id DESC " +
-            "LIMIT #{pageSize} OFFSET #{offset}")
+            "LIMIT #{pageSize} OFFSET #{offset}</script>")
     List<MyAnswerItem> pageByUser(@Param("userId") Integer userId,
+                                  @Param("keyword") String keyword,
+                                  @Param("startTime") LocalDateTime startTime,
+                                  @Param("endTime") LocalDateTime endTime,
                                   @Param("offset") long offset,
                                   @Param("pageSize") int pageSize);
 
     /** 我答过的问卷总数（分页用）。与 pageByUser 同一 WHERE 口径，否则总数与列表对不上。 */
-    @Select("SELECT COUNT(*) FROM t_answer WHERE user_id = #{userId}")
-    int countByUser(Integer userId);
+    @Select("<script>SELECT COUNT(*) FROM t_answer a JOIN t_survey s ON s.id = a.survey_id " +
+            "WHERE a.user_id = #{userId} " +
+            "<if test='keyword != null and keyword != \"\"'>AND s.title LIKE CONCAT('%', #{keyword}, '%') </if>" +
+            "<if test='startTime != null'>AND a.submit_time &gt;= #{startTime} </if>" +
+            "<if test='endTime != null'>AND a.submit_time &lt;= #{endTime} </if>" +
+            "</script>")
+    int countByUser(@Param("userId") Integer userId,
+                    @Param("keyword") String keyword,
+                    @Param("startTime") LocalDateTime startTime,
+                    @Param("endTime") LocalDateTime endTime);
 
     /**
      * 签到 / 取消签到。checked_in_at 用 IF 一句写完：取消时同时清空时间，避免"未签到却有签到时间"。
@@ -145,6 +161,12 @@ public interface AnswerMapper {
     @Select("SELECT * FROM t_answer WHERE survey_id = #{surveyId} " +
             "ORDER BY submit_time ASC, id ASC LIMIT #{limit}")
     List<Answer> findFirstBySurveyId(@Param("surveyId") Integer surveyId, @Param("limit") int limit);
+
+    /** 报名 / 签到汇总：总答卷数 + 已签到数（作者端名单卡用，一次聚合不拉全表）。 */
+    @Select("SELECT COUNT(*) AS total, " +
+            "COALESCE(SUM(CASE WHEN checked_in = 1 THEN 1 ELSE 0 END), 0) AS checkedIn " +
+            "FROM t_answer WHERE survey_id = #{surveyId}")
+    Map<String, Object> countParticipants(@Param("surveyId") Integer surveyId);
 
     /** 批量取某题在若干答卷里的回答（报名名单用，避免 N+1）。返回 { aid, content }。 */
     @Select("<script>SELECT answer_id AS aid, content FROM t_answer_detail " +

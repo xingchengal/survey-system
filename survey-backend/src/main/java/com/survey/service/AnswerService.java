@@ -2,6 +2,7 @@ package com.survey.service;
 
 import com.survey.common.AnswerDisplay;
 import com.survey.common.BizException;
+import com.survey.common.DateRanges;
 import com.survey.common.Grader;
 import com.survey.common.MatrixConfig;
 import com.survey.common.PageParams;
@@ -16,6 +17,7 @@ import com.survey.entity.Option;
 import com.survey.entity.Question;
 import com.survey.dto.MyAnswerDetailDTO;
 import com.survey.dto.MyAnswerItem;
+import com.survey.dto.OwnerParticipantItem;
 import com.survey.dto.ParticipantItem;
 import com.survey.dto.SurveyStatisticsDTO;
 import com.survey.dto.SubmitResult;
@@ -76,6 +78,9 @@ public class AnswerService {
 
     /** 公开报名名单最多展示多少位（接龙通常几十人，再多页面也没人看）。 */
     private static final int MAX_PARTICIPANTS = 50;
+
+    /** 作者端名单一次最多返回多少条：作者要看全量，但接口必须有上限。 */
+    private static final int MAX_OWNER_PARTICIPANTS = 500;
 
     /** 日期题的格式（value-format 统一为 yyyy-MM-dd，避免客户端时区把日期差一天） */
     private static final java.util.regex.Pattern DATE_PATTERN =
@@ -776,17 +781,22 @@ public class AnswerService {
     /**
      * 我答过的问卷（分页）：身份只取当前登录用户；total=0 时不查列表。
      * 含已删除/已结束的问卷，能否打开由前端判断；页码/页大小一律过 PageParams。
+     * 可选筛选：问卷标题关键词 + 提交时间范围（yyyy-MM-dd，闭区间），总数与列表同一口径。
      */
-    public PageResult<MyAnswerItem> myAnswers(Integer userId, int pageNum, int pageSize) {
+    public PageResult<MyAnswerItem> myAnswers(Integer userId, int pageNum, int pageSize,
+                                              String keyword, String startDate, String endDate) {
         if (userId == null) {
             throw new BizException("请先登录后再查看答题记录");
         }
         int num = PageParams.pageNum(pageNum);
         int size = PageParams.pageSize(pageSize);
-        int total = answerMapper.countByUser(userId);
+        String kw = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        java.time.LocalDateTime start = DateRanges.startOfDay(startDate);
+        java.time.LocalDateTime end = DateRanges.endOfDay(endDate);
+        int total = answerMapper.countByUser(userId, kw, start, end);
         List<MyAnswerItem> list = total == 0
                 ? List.of()
-                : answerMapper.pageByUser(userId, PageParams.offset(num, size), size);
+                : answerMapper.pageByUser(userId, kw, start, end, PageParams.offset(num, size), size);
         return new PageResult<>(total, list, num, size);
     }
 
@@ -886,41 +896,88 @@ public class AnswerService {
         if (survey.getShowParticipants() == null || survey.getShowParticipants() != 1) {
             throw new BizException("作者未公开报名名单");
         }
-        List<Question> questions = questionMapper.findBySurveyId(survey.getId());
-        Integer nameQuestionId = questions.stream()
-                .filter(q -> QuestionType.isText(q.getType()) && q.getId() != null)
-                .map(Question::getId).findFirst()
-                .orElseGet(() -> questions.stream()
-                        .filter(q -> QuestionType.isTextarea(q.getType()) && q.getId() != null)
-                        .map(Question::getId).findFirst().orElse(null));
-
         List<Answer> answers = answerMapper.findFirstBySurveyId(survey.getId(), MAX_PARTICIPANTS);
         if (answers.isEmpty()) {
             return List.of();
         }
-        Map<Integer, String> nameByAnswer = new HashMap<>();
-        if (nameQuestionId != null) {
-            List<Integer> answerIds = answers.stream().map(Answer::getId)
-                    .filter(java.util.Objects::nonNull).collect(Collectors.toList());
-            if (!answerIds.isEmpty()) {
-                for (Map<String, Object> row : answerMapper.findContentsByAnswerIds(nameQuestionId, answerIds)) {
-                    Object aid = row.get("aid");
-                    Object content = row.get("content");
-                    if (aid instanceof Number n) {
-                        nameByAnswer.put(n.intValue(), content == null ? "" : content.toString());
-                    }
-                }
-            }
-        }
+        Map<Integer, String> nameByAnswer = loadNameMap(survey.getId(), answers);
         List<ParticipantItem> list = new ArrayList<>(answers.size());
         int seq = 1;
         for (Answer a : answers) {
             String name = nameByAnswer.get(a.getId());
             list.add(new ParticipantItem(seq++,
                     name == null || name.isBlank() ? "匿名" : name.trim(),
-                    a.getSubmitTime()));
+                    a.getSubmitTime(),
+                    a.getCheckedIn() != null && a.getCheckedIn() == 1 ? 1 : 0));
         }
         return list;
+    }
+
+    /**
+     * 作者端报名 / 签到名单：不要求作者开启「公开报名名单」（那是给访客看的），
+     * 但必须是问卷归属者（Controller 用 requireSurveyOwnership 校验）。最多 500 条。
+     */
+    public Map<String, Object> listParticipantsForOwner(Integer surveyId) {
+        Survey survey = surveyMapper.findById(surveyId);
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        Map<String, Object> summary = answerMapper.countParticipants(surveyId);
+        int total = summary == null ? 0 : toInt(summary.get("total"));
+        int checkedInCount = summary == null ? 0 : toInt(summary.get("checkedIn"));
+        List<Answer> answers = answerMapper.findFirstBySurveyId(surveyId, MAX_OWNER_PARTICIPANTS);
+        Map<Integer, String> nameByAnswer = loadNameMap(surveyId, answers);
+        List<OwnerParticipantItem> list = new ArrayList<>(answers.size());
+        int seq = 1;
+        for (Answer a : answers) {
+            String name = nameByAnswer.get(a.getId());
+            list.add(new OwnerParticipantItem(seq++,
+                    a.getId(),
+                    name == null || name.isBlank() ? "匿名" : name.trim(),
+                    a.getSubmitTime(),
+                    a.getCheckedIn() != null && a.getCheckedIn() == 1 ? 1 : 0,
+                    a.getCheckedInAt()));
+        }
+        Map<String, Object> result = new HashMap<>();
+        result.put("total", total);
+        result.put("checkedInCount", checkedInCount);
+        result.put("list", list);
+        return result;
+    }
+
+    private int toInt(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
+    }
+
+    /** 报名名单的称呼映射：取第一道单行文本题（没有则多行文本），一次批量查避免 N+1。 */
+    private Map<Integer, String> loadNameMap(Integer surveyId, List<Answer> answers) {
+        Map<Integer, String> nameByAnswer = new HashMap<>();
+        if (answers == null || answers.isEmpty()) {
+            return nameByAnswer;
+        }
+        List<Question> questions = questionMapper.findBySurveyId(surveyId);
+        Integer nameQuestionId = questions.stream()
+                .filter(q -> QuestionType.isText(q.getType()) && q.getId() != null)
+                .map(Question::getId).findFirst()
+                .orElseGet(() -> questions.stream()
+                        .filter(q -> QuestionType.isTextarea(q.getType()) && q.getId() != null)
+                        .map(Question::getId).findFirst().orElse(null));
+        if (nameQuestionId == null) {
+            return nameByAnswer;
+        }
+        List<Integer> answerIds = answers.stream().map(Answer::getId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+        if (answerIds.isEmpty()) {
+            return nameByAnswer;
+        }
+        for (Map<String, Object> row : answerMapper.findContentsByAnswerIds(nameQuestionId, answerIds)) {
+            Object aid = row.get("aid");
+            Object content = row.get("content");
+            if (aid instanceof Number n) {
+                nameByAnswer.put(n.intValue(), content == null ? "" : content.toString());
+            }
+        }
+        return nameByAnswer;
     }
 
     /** 某问卷的全部答卷明细（统计页整体分析用，注意数据量）。 */

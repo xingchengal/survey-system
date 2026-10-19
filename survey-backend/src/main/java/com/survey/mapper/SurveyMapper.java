@@ -15,12 +15,17 @@ import java.util.Map;
 @Mapper
 public interface SurveyMapper {
 
-    /** 新建问卷。useGeneratedKeys 回填 id，调用方拿到后可接着插题目；view_count 用 IFNULL 兜底 0。 */
+    /**
+     * 新建问卷。useGeneratedKeys 回填 id，调用方拿到后可接着插题目；view_count 用 IFNULL 兜底 0。
+     * ★ 签到核销 / 公开报名名单也要在这里落库：场景模板（接龙、报名签到）创建时就要带上开关，
+     *   只靠 update 的话新建问卷永远是关闭状态。
+     */
     @Insert("INSERT INTO t_survey(user_id, title, description, status, share_code, deleted, " +
-            "start_time, end_time, is_template, template_category, view_count) " +
+            "start_time, end_time, is_template, template_category, view_count, " +
+            "checkin_enabled, show_participants) " +
             "VALUES(#{userId}, #{title}, #{description}, #{status}, #{shareCode}, 0, " +
-            "#{startTime}, #{endTime}, #{isTemplate}, #{templateCategory}, " +
-            "IFNULL(#{viewCount}, 0))")
+            "#{startTime}, #{endTime}, #{isTemplate}, #{templateCategory}, IFNULL(#{viewCount}, 0), " +
+            "IFNULL(#{checkinEnabled}, 0), IFNULL(#{showParticipants}, 0))")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Survey survey);
 
