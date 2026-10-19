@@ -19,7 +19,7 @@
 - 过程叙事（第几轮、改造前、踩坑经过）只进 `HISTORY.md`，**不写回代码注释**与 `ARCHITECTURE.md`。
 - 数字口径以 `AUDIT.md` 为唯一出处；`README.md`、`ARCHITECTURE.md`、`SPRINT.md` 不重复写具体端点 / 表数。
 - 改完文档或端点后跑 **`node tools/check-docs.mjs`**：端点计数、§四权限点、相对链接、README 规模、历史叙事泄漏必须全绿；CI 的 `docs` 作业会复跑。
-- **提交**：只在完整功能 / 测试通过 / 用户要求时 commit；消息用 Conventional Commits（`feat` / `fix` / `docs` / `chore` 等）；同一问题多次改动用 `git rebase -i` / `squash` 合并（详见工作区 `AGENTS.md` 的「提交规范」）。
+- **提交**：日常可频繁小步 commit 便于回退；**push 前**用 `git rebase -i` / `squash` 整合成 Conventional Commits 格式的高质量 commit，并跑绿测试与检查（详见工作区 `AGENTS.md` 的「提交规范」）。
 - 完整规则见工作区 `AGENTS.md` 的「问卷系统文档分层」。
 
 ## 二、专题文档
