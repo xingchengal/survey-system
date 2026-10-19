@@ -55,8 +55,9 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 
 - **Controller 不注入 Mapper、不写 `@Transactional`。** 否则事务边界散到 Web 层，这段逻辑也没法在 Service 层复用或单测。
   验：`grep -n "Mapper" src/main/java/com/survey/controller/*.java`，除下面登记的例外外只应命中注释。
-  ★ **现存例外**：`UserController` 在登录时直接注入 `RoleMapper` 读角色码与权限点（只读、无事务）。
-  这是当前唯一一处 Web 层直连 Mapper 的代码，新增代码不要照抄。
+  ★ **现存例外**：`UserController`（登录时读角色码与权限点）、`SurveyController` / `SystemStatisticsController`
+  （系统总览与统计按模块权限裁剪字段）直接注入 `RoleMapper`。三处都是**只读、无事务**；
+  新增代码不要照抄，优先把权限查询收在 Service / 已有的 `SurveyAccessService`。
 - **对象级不变量必须在 Service 层。** `SurveyAccessService.requirePermission`、`AnswerService.submit` 的守卫、
   `UserService.deleteUser` 的删除保护都在 Service；新增入口先找「有没有现成的统一入口」。
 - **静态工具类不拿 Mapper。** 协作者判定规则留在 `OwnershipGuard` 的纯函数里，查库交给 `SurveyAccessService`，
@@ -204,6 +205,9 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
   是两套 key（`qstats` / `qstats-valid`），失效时必须一起删。
 - **限流按真实连接 IP 计数，不看 `X-Forwarded-For`。** 日志里的 IP 优先信任该头、可伪造，
   只能用于展示，不能用于任何安全判决。
+- **限流规则可带可选 `method`。** `RateLimitInterceptor.Rule` 默认只按路径前缀匹配；反馈这类
+  “只限写操作”的规则必须带 `POST`，否则 3 秒一次的 GET 轮询会把 20 次/分的配额吃光。
+  新增轮询型接口时先检查它会不会撞上已有前缀规则。
 - **缓存 / 限流各有开关**（`app.cache.stats-enabled`、`app.rate-limit.redis-enabled`）：
   false = 完全绕过 Redis，用于对比压测与 CI。新增缓存前先回答三件事：回源代价多大、TTL 多少、失效点在哪；
   没有明确失效点的数据不要缓存。
