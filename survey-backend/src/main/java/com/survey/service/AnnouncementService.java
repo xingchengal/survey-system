@@ -10,17 +10,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 系统公告业务：发布、查询、上下架、删除。
- *
- * ── 谁在调我 ──────────────────────────────────────────
- *   AnnouncementController（公告的全部接口）
- *
- * ── 涉及的表 ──────────────────────────────────────────
- *   t_announcement（status 控制上下架，expireTime 控制过期时间）
- *
- * ── 说明 ──────────────────────────────────────────────
- *   这一层很薄，基本只是转发给 mapper。**权限校验（必须管理员）在 Controller 里做**，
- *   所以这里的方法本身不做身份判断 —— 以后若新增别的入口调用它，需要自己补校验。
+ * 系统公告（t_announcement）：发布、查询、上下架、删除。
+ * ★ active 必须同时过滤 status=1 与未过期；status 只认 0/1（Controller 校验），其它值会让
+ *   /active 与状态标签同时语义失真。
+ * 权限（管理员）在 Controller 层做，本类不做身份判断；新增入口要自己补校验。
  */
 @Service
 public class AnnouncementService {
@@ -29,16 +22,11 @@ public class AnnouncementService {
     private AnnouncementMapper announcementMapper;
 
     /**
-     * 发布公告。
-     * ★ publisherId 由 Controller 从 X-User-Id 写入；publisherName 取该用户的**真实昵称**
-     *   （查不到用户时才回退为"管理员"），见 AnnouncementController.add。
-     * ★ 标题长度校验：t_announcement.title 是 varchar(200)，超长会以 500 收场。
+     * 发布公告：publisherId / publisherName 由 Controller 写入（名字取真实昵称）。
+     * 正文是 text NOT NULL：空校验与长度校验都要有，否则落到 MySQL 报错 → 500 而不是 400。
      */
     public Announcement create(Announcement a) {
         TextLimits.requireWithin(a.getTitle(), TextLimits.ANNOUNCEMENT_TITLE, "公告标题");
-        // ★ 正文必须同时有非空校验与长度校验：
-        //   t_announcement.content 是 **text NOT NULL** ——
-        //   超长或缺字段都会落到 MySQL 报错 → 500「系统繁忙」，而不是 400 + 明确文案。
         if (a.getContent() == null || a.getContent().trim().isEmpty()) {
             throw new BizException("公告正文不能为空");
         }
@@ -47,15 +35,12 @@ public class AnnouncementService {
         return a;
     }
 
-    /** 全部公告（管理员管理页用，包含已下架/已过期的）。 */
+    /** 全部公告（管理员管理页用，包含已下架 / 已过期的）。 */
     public List<Announcement> listAll() {
         return announcementMapper.findAll();
     }
 
-    /**
-     * 有效公告（用户登录后弹窗展示用）。
-     * ★ SQL 里会过滤掉「已下架」和「已过期」的，所以前端拿到的都是该展示的。
-     */
+    /** 有效公告（登录后弹窗用）：SQL 里已同时过滤下架与过期。 */
     public List<Announcement> listActive() {
         return announcementMapper.findActive();
     }

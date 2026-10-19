@@ -8,11 +8,8 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 模拟充值请求（演示用，不接真实支付）。
- *
- * ★ idempotencyKey 必填：前端每次点击生成一个 UUID，重复提交（网络重试、连点）
- *   只到账一次。服务端把它落成 t_wallet_transaction 的唯一键。
- * ★ amount 上限与 WalletService.RECHARGE_MAX 对齐（1~1000 点），
- *   避免误点/脚本把余额刷成天文数字。
+ * ★ 必须带 idempotencyKey（前端每次点击生成 UUID）：重复提交只到账一次，服务端据此落唯一键。
+ * amount 限 1~1000 点，与 WalletService.RECHARGE_MAX 对齐。
  */
 public class WalletRechargeRequest {
 

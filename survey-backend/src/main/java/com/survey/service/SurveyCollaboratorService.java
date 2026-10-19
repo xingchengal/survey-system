@@ -16,27 +16,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 问卷协作者的管理（邀请 / 改角色 / 移除 / 列表）。
- *
- * ── 谁能管理协作者 ────────────────────────────────────
- *   **只有作者本人与管理员**（Controller 用 {@code OwnershipGuard.requireOwnerOrAdmin} 判）。
- *   ★ 为什么不让 editor 协作者再邀请人：那会出现"权限扩散"——
- *     一个人被邀请，就能把整个部门拉进来；协作者名单只该由问卷的主人掌握。
- *
- * ── 业务校验（都在这里，Controller 只做归属校验）─────────
- *   ① 角色只能是 viewer / editor / analyst（大小写敏感，解析失败即 400）；
- *   ② 被邀请人必须存在且**未注销**（已注销账号留着授权没有意义）；
- *   ③ 不能邀请自己；
- *   ④ 不能邀请作者本人（作者本来就全权，多一条协作者记录只会让列表更乱）；
- *   ⑤ 重复邀请 / 对非协作者改角色或移除 → 400（不静默成功）。
- *
- * ── 事务边界 ──────────────────────────────────────────
- *   改角色 / 移除 只有**一条**写语句，不需要事务；
- *   **invite 例外**：H5 起邀请可能要先扣协作者名额费，扣费与插入必须原子
- *   （扣了钱没插进去 = 用户白付），所以 invite 标了 @Transactional。
- *   ★ 并发风险"同一用户被同时邀请两次"仍由唯一键
- *     uk_survey_user(survey_id,user_id) 兜底 —— 第二个请求会拿到 DuplicateKey，
- *     这里不额外捕获，让它变成 500（极端并发下的脏请求，值得被看见）。
+ * 问卷协作者：邀请 / 改角色 / 移除 / 列表 / 退出。
+ * 只有作者本人与管理员能管理名单：让 editor 再邀请人会权限扩散，名单只该由问卷主人掌握。
+ * ★ 角色只认 viewer / editor / analyst（大小写敏感，解析失败即 400）；不能邀请自己或作者本人。
+ * 重复邀请、对非协作者改角色/移除一律 400，不静默成功；邀请、改角色、退出都发通知给相关人。
+ * ★ invite 带事务：名额扣费与插入必须原子（扣了钱没插进去 = 用户白付）；并发重复邀请由唯一键兜底。
  */
 @Service
 public class SurveyCollaboratorService {
@@ -52,9 +36,8 @@ public class SurveyCollaboratorService {
     private NotificationService notificationService;
 
     /**
-     * H5 额度钱包：协作者名额（前 2 名免费，之后每名 1 点）。
-     * ★ invite() 因此加了 @Transactional：扣费与插入必须原子 ——
-     *   扣了钱却插入失败（或反过来）都会让用户困惑/白付。
+     * H5 额度钱包：协作者名额前 {@link WalletFeature#FREE_COLLABORATORS} 名免费，之后每名 1 点。
+     * invite 因此加 @Transactional：扣费与插入必须原子。
      */
     @Autowired
     private WalletService walletService;
@@ -68,7 +51,7 @@ public class SurveyCollaboratorService {
      * 邀请协作者。
      *
      * @param survey         已通过归属校验的问卷
-     * @param targetUserId   被邀请的用户
+     * @param targetUsername 被邀请人的用户名
      * @param roleCode       viewer / editor / analyst
      * @param operatorUserId 邀请人（写进 created_by，便于追溯）
      */
@@ -78,10 +61,10 @@ public class SurveyCollaboratorService {
         if (targetUsername == null || targetUsername.isBlank()) {
             throw new BizException("请输入要邀请的用户名");
         }
-        // ★ 按用户名而不是 id：前端让作者输账号即可，不用去查对方的数字 id
+        // 按用户名而不是 id：前端让作者输账号即可，不用去查对方的数字 id
         User target = userMapper.findByUsername(targetUsername.trim());
         if (target == null) {
-            // ★ 文案不区分"不存在"与"已注销"：后者是账号隐私，没必要在接口里透露
+            // 文案不区分"不存在"与"已注销"：后者是账号隐私，没必要在接口里透露
             throw new BizException("被邀请的用户不存在或已注销");
         }
         Integer targetUserId = target.getId();
@@ -96,14 +79,14 @@ public class SurveyCollaboratorService {
         if (existing != null) {
             throw new BizException("该用户已经是协作者（当前角色：" + existing + "），请直接改角色");
         }
-        // ★ H5：名额收费 —— 前 FREE_COLLABORATORS 名免费，之后每名 1 点（同一人只扣一次）。
-        //   余额不足会在这里 400，邀请不会落库（与扣费同事务）。
+        // 名额收费：前 FREE_COLLABORATORS 名免费，之后每名 1 点（同一人只扣一次）。
+        //   余额不足会在这里 400，邀请不落库（与扣费同事务）。
         int currentCount = collaboratorMapper.countBySurvey(survey.getId());
         if (currentCount >= WalletFeature.FREE_COLLABORATORS) {
             walletService.chargeCollaborator(survey.getId(), survey.getUserId(), targetUserId);
         }
         collaboratorMapper.insert(survey.getId(), targetUserId, roleCode, operatorUserId);
-        // ★ 通知被邀请人：不通知的话对方根本不知道自己被拉进来了
+        // 通知被邀请人：不通知的话对方根本不知道自己被拉进来了
         notificationService.send(targetUserId, "协作邀请",
                 "邀请你协作问卷《" + survey.getTitle() + "》，角色：" + roleCode,
                 "collaborator", "/my/surveys");
@@ -120,9 +103,7 @@ public class SurveyCollaboratorService {
     }
 
     /**
-     * 被邀请人**自己退出**协作。
-     * ★ 与 remove 的区别：remove 是作者踢人（要归属校验），这个是本人主动退出 ——
-     *   只需"我确实是这份问卷的协作者"，不需要对问卷有任何所有权。
+     * 被邀请人自己退出协作；只需"我确实是协作者"，不需要问卷所有权（remove 是作者踢人）。
      */
     public void leave(Survey survey, Integer userId) {
         String current = collaboratorMapper.findCollaboratorRole(survey.getId(), userId);
@@ -130,7 +111,7 @@ public class SurveyCollaboratorService {
             throw new BizException("你不是这份问卷的协作者");
         }
         collaboratorMapper.delete(survey.getId(), userId);
-        // ★ 退出也要让作者知道：否则作者只看到名单里少了一个人，不知道是谁、为什么
+        // 退出也要让作者知道，否则名单里少了一个人却不知是谁、为什么
         User leaver = userMapper.findById(userId);
         String who = leaver != null && leaver.getNickname() != null && !leaver.getNickname().isBlank()
                 ? leaver.getNickname() : (leaver != null ? leaver.getUsername() : ("用户" + userId));
@@ -143,7 +124,7 @@ public class SurveyCollaboratorService {
 
     /**
      * 协作者**申请**变更自己的角色：只给作者发一条通知，**不自动改**。
-     * ★ 改角色是作者的权力；自动改等于把授权交给申请人。
+     * 改角色是作者的权力；自动改等于把授权交给申请人。
      */
     public void applyRole(Survey survey, Integer userId, String roleCode) {
         requireValidRole(roleCode);
@@ -172,7 +153,7 @@ public class SurveyCollaboratorService {
 
     /**
      * 给"我的问卷"列表打上"已共享 N 人"（一次 GROUP BY，不逐条查）。
-     * ★ 没有协作者的问卷记为 0（前端据此不显示角标）。
+     * 没有协作者的问卷记为 0（前端据此不显示角标）。
      */
     public void fillCollaboratorCounts(List<Survey> surveys) {
         if (surveys == null || surveys.isEmpty()) {
@@ -197,8 +178,7 @@ public class SurveyCollaboratorService {
 
     /**
      * 共享给我的问卷。
-     * ★ **必须脱敏**：t_survey 那行带 access_password，协作者不该看到作者设的答题口令
-     *   （它只用于"填写人进门"，不是协作授权）。这里统一置空，并保留 hasPassword 供前端提示。
+     * 必须脱敏 access_password（只用于填写人进门，不是协作授权），保留 hasPassword 供前端提示。
      */
     public List<Survey> listSharedWithMe(Integer userId) {
         List<Survey> list = collaboratorMapper.findSharedSurveys(userId);
@@ -210,8 +190,7 @@ public class SurveyCollaboratorService {
     }
 
     /**
-     * 角色合法性：只认三种，且**不做大小写/空白归一** ——
-     * 与 CollaboratorRole.fromCode 同一口径（写错就是错，不做"宽容解析"）。
+     * 角色合法性：只认三种，且不做大小写 / 空白归一（与 CollaboratorRole.fromCode 同一口径）。
      */
     private void requireValidRole(String roleCode) {
         if (CollaboratorRole.fromCode(roleCode) == null) {

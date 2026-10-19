@@ -22,12 +22,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 次级管理员管理 —— **超级管理员专属**（类级 @RequireAdmin）。
- *
- * ★ 为什么不挂 @RequirePermission：这类“谁能进管理端 / 谁有什么权限”的操作
- *   不能再下放给任何一个次级管理员，否则一个人可以给自己加权限（提权闭环）。
- * ★ 五个端点都直接改安全边界，失败一律 BizException（400）或切面 403/401；
- *   角色字符串只由服务端写，请求体里的 userId/permissions 不能指定 role。
+ * 次级管理员管理：选定、授权、降级，超级管理员专属（类级 @RequireAdmin）。
+ * ★ 不挂 @RequirePermission：授权本身若下放给次级管理员，等于允许给自己加权限（提权闭环）。
+ * ★ 可分配点只有 Permission.ADMIN_GRANTABLE 的 9 个模块级项；角色与权限在 Service 同一事务内改，
+ *   请求体里的 userId/permissions 不能指定 role —— 角色字符串只由服务端写。
  */
 @Tag(name = "次级管理员", description = "选定、授权、降级（仅超级管理员）")
 @RestController

@@ -23,22 +23,9 @@ import java.lang.reflect.Method;
 /**
  * 操作日志切面：把标了 @OperationLog 的方法自动记进 t_operation_log。
  *
- * ── 工作方式 ──────────────────────────────────────────
- *   @Pointcut 匹配"带 @OperationLog 注解的方法"；@AfterReturning 表示
- *   **方法正常返回之后**才记录 —— 抛异常的操作不会被记成"成功"。
- *
- * ── 一条日志记了什么 ──────────────────────────────────
- *   操作描述（注解的 value，如"发布问卷"）、类名.方法名、用户、角色、IP。
- *   用户是先从请求头 X-User-Id 拿到 id，再去 t_user 查昵称（昵称更能认人）。
- *
- * ── ★ 两个健壮性设计 ──────────────────────────────────
- *   1. 整个方法包在 try-catch 里 —— 记日志失败绝不能影响业务，只打印一行错误；
- *   2. Integer.parseInt 单独保护（NumberFormatException）—— 请求头被人改成非数字也不会崩。
- *   另外落库那步是 @Async（OperationLogService.save），不占用请求线程。
- *
- * ── 一个已知的弱点 ────────────────────────────────────
- *   IP 走 util/WebUtils.getClientIp()：它优先信任 X-Forwarded-For / X-Real-IP，
- *   而这两个头客户端可以伪造，所以日志里的 IP 只能当参考，不得用于安全判决。
+ * @AfterReturning 只在方法正常返回后记录，抛异常的操作不会被记成「成功」。
+ * 日志内容：注解 value、类名.方法名、用户、角色、IP；用户昵称要按 X-User-Id 查 t_user。
+ * ★ 整段包在 try-catch 里：记日志失败绝不能影响业务，只打印一行错误。
  */
 @Aspect
 @Component
@@ -49,10 +36,7 @@ public class LogAspect {
 
     @Autowired
     private OperationLogService operationLogService;
-    /**
-     * ★ 这里注入 UserService 而不是 UserMapper：与 GlobalExceptionHandler 保持同一口径
-     *   （核心横切组件都走"切面/配置层 → Service → Mapper"），也便于以后给"取用户"加缓存。
-     */
+    /** 注入 UserService 而非 UserMapper：与 GlobalExceptionHandler 同口径，也便于以后给「取用户」加缓存。 */
     @Autowired
     private UserService userService;
 
@@ -84,7 +68,7 @@ public class LogAspect {
             com.survey.entity.OperationLog log = new com.survey.entity.OperationLog();
             String username = "匿名";   // 未登录（如注册接口）时显示"匿名"
 
-            // parseInt 异常保护：请求头是非数字格式也不会让整个切面挂掉
+            // parseInt 异常保护：请求头不是数字也不会让整个切面挂掉
             if (userIdStr != null && !userIdStr.isEmpty()) {
                 try {
                     Integer userId = Integer.parseInt(userIdStr);

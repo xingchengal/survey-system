@@ -26,30 +26,11 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 问卷版本快照：编辑历史、版本对比、回滚时读快照。
- *
- * ── 为什么要有它（背景）────────────────────────────────
- *   题目保存是**全量覆盖**语义（`QuestionService.saveQuestions`：没传的题会被删掉），
- *   一次误操作就可能把整份问卷的题目结构改掉，且**没有任何历史可查**。
- *   这里把每次"题目结构真的变了"的保存留一份快照，提供三件事：
- *   编辑历史（列表）、版本对比（结构化 diff）、回滚（把旧结构写回去）。
- *
- * ── 版本什么时候生成（★ 改这里之前先读）────────────────
- *   · 只在**题目保存**（`saveQuestions`）时生成，且**内容没变就不生成** ——
- *     用户点十次"保存"但一个字没改，不该产生十个版本；
- *   · 改标题/描述**不生成**版本（否则每改一次标题就多一版，版本会爆炸）。
- *     但每个快照里都带了当时的标题/描述，所以对比两个版本时仍能看到"标题当时是什么"；
- *   · **回滚也算一次编辑**：回滚后同样生成一个新版本（摘要里写明"回滚到 v3"），
- *     历史是线性的、可审计的 —— 回滚不是"抹掉中间几版"。
- *
- * ── 每份问卷最多保留 50 个版本 ──────────────────────────
- *   超出后删**最旧**的（`deleteUpTo`）。版本号不会因此回退（它是业务号，不是行号），
- *   所以用户看到的历史是"v47…v96"这样的滚动窗口，而不是永远从 v1 开始。
- *
- * ── 为什么本类不注入 QuestionService ────────────────────
- *   那会形成环：QuestionService →（保存后生成快照）→ SurveyVersionService →（回滚要写题目）→ QuestionService。
- *   所以分工是：**本类只负责"读写快照"**，回滚的写库动作留在 `QuestionService.rollbackToVersion`
- *   （它本来就拥有"全量覆盖式保存"的全部校验逻辑，回滚也必须走同一套）。
+ * 问卷版本快照：编辑历史、版本对比、回滚。
+ * ★ 只在题目结构真的变了时生成：改标题/描述不生成（否则版本爆炸），内容没变重复保存也不生成。
+ * 每份问卷最多 50 版，超出删最旧；版本号是业务号不回退，历史呈"v47…v96"滚动窗口。
+ * ★ 回滚 = 全量覆盖写回 + 生成新版本；跳转指向会被重建的题时 QuestionService 拒绝回滚，避免旧 id 悬空。
+ * 不注入 QuestionService（会成环），本类只读写快照；回滚写库在 QuestionService.rollbackToVersion。
  */
 @Service
 public class SurveyVersionService {
@@ -65,9 +46,8 @@ public class SurveyVersionService {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /**
-     * 快照 JSON 的编解码器。
-     * ★ 关掉"未知字段报错"：这是**持久化格式**，将来给 Question 加字段时，
-     *   旧快照必须还能被新代码读出来（否则一升级，历史版本全部反序列化失败）。
+     * 快照 JSON 编解码器。
+     * 关掉未知字段报错：这是持久化格式，给 Question 加字段后旧快照必须还能读出来。
      */
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -87,13 +67,11 @@ public class SurveyVersionService {
     // ==================== 生成快照 ====================
 
     /**
-     * 为问卷生成一个版本快照。**必须在保存题目的同一事务内调用**（`QuestionService` 里调用）——
-     * 保存成功而快照失败，或快照成功而保存回滚，都会让历史与实际结构对不上。
+     * 为问卷生成版本快照；必须在保存题目的同一事务内调用（否则历史与实际结构对不上）。
      *
-     * @param surveyId 问卷 id
-     * @param userId   操作人（回滚时是执行回滚的人）
-     * @param note     变更说明前缀（回滚时传「回滚到 v3」），可为 null
-     * @return 新生成的版本；**题目结构与上一版完全相同时返回 null**（不生成噪音版本）
+     * @param userId 操作人（回滚时是执行回滚的人）
+     * @param note   变更说明前缀（回滚时传「回滚到 v3」），可为 null
+     * @return 新版本；题目结构没变时返回 null（不生成噪音版本）
      */
     @Transactional
     public SurveyVersion capture(Integer surveyId, Integer userId, String note) {
@@ -105,7 +83,7 @@ public class SurveyVersionService {
         List<Question> questions = loadQuestionsForSnapshot(surveyId);
         String json = writeJson(new SurveySnapshot(survey.getTitle(), survey.getDescription(), questions));
 
-        // ★ 只比题目结构（questionsJson），不比标题 —— 改标题不触发版本，见类注释。
+        // 只比题目结构（questionsJson），不比标题 —— 改标题不触发版本，见类注释。
         SurveyVersion latest = versionMapper.findLatest(surveyId);
         if (latest != null && json.equals(latest.getQuestionsJson())) {
             return null;
@@ -124,8 +102,7 @@ public class SurveyVersionService {
         try {
             versionMapper.insert(version);
         } catch (DuplicateKeyException e) {
-            // 同一份问卷被两个请求同时保存：都算出了同一个 version_no，后到的撞上唯一键。
-            // ★ 重新取号再插一次即可（内容不同是正常业务，不是错误）。
+            // 并发保存算出同一个 version_no 撞唯一键：重新取号再插一次，内容不同是正常业务。
             version.setVersionNo(versionMapper.findMaxVersionNo(surveyId) + 1);
             versionMapper.insert(version);
         }
@@ -179,10 +156,8 @@ public class SurveyVersionService {
     // ==================== 对比 ====================
 
     /**
-     * 对比两个版本（结构化 diff）。两个版本必须属于同一份问卷。
-     *
-     * ★ 按 `questionId` 对齐：`saveQuestions` 是按 id 保留/更新的，
-     *   同一道题在两个版本里 id 稳定，所以能区分"改了"与"删了+新增"。
+     * 对比两个版本（结构化 diff）；两个版本必须属于同一份问卷。
+     * 按 questionId 对齐：saveQuestions 按 id 保留/更新，同一道题 id 稳定，能区分"改了"与"删了+新增"。
      */
     public SurveyVersionDiff diff(Integer fromId, Integer toId) {
         SurveyVersion from = requireById(fromId);
@@ -230,9 +205,7 @@ public class SurveyVersionService {
 
     /**
      * 读出用于快照的题目（含选项）。
-     * ★ 这里**不能**用 `QuestionService.getQuestionsBySurveyId`（会形成循环依赖，见类注释），
-     *   所以自己查：1 次查题目 + 每道选择题 1 次查选项。
-     *   题目数有上限（`MAX_QUESTIONS_PER_SURVEY = 200`），且只在保存这一条路径上发生，可接受。
+     * 不能复用 QuestionService.getQuestionsBySurveyId（循环依赖），所以自己查：1 次题目 + 每道选择题 1 次选项。
      */
     private List<Question> loadQuestionsForSnapshot(Integer surveyId) {
         List<Question> questions = questionMapper.findBySurveyId(surveyId);
@@ -298,8 +271,7 @@ public class SurveyVersionService {
         if (!Objects.equals(a.getRequired(), b.getRequired())) {
             changes.add("必填设置变化");
         }
-        // ★ 分值也要参与差异判定（第四十五轮）：给题目设/改分值不生成版本的话，
-        //   回滚到旧版本会悄悄退回旧分值，而对比页显示的却是"无变化"。
+        // 分值也要参与差异判定，否则回滚会悄悄退回旧分值，对比页却显示"无变化"。
         if (!Objects.equals(a.getScore(), b.getScore())) {
             changes.add("分值变化");
         }
@@ -309,8 +281,7 @@ public class SurveyVersionService {
         if (!optionsSignature(a).equals(optionsSignature(b))) {
             changes.add("选项变化");
         }
-        // ★ 矩阵题的行列标题也要参与差异判定：只改行列、不改题干时，
-        //   不比较这两列就会出现"保存了、版本没生成"以及对比页显示"无变化"。
+        // 矩阵行列标题也要参与差异判定，否则只改行列会出现"保存了、版本没生成"。
         if (!Objects.equals(a.getMatrixRows(), b.getMatrixRows())
                 || !Objects.equals(a.getMatrixCols(), b.getMatrixCols())) {
             changes.add("矩阵行列变化");
@@ -319,10 +290,8 @@ public class SurveyVersionService {
     }
 
     /**
-     * 选项的"内容签名"：按 sortOrder 排序后把 `内容->跳转目标` 串起来。
-     * ★ 必须把 `nextQuestionId` 也算进去 —— 只改跳转规则不改文案，也是**实质变更**。
-     * ★ 第四十五轮补：`isCorrect` 也要算进去 —— 只把某个选项改成"正确答案"同样是实质变更
-     *   （否则版本对比会显示"无变化"，回滚时答案标记也会被悄悄还原）。
+     * 选项的内容签名：按 sortOrder 排序后把「内容->跳转目标」串起来。
+     * 必须算 nextQuestionId（只改跳转会变实质变更）与 isCorrect（否则对比显示无变化、回滚还原标记）。
      */
     private String optionsSignature(Question q) {
         if (q.getOptions() == null || q.getOptions().isEmpty()) {

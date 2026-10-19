@@ -8,36 +8,21 @@ import java.util.List;
 
 /**
  * RBAC 的读取入口（角色 / 权限点 / 用户-角色）。
- *
- * ── 为什么全在本类，而不拆三个 Mapper ──────────────────
- *   这三张表只有一个读取场景：**"这个用户有哪些权限点"**（登录下发 + 切面校验）。
- *   拆开只会让一次请求里出现三个 Mapper 依赖，读代码要来回跳。
- *   写入（分配角色）目前在 SQL 脚本里做，暂不开接口 —— 开之前先想清"谁能改角色"。
- *
- * ── 注意 ──────────────────────────────────────────────
- *   · 这里**不判**账号是否有效（deleted_at / token_valid_after）：那是 JwtAuthFilter 的职责，
- *     走到这里说明请求已经过鉴权；
- *   · 权限点字符串的合法性由 common/Permission 保证（种子数据只写常量值）；
- *   · 查询都走唯一键/普通索引，单用户权限量级是个位数，不需要缓存 ——
- *     同一请求内由 PermissionAspect 用 request attribute 去重（见切面）。
+ * ★ 本类只查数据，不判账号有效性（deleted_at / token_valid_after）—— 那是 JwtAuthFilter 的职责。
+ * 权限点字符串的合法性由 common/Permission 保证；单用户权限量级是个位数，不需要缓存。
  */
 @Mapper
 public interface RoleMapper {
 
-    /** 该用户的角色码列表（如 ["admin"] / ["user"]） */
+    /** 该用户的角色码列表（如 ["admin"] / ["user"]）。 */
     @Select("SELECT r.code FROM t_user_role ur JOIN t_role r ON r.id = ur.role_id "
             + "WHERE ur.user_id = #{userId}")
     List<String> findRoleCodesByUserId(@Param("userId") Integer userId);
 
     /**
-     * 该用户的**权限点并集**（多角色 + 直接授权，去重）。
-     *
-     * ★ 两条来源：
-     *   ① 角色 → 权限点（t_user_role → t_role_permission）：admin / user / 未来自定义角色；
-     *   ② 用户 → 权限点（t_user_permission）：次级管理员逐项授权。
-     * ★ 用 UNION：同一个人既有角色权限又有直接授权时，同一个权限点只返回一次。
-     * ★ 超管（admin）在 PermissionAspect 里**兜底放行**，不依赖这里返回全部；
-     *   这里仍返回 admin 角色的全量种子，便于登录后前端菜单直接使用。
+     * 该用户的权限点并集：① 角色权限（t_user_role → t_role_permission）∪ ② 用户直接授权（t_user_permission）。
+     * ★ subadmin 没有任何角色级权限，权限全在 ②；UNION 少一支就等于次级管理员完全没权限。
+     * 超管由 PermissionAspect 兜底放行，这里仍返回 admin 的全量种子，供登录后前端菜单使用。
      */
     @Select("SELECT DISTINCT permission_code FROM ("
             + "  SELECT rp.permission_code FROM t_user_role ur "
@@ -49,7 +34,7 @@ public interface RoleMapper {
             + ") merged")
     List<String> findPermissionCodesByUserId(@Param("userId") Integer userId);
 
-    /** 按角色码取 id（分配角色时用；不存在返回 null） */
+    /** 按角色码取 id（分配角色时用；不存在返回 null）。 */
     @Select("SELECT id FROM t_role WHERE code = #{code}")
     Integer findRoleIdByCode(@Param("code") String code);
 

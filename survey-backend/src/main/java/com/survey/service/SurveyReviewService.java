@@ -13,15 +13,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 举报提交与"我的举报"。
- *
- * ── 规则（每条都会返回 400，而不是静默忽略）────────────
- *   ① 只有**已发布**的问卷能被举报（草稿/已结束的没有对外可见性，举报没有意义）；
- *   ② 不能举报自己的问卷（作者自己下架即可，不需要走举报）；
- *   ③ 同一人对同一问卷**待处理的举报只能有一条**（防止刷屏把审核台淹没）；
- *   ④ 理由必填，长度 1~500（与列宽一致，超长会被 MySQL 拒绝成 500）。
- *
- * ★ 审核动作（通过=下架 / 驳回）在 H1-3，本类只负责"收举报"。
+ * 举报提交与处理（t_survey_review）：report 收举报，handle 审核（通过=下架 / 驳回）并通知双方。
+ * ★ 只允许 PENDING → 终态：SQL 的 WHERE status='PENDING' 保证重复处理影响 0 行，不会二次下架 / 二次通知。
+ * ★ 当前 handle **未校验**“处理人 ≠ 举报人”；多管理员场景下需在入口补这一条（已记入 SPRINT 待办）。
+ * 通过 = 只改 lifecycle 为 SUSPENDED、不动 status，并发通知作者与举报人。
  */
 @Service
 public class SurveyReviewService {
@@ -37,6 +32,7 @@ public class SurveyReviewService {
     @Autowired
     private NotificationService notificationService;
 
+    /** 提交举报：只能举报已发布的他人问卷，同一人同一问卷只允许一条待处理举报，理由 1~500 字。 */
     public void report(Survey survey, Integer reporterId, String reason) {
         if (survey == null) {
             throw new BizException("问卷不存在");
@@ -66,11 +62,10 @@ public class SurveyReviewService {
     }
 
     /**
-     * 处理一条举报。
+     * 处理一条举报（幂等靠 SQL 的 AND status='PENDING'：重复处理影响 0 行 → 400）。
+     * SUSPEND = 通过并下架，只改 lifecycle、不动 status；IGNORE = 驳回。结果通知作者与举报人。
      *
-     * @param action SUSPEND（通过并下架）/ IGNORE（驳回）
-     * ★ 幂等靠 SQL 的 `AND status='PENDING'`：重复处理影响 0 行 → 抛 400，不会二次下架/二次通知。
-     * ★ 下架只改 lifecycle，**不动 status** —— 前端"已发布/已结束"的既有口径不受影响。
+     * @param action SUSPEND / IGNORE
      */
     public void handle(Integer reviewId, Integer adminId, String action) {
         if (!"SUSPEND".equals(action) && !"IGNORE".equals(action)) {

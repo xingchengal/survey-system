@@ -16,26 +16,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 健康检查：返回服务与数据库是否可用。全项目最简单的接口，但有两个「隐形用户」很重要。
- *
- * ── 谁在调我 ──────────────────────────────────────────
- *   1. 启动脚本「启动问卷系统-改进版.bat」：启动 jar 后轮询这里，通了才去开浏览器；
- *   2. Dashboard.vue 的「系统信息」卡片：右上角那个绿点/红点就是它。
- *
- * ── 权限 ──────────────────────────────────────────────
- *   公开：在 JwtAuthFilter 白名单里。必须公开 —— 否则未登录时探针拿不到响应，
- *   启动脚本会一直等不到就绪。
- *
- * ── 返回 ──────────────────────────────────────────────
- *   DB 正常： **200** {"status":"UP","database":"UP","timestamp":...}
- *   DB 异常： **503** {"status":"DOWN","database":"DOWN","databaseError":"...","timestamp":...}
- *
- * ★ 健康检查**必须真的探测数据库**：若无论数据库通不通都返回常量 `status=UP`，
- *   "探针说健康、实际每个接口都 500"这种最需要被发现的情况反而检测不到。
- *   这里取一次连接做 isValid(2) 探测：
- *     · 启动脚本会因为拿不到 200 而继续等待（DB 没起来本来就该等，属正确行为）；
- *     · Dashboard 的绿点读的是响应是否 ok，DB 挂掉会自动变红点。
- *   ★ databaseError 只回传**异常类名**（不回传 message），避免泄露连接串等内部信息。
+ * 健康检查：服务与数据库是否可用，启动脚本把它当就绪探针轮询。
+ * ★ 必须公开（JwtAuthFilter 白名单）：未登录时启动器探针就要拿到响应，不要加登录要求。
+ * ★ 必须真的探测数据库：常量 UP 会掩盖"探针绿、接口全 500"；DB 异常返 503。
+ * databaseError 只回传异常类名，避免泄露连接串等内部信息。
  */
 @Tag(name = "健康检查", description = "服务状态监测")
 @RestController
@@ -44,11 +28,7 @@ public class HealthController {
 
     private static final Logger LOG = LoggerFactory.getLogger(HealthController.class);
 
-    /**
-     * 数据源。
-     * ★ required = false：让"没有配置数据源"的场景（例如纯 mock 的切片测试）也能加载本类，
-     *   那种情况下不把数据库判为故障。
-     */
+    /** 数据源；required = false 让无数据源的切片测试也能加载本类（此时不判为故障）。 */
     @Autowired(required = false)
     private DataSource dataSource;
 

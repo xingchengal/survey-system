@@ -1,19 +1,9 @@
 package com.survey.common;
 
 /**
- * 文本长度上限 —— 全项目"某个字段最多能存多少字"的**唯一口径**。
- *
- * ── 为什么必须与列宽一致 ────────────────────────────────
- *   校验上限大于**数据库列宽**时会出现一类很难查的错误：
- *   Java 侧放行 → MySQL 拒绝 → 用户拿到 **500「系统繁忙」**，
- *   而真正的原因只是"描述多写了两百个字"。
- *   ⇒ 题干、选项、公告标题这类文本都必须校验，且上限取自本类的常量。
- *
- * ── 怎么用 ────────────────────────────────────────────
- *   · 常量值必须等于 information_schema 里的 character_maximum_length；
- *   · 校验走 {@link #requireWithin}（超限抛 BizException → 400 + 明确文案）。
- *   ★ 业务上确实需要更长的文本时，**先 ALTER 列宽、再同步改这里**；
- *     只调大这里的数字只会在运行时炸 500。
+ * 文本长度上限 —— 全项目"某个字段最多能存多少字"的唯一口径。
+ * ★ 常量必须等于数据库列宽：Java 放行、MySQL 拒绝时，用户拿到的是 500 而不是"多写了两百字"。
+ * ★ 需要更长的文本时先 ALTER 列宽、再改这里；只调大数字会在运行时炸 500。
  */
 public final class TextLimits {
 
@@ -42,9 +32,8 @@ public final class TextLimits {
     public static final int USER_NAME = 50;
 
     /**
-     * t_template_category.name —— varchar(50)
-     * ★ 与 t_survey.template_category 同宽：分类名最终会写进那份问卷的 template_category 列，
-     *   两处列宽必须一致，否则"清单里能存、模板上存不下"会变成 500。
+     * t_template_category.name —— varchar(50)，与 t_survey.template_category 同宽：
+     * 否则"清单里能存、模板上存不下"会变成 500。
      */
     public static final int TEMPLATE_CATEGORY = 50;
 
@@ -52,13 +41,8 @@ public final class TextLimits {
     public static final int ANNOUNCEMENT_TITLE = 200;
 
     /**
-     * t_announcement.content —— text（上限 65535 **字节**，不是字符）。
-     * ★ 这一列**必须校验**：列定义是 text NOT NULL，所以"正文超过 65535 字节
-     *   （utf8mb4 下约 1.6 万汉字）"或"干脆不传 content"都会变成
-     *   500「系统繁忙」，而不是 400 + 明确提示。（title 那侧同理，见上。）
-     * ★ 注意单位差异：这里是**字节**上限（MySQL 的 text 按字节算），
-     *   而 requireWithin 数的是 Java 字符数（utf8mb4 下一个汉字最多 4 字节）。
-     *   所以取一个保守值：按"每字符最多 4 字节"折算，16383 字符以内必定安全。
+     * t_announcement.content —— text（上限 65535 字节，不是字符）；不校验会变成 500 而不是 400。
+     * 16000 是保守值：requireWithin 数的是 Java 字符，utf8mb4 下每字符最多 4 字节。
      */
     public static final int ANNOUNCEMENT_CONTENT = 16000;
 
@@ -66,13 +50,9 @@ public final class TextLimits {
     }
 
     /**
-     * 校验文本长度，超限抛 {@link BizException}（→ 400 + "XX不能超过 N 个字符"）。
-     *
-     * ★ null 视为"没有填"，直接放行 —— 是否必填属于各自的业务规则，不归这里管。
-     *
-     * @param value      待校验的文本
-     * @param max        上限（应当取自本类的常量）
-     * @param fieldLabel 字段中文名，用于拼文案，如 "题目内容" → "题目内容不能超过 500 个字符"
+     * 校验文本长度，超限抛 BizException（→ 400 + "XX不能超过 N 个字符"）；null 视为没填，直接放行。
+     * @param max        上限（应取自本类常量）
+     * @param fieldLabel 字段中文名，如 "题目内容"
      */
     public static void requireWithin(String value, int max, String fieldLabel) {
         if (value != null && value.length() > max) {

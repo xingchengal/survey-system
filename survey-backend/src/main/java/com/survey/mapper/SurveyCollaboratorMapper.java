@@ -13,26 +13,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 问卷协作者（t_survey_collaborator）的读写。
- *
- * ── 权限口径 ──────────────────────────────────────────
- *   本表是"某人对某份问卷的**局部**授权"，与 t_role 那套全局角色不是一回事：
- *   · 谁能在**哪份**问卷上做什么 → 这里（collaborator_role）；
- *   · 这个账号**全局**能做什么 → t_user_role / t_role_permission。
- *   判定顺序：先能力（@RequirePermission / SurveyAccessService），再看这张表。
- *
- * ── 为什么读列表要 JOIN t_user ────────────────────────
- *   前端要显示"谁被邀请了"（昵称/账号），只存 user_id 就得 N+1 次查询。
- *   ★ 过滤 `u.deleted_at IS NULL`：已注销账号不再出现在协作者列表里。
- *     （已注销的人本来就过不了 JwtAuthFilter，留着他的授权只会让列表看起来脏。）
+ * 问卷协作者（t_survey_collaborator）的读写 —— 本表是"某人在某份问卷上的局部授权"。
+ * 全局能力看 t_user_role / t_role_permission，本表只管"哪份问卷能做什么"；判定时先能力、后本表。
+ * 列表 JOIN t_user 取昵称/账号，避免 N+1；并过滤 u.deleted_at IS NULL，已注销账号不再出现在协作者列表。
  */
 @Mapper
 public interface SurveyCollaboratorMapper {
 
-    /**
-     * 取某人在某份问卷上的协作者角色；不是协作者返回 null。
-     * ★ LIMIT 1：唯一键 uk_survey_user 已保证最多一行，这里只是防御性写法。
-     */
+    /** 某人在某份问卷上的协作者角色；不是协作者返回 null。LIMIT 1 只是防御（唯一键已保证至多一行）。 */
     @Select("SELECT collaborator_role FROM t_survey_collaborator "
             + "WHERE survey_id = #{surveyId} AND user_id = #{userId} LIMIT 1")
     String findCollaboratorRole(@Param("surveyId") Integer surveyId, @Param("userId") Integer userId);
@@ -46,12 +34,9 @@ public interface SurveyCollaboratorMapper {
     List<CollaboratorView> listBySurveyId(@Param("surveyId") Integer surveyId);
 
     /**
-     * 共享给我的问卷（我作为协作者参与、且不在回收站）。
-     * ★ 只按 user_id 过滤，不接受"查别人"的参数 —— 这类"我的"列表永远不该能越权查。
-     * ★ 返回整行 Survey（含 access_password），**由 Service 负责脱敏**（置空并给出 hasPassword）。
-     * ★ 额外 JOIN 出作者昵称/账号、我的协作者角色、共享时间：
-     *   一个人可能被多个作者邀请，前端要按作者分组、按角色筛选，没有这三个字段只能靠猜。
-     * ★ 作者账号即使已注销也照常 JOIN（问卷还在，作者名仍要能显示）；不显示已注销状态。
+     * 共享给我的问卷（我作为协作者且问卷不在回收站）。
+     * 只按 user_id 过滤，不接受"查别人"的参数；返回整行 Survey 含 access_password，必须由 Service 脱敏。
+     * 额外 JOIN 作者昵称/账号、我的角色、共享时间，供前端按作者分组与按角色筛选。
      */
     @Select("SELECT s.*, u.username AS ownerUsername, u.nickname AS ownerNickname, "
             + "c.collaborator_role AS myCollaboratorRole, c.created_time AS sharedTime "
@@ -62,19 +47,15 @@ public interface SurveyCollaboratorMapper {
             + "ORDER BY u.nickname, c.created_time DESC, s.id DESC")
     List<Survey> findSharedSurveys(@Param("userId") Integer userId);
 
-    /**
-     * 批量数"每份问卷有几个协作者"（给"我的问卷"列表打标）。
-     * ★ 一次 GROUP BY 而不是逐条 COUNT：列表里可能有几十份问卷，N+1 会拖慢首屏。
-     */
+    /** 批量数"每份问卷有几个协作者"（我的问卷打标）。一次 GROUP BY，避免逐条 COUNT 的 N+1。 */
     @Select("<script>SELECT survey_id AS surveyId, COUNT(*) AS total FROM t_survey_collaborator "
             + "WHERE survey_id IN <foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach> "
             + "GROUP BY survey_id</script>")
     List<Map<String, Object>> countBySurveyIds(@Param("ids") List<Integer> ids);
 
     /**
-     * 某份问卷当前有几个协作者（邀请前判断是否已超过免费名额）。
-     * ★ 只用于"名额收费"的判定；并发下两个邀请可能都读到 2，属于可接受的轻微超发
-     *   （最多多一个免费名额），不影响扣费幂等。
+     * 某份问卷当前协作者数（邀请前判断是否超过免费名额）。
+     * 并发下两个邀请可能都读到旧值，最多多一个免费名额，不影响扣费幂等。
      */
     @Select("SELECT COUNT(*) FROM t_survey_collaborator WHERE survey_id = #{surveyId}")
     int countBySurvey(@Param("surveyId") Integer surveyId);

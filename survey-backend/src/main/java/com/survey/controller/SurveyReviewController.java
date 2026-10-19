@@ -22,12 +22,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 举报（§H-H1-2）。
- *
- * ── 权限 ──────────────────────────────────────────────
- *   两个端点都**只需登录**：举报人不需要对问卷有任何归属关系（这正是举报的意义），
- *   但必须留下身份（reporter_id），否则无法防刷屏、也无法"我的举报"。
- *   ★ 管理员审核（列表/处理）在 H1-3，不在本类。
+ * 举报：提交举报、我的举报，以及管理员审核列表与处理。
+ * 举报入口只接受已发布的问卷、不能举报自己（校验在 Service），且必须登录以留下 reporter_id。
+ * 审核只认 review:handle 权限点。
  */
 @Tag(name = "问卷举报", description = "提交举报与我的举报")
 @RestController
@@ -44,6 +41,7 @@ public class SurveyReviewController {
     public String report(@PathVariable Integer surveyId,
                          @RequestBody Map<String, Object> body,
                          @RequestHeader("X-User-Id") Integer userId) {
+        // 无法举报不存在/未发布/自己的问卷，理由长度也在 Service 校验；这里只传身份。
         Survey survey = surveyService.getById(surveyId);
         String reason = body.get("reason") == null ? null : String.valueOf(body.get("reason"));
         reviewService.report(survey, userId, reason);

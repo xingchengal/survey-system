@@ -86,7 +86,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * ── 维护口径 ───────────────────────────────────────────
  *   ALL_ENDPOINTS 是"110"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
- *   docs/问卷系统-端点权限审计表.md 与《交接文档》的端点数。
+ *   docs/AUDIT.md 与《交接文档》的端点数。
  */
 @SpringBootTest(properties = {
         // 占位数据源：真连接由 @MockitoBean DataSource 顶掉，这里只是让自动配置有值可绑
@@ -445,7 +445,7 @@ class EndpointAuthMatrixTest {
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
         assertEquals(110, registered.size(),
-                "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
+                "注册的 /api 端点数变了。请同步 docs/AUDIT.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="

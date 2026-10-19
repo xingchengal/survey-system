@@ -3,12 +3,9 @@ package com.survey.dto;
 import java.time.LocalDateTime;
 
 /**
- * 协作者列表项（GET /api/survey/{id}/collaborators 的返回元素）。
- *
- * ★ 为什么单独一个 DTO，而不是直接返回实体：
- *   前端要显示"是谁"（昵称/账号），而 t_survey_collaborator 只存 user_id；
- *   让接口层做一次 JOIN 比让前端再发 N 个查用户的请求更省，也避免把整条 User（含头像）带出来。
- * ★ 字段名与 SQL 别名一致（项目开了 map-underscore-to-camel-case，但这里显式起别名，避免依赖配置）。
+ * 协作者名单项（GET /api/survey/{id}/collaborators 的元素）：账号 / 昵称 / 角色 / 邀请时间。
+ * ★ 角色到权限点：viewer 只看问卷本身；editor = survey:edit + survey:data；analyst = survey:data。
+ * 单独 DTO 是为了连表带出账号昵称，省掉前端按 user_id 逐个查人。
  */
 public class CollaboratorView {
 

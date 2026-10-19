@@ -13,26 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 
 /**
- * 演示数据：一键造/清演示用的用户与问卷（答辩演示、压测用）。
- *
- * ── 谁在调我 ──────────────────────────────────────────
- *   DemoDataController → /init、/reset 两个端点（页面是 DemoData.vue 的「演示数据」页）。
- *
- * ── 权限 ──────────────────────────────────────────────
- *   两个端点都需管理员 —— 但**权限校验不在这里**：Controller 上挂了类级 @RequireAdmin，
- *   由 aspect/AdminCheckAspect 统一实施。本类只管业务，不碰身份。
- *
- * ── 数据约定（reset 靠它精确回收，改这里要同步改 reset 逻辑）──
- *   演示用户名一律以 DEMO_PREFIX("demo_user") 开头；演示问卷的 userId 都指向这些用户。
- *   演示用户密码统一 123456，用 UserService.hashPassword() 生成（与真实注册同一套算法）。
- *   ★ reset 只删「名字带前缀」的用户及其问卷，不碰真实数据。
+ * 演示数据：一键造 / 清演示用户与问卷（答辩演示、压测用），端点仅管理员可触发。
+ * ★ 只在非 prod 生效：挡住端点的是 DemoDataController 的 @Profile("!prod")，本类仍会被实例化（别加定时任务）。
+ * ★ reset 幂等：只删 demo_user 前缀的用户及其问卷，不碰真实数据；重复 init 则续造下一批。
+ * 量级与看板口径一致（约 20 用户 / 30 问卷 / 80 答卷，访问量 = 答卷数 + 0~19）。
  */
-// ★ prod 下"不注册"的是 **DemoDataController**（它上面有 @Profile("!prod")，
-//   端点因此 404），**不是本类** —— 本类只有 @Service，prod 下照样会被实例化。
-//   别按"prod 下整个类不加载"去推断：若给本类加 @PostConstruct 或定时任务，在 prod 下是会执行的。
-//   之所以要挡住那个端点：/init 会批量创建密码统一为 123456 的 demo_user* 真实账号，
-//   管理员在生产里误点一次，库里就多 20 个可被撞库的弱口令入口。
-//   本地/演示（local 默认 profile）照常可用。
 @Service
 public class DemoDataService {
 
@@ -49,9 +34,8 @@ public class DemoDataService {
     @Autowired
     private AnswerDetailMapper answerDetailMapper;
     /**
-     * ★ 分享码必须复用 SurveyService 的实现（SecureRandom + 查重 + 重试）：
-     *   若本地另写一套不检测占用的生成器，一旦撞上 t_survey.share_code 的唯一索引，
-     *   整个 @Transactional 的"20 用户 + 30 问卷"批次会全部回滚并返回 500。
+     * 分享码必须复用 SurveyService 的实现（SecureRandom + 查重 + 重试）。
+     * 另写一套不查重的生成器，一旦撞上 t_survey.share_code 唯一索引，整批 @Transactional 全部回滚。
      */
     @Autowired
     private SurveyService surveyService;
@@ -65,14 +49,11 @@ public class DemoDataService {
     public Map<String, Object> init() {
         Map<String, Object> result = new HashMap<>();
 
-        // ★ **权限校验不在这里** —— DemoDataController 的类级 @RequireAdmin 负责
-        //   （本方法连身份参数都没有）。
-
         int existingCount = userMapper.countByUsernamePrefix(DEMO_PREFIX);
         int startIndex = existingCount + 1;
         int batchNo = existingCount / USERS_PER_BATCH + 1;
 
-        // 1. 生成用户
+        // 1. 生成用户（密码统一 123456，与真实注册同一套 hash）
         List<User> users = new ArrayList<>();
         String demoPwd = UserService.hashPassword("123456");
         for (int i = 0; i < USERS_PER_BATCH; i++) {
@@ -112,9 +93,7 @@ public class DemoDataService {
                 s.setStatus(SurveyStatus.ENDED.code());
                 s.setShareCode(surveyService.generateShareCode());
             }
-            // ★ 访问量先留 0，等下面把答卷造完再按「答卷数 + 少量只浏览未提交的访客」回填。
-            //   若在这里凭空给 0~199 次访问，30 份问卷会让管理员看板的「访客次数」直接跳到两千多，
-            //   与"只生成了 30 份问卷"完全对不上。
+            // 访问量先留 0，等答卷造完再回填；凭空给大数会让看板「访客次数」与问卷量级对不上
             s.setViewCount(0);
             s.setIsTemplate(0);
             s.setDeleted(0);
@@ -150,9 +129,7 @@ public class DemoDataService {
         for (Survey s : surveys) {
             if (!SurveyStatus.isPublished(s.getStatus())) continue;
             List<Question> questions = questionMapper.findBySurveyId(s.getId());
-            // ★ 每份已发布问卷造 3~8 份答卷：一批约 80 份，既够图表展示也不失真。
-            //   若造 5~20 份，一批就是 200+ 份，管理员看板的「总答卷」会跳到两百多，
-            //   与"30 份问卷"不成比例。
+            // 每份已发布问卷造 3~8 份，一批约 80 份：够图表展示，也不会让看板「总答卷」失真
             int ansCount = 3 + RANDOM.nextInt(6);
             int created = 0;
             for (int a = 0; a < ansCount; a++) {
@@ -196,9 +173,7 @@ public class DemoDataService {
                 totalAnswers++;
                 created++;
             }
-            // ★ 回填访问量：答卷数 + 0~19 次"只浏览没提交"的访问。
-            //   这样「访客次数」永远 ≥「总答卷」且与问卷量级自洽，看板上不会出现
-            //   "30 份问卷 / 两千多访客" 这种对不上的数字。
+            // 回填为 答卷数 + 0~19：保证「访客次数」≥「总答卷」且与问卷量级自洽
             surveyMapper.updateViewCount(s.getId(), created + RANDOM.nextInt(20));
         }
 
@@ -214,8 +189,6 @@ public class DemoDataService {
     @Transactional
     public Map<String, Object> reset() {
         Map<String, Object> result = new HashMap<>();
-
-        // ★ **权限校验不在这里**（同 init），由 DemoDataController 的类级 @RequireAdmin 负责。
 
         List<User> demoUsers = userMapper.findByUsernamePrefix(DEMO_PREFIX);
         if (demoUsers.isEmpty()) {

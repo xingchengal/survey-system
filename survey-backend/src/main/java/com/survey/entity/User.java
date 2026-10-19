@@ -5,50 +5,16 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDateTime;
 
 /**
- * 用户实体 —— 对应表 t_user。
- *
- * ── 字段 ↔ 列 ────────────────────────────────────────
- *   id / username / password / nickname / role / created_time / avatar / phone / email /
- *   deleted_at / token_valid_after / disabled
- *   （项目开了 map-underscore-to-camel-case，created_time ↔ createdTime 自动映射）
- *
- * ── ★ 表里有、但本实体**故意不映射**的列（别以为是漏了）──
- *   `profile_public`：原「资料公开开关」（需求 三.4）。需求方后来明确"不需要这个需求了，
- *   对应代码也剔除"，所以应用侧已全部删掉（端点、Service、Mapper、界面都没了）。
- *   **列本身留在库里没删**（删列不可逆，要单独确认）—— 见 UserMapper 类注释里的同一句说明。
- *
- * ── ★ deleted_at：软删除（账号注销，需求 三.5）──────────
- *   语义（唯一口径，改之前先读）：**NULL = 正常；非 NULL = 已注销**。
- *   · 所有"查用户"的 SQL 都带 `deleted_at IS NULL`（见 UserMapper 的类注释）——
- *     正因如此，"注销后登不进去、用户列表里看不到、JWT 立刻失效"这三件事
- *     **一处都不用另写判断**；
- *   · 它**会**随 /api/user/profile 返回给前端（前端据此显示"注销账号"还是"已注销"），
- *     所以这里是一个正常的映射字段，不再是"故意不映射"。
- *   · ★ 与 `username` 唯一索引的关系：已注销账号**仍然占着那个用户名**（有意为之，
- *     防他人抢注）；要放开得把唯一索引改成 (username, deleted_at) 组合唯一 —— 那是另一个决定。
- *
- * ── 谁在用 ────────────────────────────────────────────
- *   UserController（注册/登录/资料）、UserService、UserMapper、LogAspect（查昵称填日志）
- *
- * ── ★ 安全要点：password 字段的处理 ────────────────────
- *   用 @JsonProperty(WRITE_ONLY) 而不是 @JsonIgnore，原因很关键：
- *     - WRITE_ONLY：反序列化（请求体 → 对象）照常，序列化（对象 → JSON）时被忽略。
- *       register/login 用 @RequestBody User 接收，密码必须能**传进来**。
- *     - @JsonIgnore：两个方向都忽略 → password 永远读不到 → 注册和登录直接坏掉。
- *   所以这里只能用 WRITE_ONLY。加上它之后，/api/user/list、/api/user/page
- *   再也不会把全站口令哈希发给前端（在此之前是真的会返回的）。
+ * 用户实体 —— 表 t_user（map-underscore-to-camel-case 自动映射 created_time ↔ createdTime）。
+ * ★ deleted_at 软删除：NULL = 正常，非 NULL = 已注销；所有查用户的 SQL 都带 deleted_at IS NULL。
+ * ★ password 用 @JsonProperty(WRITE_ONLY)：请求体能写入、序列化不返回；不能换 @JsonIgnore，否则注册/登录反序列化不到。
  */
 public class User {
     private Integer id;
     private String username;
 
-    /**
-     * 密码（PBKDF2 加盐哈希，格式 pbkdf2$迭代次数$盐$哈希；旧数据可能是 MD5，登录时会自动升级）。
-     * 只允许"从请求体写入"，绝不序列化返回给前端 —— 这样 /api/user/list、/api/user/page
-     * 就不会再把全站口令哈希发给浏览器。
-     * 注意：这里不能用 @JsonIgnore，因为 register/login 用的是 @RequestBody User，
-     * 加了 @JsonIgnore 会导致 password 反序列化不进来，注册和登录会直接坏掉。
-     */
+    /** 密码（PBKDF2 加盐哈希，格式 pbkdf2$迭代次数$盐$哈希；旧 MD5 数据登录时自动升级）。
+     * WRITE_ONLY：只从请求体写入、绝不序列化返回；换 @JsonIgnore 会让注册/登录解不出密码。 */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
     private String nickname;         // 昵称（操作日志、回收站里显示的就是它）
@@ -58,40 +24,19 @@ public class User {
     private String phone;            // 手机号（1[3-9] 开头的 11 位）
     private String email;            // 邮箱
 
-    /**
-     * 注销时间（软删除）：**NULL = 正常；非 NULL = 已注销**。
-     * ★ 对应列 `t_user.deleted_at`（账号注销的软删除标记）。
-     * ★ 它随 /api/user/profile 返回给前端（前端据此把「注销账号」换成「已注销」提示）；
-     *   但**不要**把它当成"能由请求体写入"的字段 —— 只有 `UserService.deleteAccount`
-     *   与 `restoreUser` 两个方法会写它（没有任何 DTO 暴露它）。
-     */
+    /** 注销时间（软删除）：NULL = 正常，非 NULL = 已注销；随 /api/user/profile 返回前端。
+     * 只由 UserService.deleteAccount / restoreUser 写，没有 DTO 暴露它。
+     * 已注销账号仍占着原 username（防抢注），放开需把唯一索引改成 (username, deleted_at)。 */
     private LocalDateTime deletedAt;
 
-    /**
-     * 令牌生效起点：JWT 的 `iat` **早于**它即视为失效（NULL = 不限制）。
-     * ★ 列 `t_user.token_valid_after`，语义是"此刻之前签发的票全部作废"。
-     * ★ 为什么需要它（JWT 无法吊销，这是唯一能作废已发出票据的办法）：
-     *   access token 是自包含的，服务端没有黑名单；要"踢掉别的会话"只能记一个时间点，
-     *   然后在过滤器里拒绝签发时间早于它的票（见 `JwtAuthFilter` / `DocAccessFilter`）。
-     * ★ 写入点只有两个，都在 Service 里：`restoreUser`（恢复已注销账号）与
-     *   `updatePassword`（改密码）——**不要**新增写入点而不想清楚"作废谁的票"。
-     */
+    /** 令牌生效起点：JWT 的 iat 必须**严格晚于**它，否则视为失效（NULL = 不限制）。
+     * 语义是「此刻之前签发的票全部作废」：JWT 无黑名单，只能靠时间点踢掉旧会话。
+     * 写入点只有 restoreUser 与 updatePassword；新增写入点先想清「作废谁的票」。 */
     private LocalDateTime tokenValidAfter;
 
-    /**
-     * 禁用标记（管理端处置）：**0 = 正常；1 = 已禁用**。
-     * ★ 对应列 `t_user.disabled`（NOT NULL DEFAULT 0，见 sql/migration-user-disabled.sql）。
-     * ★ 与 {@link #deletedAt} 的区别（两者都会"登不进去"，但语义不同）：
-     *   · 注销 = **用户自己**不打算用了（走 DELETE /api/user/account，要输密码），数据保留；
-     *   · 禁用 = **管理员**的处置（内容违规 / 异常操作），数据同样保留，但由管理员解禁。
-     *   合并成一列会让列表里分不清"他自己注销的"还是"被我禁用的"，恢复路径也不同。
-     * ★ 生效链路三处，缺一处就会"看起来禁了、其实还能用"：
-     *   ① 登录：`UserController.login` 在密码验过后判它；
-     *   ② 已登录：`JwtAuthFilter` 每个请求查库时判它；
-     *   ③ 禁用/解禁同时写 `tokenValidAfter`（作废此前签发的票），否则最长要等 12 小时。
-     * ★ 用 Integer 而不是 boolean：与 tinyint 列一一对应，且 null 能表达"老数据没读到这一列"
-     *   （读不到时前端显示为正常，而不是把所有人显示成禁用）。
-     */
+    /** 禁用标记：0 = 正常，1 = 已禁用（与 deletedAt 的注销不同，禁用是管理员的处置）。
+     * 三处生效缺一不可：登录时判、JwtAuthFilter 每请求判、禁用/解禁同时推 tokenValidAfter（否则最长等 12 小时）。
+     * 用 Integer 而非 boolean：与 tinyint 列对应，null 表达「老数据没读到」，前端显示正常。 */
     private Integer disabled;
 
     public String getPhone() { return phone; }

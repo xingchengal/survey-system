@@ -11,18 +11,17 @@ import java.util.List;
 
 /**
  * 模板分类清单（t_template_category）。
- *
- * ★ 它只存"有哪些分类"，不存分类下有多少模板 —— 数量永远由 t_survey 现算，
- *   否则模板改分类/取消模板时要同步维护计数，漏一处就长期对不上。
+ * ★ name 唯一；分类可独立于模板存在（允许空分类，删除分类不级联删模板）。
+ * 只存"有哪些分类"，不存分类下的模板数 —— 数量由 t_survey 现算，避免两边计数长期对不上。
  */
 @Mapper
 public interface TemplateCategoryMapper {
 
-    /** 全部分类，按展示顺序（同序按 id，保证稳定）。 */
+    /** 全部分类，按展示顺序（sort_order，同序按 id 保证稳定）。 */
     @Select("SELECT * FROM t_template_category ORDER BY sort_order ASC, id ASC")
     List<TemplateCategory> findAll();
 
-    /** 同名分类数量（唯一键是最终防线，这里是给用户友好 400 的预检）。 */
+    /** 同名分类数量（唯一键才是最终防线，这里只用于给用户友好 400 的预检）。 */
     @Select("SELECT COUNT(*) FROM t_template_category WHERE name = #{name}")
     int countByName(@Param("name") String name);
 
@@ -35,9 +34,8 @@ public interface TemplateCategoryMapper {
     int countAll();
 
     /**
-     * 新增分类。
-     * ★ INSERT IGNORE 供"设为模板时自动登记分类"使用：两个请求同时登记同一个新分类时，
-     *   后到的会被唯一键忽略，不抛异常、也不影响这次设为模板。
+     * 新增分类（INSERT IGNORE）。
+     * 供"设为模板时自动登记分类"用：并发登记同名分类时，后到的被唯一键忽略，不抛异常。
      */
     @Insert("INSERT IGNORE INTO t_template_category(name, sort_order) VALUES(#{name}, #{sortOrder})")
     @Options(useGeneratedKeys = true, keyProperty = "id")

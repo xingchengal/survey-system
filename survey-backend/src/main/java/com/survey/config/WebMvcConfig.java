@@ -22,9 +22,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private RateLimitInterceptor rateLimitInterceptor;
 
     /**
-     * 注册拦截器。
-     * ★ 只挂 /api/** —— 静态资源、SPA 路由、接口文档不该被限流（文档页面会连续拉很多请求）。
-     * ★ 拦截器在 Filter 之后执行，所以能读到 JwtAuthFilter 注入的 X-User-Id（AI 限流按用户计数就靠它）。
+     * 只挂 /api/**：静态资源、SPA 路由与文档页面不该被限流。
+     * 拦截器在 Filter 之后执行，能读到 JwtAuthFilter 注入的 X-User-Id。
      */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -32,17 +31,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     }
 
     /**
-     * CORS 跨域配置。
+     * CORS：只放行本机开发来源（5173 Vite、8080 后端自身）。
      *
-     * ★ 安全约束（不要改成通配）：
-     *   `addAllowedOriginPattern("*")` + `setAllowCredentials(true)` 组合在一起等于
-     *   「任何网站都能带着浏览器里的凭证跨域调我的接口」，所以只放行本机开发用的来源：
-     *     - 5173 是 Vite 开发服务器（前端 npm run dev）
-     *     - 8080 是后端自己（同源部署时其实根本用不到 CORS）
-     *   生产环境是「前端 dist 拷进后端 static」的同源单包部署，天然不需要 CORS。
-     *
-     *   要在局域网 / 别的域名访问，把来源加进下面的 List 即可，
-     *   必须写完整的「协议 + 域名 + 端口」，不支持通配。
+     * ★ 不要改成通配：allowCredentials(true) + "*" 等于任何网站都能带浏览器凭证调接口。
+     * 生产是同源单包部署，本就不需要 CORS；加来源必须写全“协议+域名+端口”。
      */
     @Bean
     public CorsFilter corsFilter() {

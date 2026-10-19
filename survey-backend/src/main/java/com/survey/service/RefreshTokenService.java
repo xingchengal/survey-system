@@ -18,36 +18,11 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 
 /**
- * 刷新令牌业务 —— "记住我"的长效凭证（7 天，双 token 方案的第二枚）。
- *
- * ── 为什么需要它（而不是把 JWT 有效期拉长）──────────────
- *   见 {@link com.survey.entity.RefreshToken} 的类注释：JWT 无法吊销，
- *   把它的有效期从 12 小时拉到 7 天等于把"不可撤销的凭证"暴露 7 天。
- *   这里用"短 JWT + 可吊销的长效 refresh token"把风险收回来。
- *
- * ── 生命周期（改代码前务必理解）────────────────────────
- *   1. 登录勾选"记住我" → {@link #issue} 签发一枚随机串（**明文只返回给客户端一次**），
- *      库里只存它的 SHA-256；
- *   2. access token 过期后，客户端带 refresh token 调 /api/user/refresh →
- *      {@link #rotate} 校验（存在 / 未过期 / 未吊销）→ **旧令牌立即吊销** + 签发新的一枚
- *      （一次性轮换：被盗用会因"旧令牌已失效"而暴露）；
- *   3. 登出 → {@link #revokeByRawToken}（带 token 时精确吊销那一枚）
- *      或 {@link #revokeAllByUser}（没带 token 但有登录身份时，吊销该用户全部）。
- *
- * ── ★★ 谁会"吊销该用户全部令牌"（改这里前先看）──────────
- *   {@link #revokeAllByUser} 现在有**三个**调用点，都是"让该用户所有会话立刻失效"的语义：
- *     · \`UserController.logout\`（没带 refresh token 但有登录身份时）；
- *     · \`UserService.updatePassword\`（**改密码踢会话**）；
- *     · \`UserService.deleteAccount\`（注销账号）。
- *   ★ 但它们**只解决 refresh token**：已经签发的 access token（最长 12 小时）JWT 无法吊销，
- *     要靠 \`t_user.token_valid_after\` 作废 —— 改密码那条链路上两件事是一起做的
- *     （见 \`UserService.updatePassword\` 的注释）。**只吊销 refresh token 是不够的**：
- *     对方手里那枚旧 access token 还能继续用到自然过期。
- *
- * ── 与需求的对齐──────────────────────────────────────
- *   · 需求："校验凭证一次性使用" —— 本类是 refresh token 的轮换，滑块凭证的一次性在 CaptchaService；
- *   · 需求："记住我延长 JWT 有效期" —— 实现为"access 12h + refresh 7d"，
- *     ★ 用户明确要求把常见的 30 天改成 **7 天**，所以这里是 7 天。
+ * 刷新令牌（"记住我"的长效凭证，7 天）：双 token 方案的第二枚。
+ * ★ 库里只存 SHA-256，明文只在签发响应里出现一次；JWT 无法吊销，靠这枚可吊销的令牌收回风险。
+ * ★ 一次性轮换：每次刷新都吊销旧令牌再签新的，旧令牌被盗用会因"已失效"暴露。
+ * 改密码 / 注销账号必须调 revokeAllByUser，让该用户所有会话立刻失效。
+ * 只吊销 refresh token 不够：已签发的 access token（最长 12h）要靠 t_user.token_valid_after 作废。
  */
 @Service
 public class RefreshTokenService {
@@ -100,8 +75,7 @@ public class RefreshTokenService {
             throw new BizException("登录状态已失效，请重新登录");
         }
         if (stored.getRevoked() != null && stored.getRevoked() != 0) {
-            // ★ 这条日志值得留：一次性的令牌被用了第二次，通常意味着它被复制/盗用，
-            //   或者客户端并发刷新（多标签页同时过期）—— 两者都该能查出来。
+            // 一次性令牌被用第二次，通常意味着被复制/盗用或客户端并发刷新，这条日志要留。
             LOG.warn("刷新令牌已被吊销却再次使用：userId={} tokenId={}", stored.getUserId(), stored.getId());
             throw new BizException("登录状态已失效，请重新登录");
         }
@@ -137,10 +111,9 @@ public class RefreshTokenService {
     }
 
     /**
-     * 定期清理过期/陈旧记录（依赖启动类 @EnableScheduling）。
-     * ★ 为什么必须有：这张表**只增不减**（每次登录勾"记住我"、每次轮换都会插一行），
-     *   不清的话长期运行会一直涨；`expires_at` 上有索引，这条 DELETE 走范围扫描。
-     * ★ 整体 try-catch：维护任务失败不该影响业务（与 ErrorLogService.purgeExpiredLogs 同款）。
+     * 定期清理过期 / 陈旧记录（依赖启动类 @EnableScheduling）。
+     * 表只增不减（每次登录、每次轮换都插行），不清会一直涨；expires_at 有索引，DELETE 走范围扫描。
+     * 整体 try-catch：维护任务失败不该影响业务。
      */
     @Scheduled(cron = "0 15 4 * * ?")
     public void purgeExpired() {
@@ -178,9 +151,7 @@ public class RefreshTokenService {
 
     /**
      * SHA-256 十六进制（64 字符，正好放进 varchar(128)）。
-     * ★ 为什么用 SHA-256 而不是 PBKDF2（密码那种慢哈希）：
-     *   refresh token 是**高熵随机串**（32 字节），不存在字典/暴力破解空间，
-     *   慢哈希只会让每次刷新都多花 100ms；密码是低熵用户输入才必须慢哈希。
+     * 不用 PBKDF2：refresh token 是 32 字节高熵随机串，无字典/暴力空间，慢哈希只会让每次刷新多花 100ms。
      */
     static String sha256Hex(String raw) {
         try {

@@ -1,29 +1,9 @@
 package com.survey.common;
 
 /**
- * 题型 —— 取代散落各处的魔数 {@code 1 / 2 / 3 / 4 / 5 / 6 / 7}。
- *
- * ── 为什么必须收口 ────────────────────────────────────
- *   一旦判断散落在 AnswerService / QuestionService / DemoDataService 等处，
- *   新增题型时就要在保存、复制、导出、答题端、统计端多处同步修改 —— 极易漏。
- *   收口之后，"哪些题型有选项""哪些题型出图表"只有这里说了算。
- *
- * ── 与数据库的约定（不要改这些数字）────────────────────
- *   1 = 单选题（有 options）
- *   2 = 多选题（有 options，一选项一行）
- *   3 = 单行填空（没有 options）
- *   4 = 多行文本（没有 options）
- *   5 = 下拉单选（有 options，单选语义）
- *   6 = 评分题（1~5 分，没有 options）
- *   7 = 日期（yyyy-MM-dd，没有 options）
- *   8 = 矩阵题（行/列标题存 t_question.matrix_rows / matrix_cols，**不占 options**；
- *       答案一行一个矩阵行，content=列标题、row_key=行标题）
- *   9 = 排序题（有 options；答案一选项一行，rank_no=名次，content=选项原文）
- *  10 = NPS（0~10 分，没有 options，content 存 "0"~"10"）
- *
- * ★ 新题型一律**追加**在末尾，绝不复用旧数字：
- *   历史答卷的 t_answer_detail 只存 content，题型由 t_question.type 决定，
- *   复用数字会让"老答卷按新题型解释"，统计直接错乱。
+ * 题型：1 单选 / 2 多选 / 3 单行填空 / 4 多行文本 / 5 下拉 / 6 评分 / 7 日期 / 8 矩阵 / 9 排序 / 10 NPS。
+ * ★ 新题型一律追加在末尾，绝不复用旧数字：历史答卷只存 content，复用数字会让老答卷按新题型解释。
+ * ★ "有选项 / 出图表 / 多行答案"只由本类判定，别在 Service 里另写一套。
  */
 public enum QuestionType {
 
@@ -60,11 +40,8 @@ public enum QuestionType {
     }
 
     /**
-     * 是否有选项（数据可能来自 DB 的 Integer）。
-     * ★ 这是全项目"选项存在 t_option"的**唯一判定口径** —— 保存、复制、版本快照都走它。
-     * ★ 下拉有 options（复用选项表），但它仍是"单选语义"（一题一行）。
-     * ★ 排序题也有 options：候选答案就是被排序的对象（答案一选项一行 + rank_no）。
-     * ★ 矩阵题**不在其中**：它的行列标题在 t_question 的两列里，不占 t_option。
+     * 是否有选项（存在 t_option）—— 全项目唯一判定口径，保存、复制、版本快照都走它。
+     * ★ 矩阵题不占 t_option：行列标题在 t_question 的两列里。
      */
     public static boolean hasOptions(Integer type) {
         return type != null && (type == SINGLE.code || type == MULTI.code
@@ -97,13 +74,8 @@ public enum QuestionType {
     }
 
     /**
-     * 是否用"分组计数"口径出统计卡（chartData）。
-     * ★ 评分题没有 options，但答案就是 1~5 的离散分数，按 content 分组天然是分布图；
-     *   NPS 同理（0~10 的分布就是它的图）。
-     * ★ 矩阵/排序也走 chartData，但**不是**普通的 content 分布：
-     *     · 矩阵按 `(row_key, content)` 分组（每一行各看各的列分布）；
-     *     · 排序返回 `{content, count, avgRank}`（每个选项的平均名次）。
-     *   统计侧靠 {@link #isMatrix}/{@link #isRanking} 分流，见 AnswerService.getSurveyStatistics。
+     * 是否用"分组计数"口径出统计卡：评分 / NPS 按 content 分布；
+     * 矩阵按 (row_key, content)、排序返回 {content, count, avgRank}，统计侧靠 isMatrix / isRanking 分流。
      */
     public static boolean hasChart(Integer type) {
         return hasOptions(type) || isRating(type) || isNps(type) || isMatrix(type);
@@ -124,20 +96,14 @@ public enum QuestionType {
         return type != null && type == NPS.code;
     }
 
-    /**
-     * 是否属于「进阶题型包」（矩阵 / 排序 / NPS）—— 计费判定的唯一口径。
-     * ★ 计费在保存题目时按"问卷是否含进阶题型"一次性扣（见 WalletFeature.ADVANCED_TYPES），
-     *   所以这个判断只允许出现在 {@code QuestionService.doSaveQuestions} 与测试里。
-     */
+    /** 是否属于进阶题型包（矩阵 / 排序 / NPS）—— 计费判定的唯一口径，只应在保存题目与测试里调用。 */
     public static boolean isAdvanced(Integer type) {
         return isMatrix(type) || isRanking(type) || isNps(type);
     }
 
     /**
-     * 是否允许"一道题多行答案"。
-     * ★ 这三类都是"一选项/一行一条"：多选（勾几个几条）、矩阵（一行一条）、
-     *   排序（每个名次一条）。提交守卫必须放行它们，否则勾第二个选项/填第二行就被判灌票。
-     * ★ 不要用 `hasOptions && !isSingle` 代替：矩阵没有 options，会被漏掉。
+     * 是否允许"一道题多行答案"（多选 / 矩阵 / 排序）—— 提交守卫必须放行，否则勾第二项就被判灌票。
+     * 不要用 `hasOptions && !isSingle` 代替：矩阵没有 options，会被漏掉。
      */
     public static boolean isMultiRow(Integer type) {
         return type != null && (type == MULTI.code || type == MATRIX.code || type == RANKING.code);

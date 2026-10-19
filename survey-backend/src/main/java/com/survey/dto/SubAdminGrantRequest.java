@@ -3,9 +3,9 @@ package com.survey.dto;
 import java.util.List;
 
 /**
- * 新增 / 修改次级管理员权限的请求体。
- *
- * ★ 不接收 role：角色只能由服务端写成 subadmin/user，客户端传什么都不认。
+ * 新增 / 修改次级管理员权限的请求体：userId + permissions，至少一项。
+ * ★ 只认 ADMIN_GRANTABLE（模块级）；对象级 4 个（edit/publish/data/delete）永不发给次级管理员。
+ * 不接收 role：角色只能由服务端写成 subadmin/user。
  */
 public class SubAdminGrantRequest {
 

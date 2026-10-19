@@ -16,26 +16,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 模板种子：把系统预置的 31 个模板（7 大分类）一次性写进数据库。
- *
- * ── 为什么需要它 ──────────────────────────────────────
- *   「模板广场」的数据不是运行时产生的，而是这批预置数据。重建数据库后必须调它恢复，
- *   否则模板广场会是空的。前端没有调用入口 —— 它是运维/初始化工具，手工 POST 一次即可。
- *
- * ── 权限 ──────────────────────────────────────────────
- *   需管理员 —— 权限由 Controller 的类级 @RequireAdmin 负责（AdminCheckAspect 实施），本类不碰身份。
- *
- * ── 幂等 ──────────────────────────────────────────────
- *   先查库里是否已有**预置模板（user_id = 0）**，有就返回 {count:0, skipped:N} ——
- *   否则无脑 INSERT，点两次模板就从 31 变 62。
- *   ★ 判据只能是"预置模板"：若放宽成"存在任意模板就跳过"，管理员只要把自己的任意一份问卷
- *     设为模板，播种就被永久阻塞（详见 init() 内的注释）。
+ * 模板种子：把系统预置的 31 个模板（7 大分类）一次性写进库，重建库后恢复模板广场用。
+ * ★ 幂等：只认预置模板（user_id = 0），有就跳过；不能放宽成"存在任意模板"——管理员设过一次自建模板就永久阻塞播种。
+ * ★ 仅管理员：权限由 TemplateSeederController 的 @RequireAdmin 负责，本类不碰身份。
+ * 模板 userId 固定 0（公共资产）；调用端点的 Controller 带 @Profile("!prod")，生产重建库要先用 local 启动再调。
  */
-// ★ 生产环境"不注册"的是 **TemplateSeederController**
-//   （它上面有 @Profile("!prod")，所以 prod 下端点 404），**不是本类** ——
-//   本类只有 @Service，prod 下照样会被实例化。
-//   注意：模板本身是「模板广场」的数据来源，生产重建库时**需要**跑一次 ——
-//   那种场景请用 --spring.profiles.active=local 启动后再调用该端点。
 @Service
 public class TemplateSeederService {
 
@@ -50,19 +35,8 @@ public class TemplateSeederService {
     public Map<String, Object> init() {
         Map<String, Object> result = new HashMap<>();
 
-        // ★ **权限校验不在这里** —— 由 TemplateSeederController 的类级 @RequireAdmin
-        //   统一拦截（AdminCheckAspect 实施）；本方法不做任何身份判断。
-
-        // ★ 幂等保护：已有**预置模板**就跳过播种 —— 否则每调用一次就多生成 31 个模板
-        //   （31 → 62 → 93…）。
-        //
-        // ★ 判定条件必须是"存在**预置**模板"，不能放宽成"存在任意模板"：
-        //   后者会让管理员只要把自己的任意一份问卷设为模板（PUT /set-template/{id}），
-        //   这个接口就永远不再播种 —— 重建数据库/恢复环境时那 31 个预置模板再也回不来，
-        //   而接口还返回 {success:true, count:0, skipped:1}，运维看到"成功"根本不会怀疑。
-        //   区分方式：预置模板的 user_id 固定为 0（见下方 tpl()），用户自建模板的 user_id 是本人。
-        //   ★ 已知局限（有意保留）：本方法仍是"全有或全无"——只缺其中几个（如手工删掉 3 个）
-        //     不会被补齐；要补齐需先清空全部模板。这一条已写进注释，避免下次有人误以为它能"修复缺失"。
+        // 幂等：只认 user_id = 0 的预置模板（用户自建模板 user_id 是本人，不能作为跳过依据）。
+        // 已知局限：全有或全无 —— 只缺其中几个不会被补齐，要补齐需先清空全部模板。
         List<Survey> existingTemplates = surveyMapper.findTemplates(null);
         long presetCount = existingTemplates == null ? 0L
                 : existingTemplates.stream()
@@ -319,6 +293,7 @@ public class TemplateSeederService {
         return result;
     }
 
+    /** 写一个预置模板：userId 固定 0（公共资产）、isTemplate = 1，题目与选项按序插入。 */
     private void tpl(String category, String title, String desc, Object[][] questions) {
         Survey s = new Survey();
         s.setUserId(0);

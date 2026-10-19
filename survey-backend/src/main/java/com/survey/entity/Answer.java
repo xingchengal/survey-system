@@ -3,51 +3,37 @@ package com.survey.entity;
 import java.time.LocalDateTime;
 
 /**
- * 答卷实体 —— 对应表 t_answer，"一次提交一行"（表头）。
- *
- * ── 与 AnswerDetail 的关系 ─────────────────────────────
- *   t_answer        : 谁、在什么时候、提交了哪份问卷（本类）
- *   t_answer_detail : 这次提交里每题一行（AnswerDetail）
- *   → 统计"收到多少份答卷"用这张表；统计"某题选了什么"用明细表。
- *
- * ── 谁在用 ────────────────────────────────────────────
- *   AnswerService.submit()（插入）、AnswerMapper、
- *   SurveyStatistics.vue（答卷列表表格）
+ * 答卷表头 —— 表 t_answer，一次提交一行；每题明细在 {@link AnswerDetail}（t_answer_detail）。
+ * 统计「收到多少份答卷」用本表，统计「某题选了什么」用明细表。
  */
 public class Answer {
     private Integer id;
     private Integer surveyId;        // 答的哪份问卷
-    private Integer userId;          // 填写者 ID，**NULL 表示匿名**（凭分享码提交，不要求登录）
+    private Integer userId;          // 填写者 ID，NULL = 匿名（凭分享码提交，不要求登录）
     private LocalDateTime submitTime; // 提交时间（数据库默认值填充）
 
-    /**
-     * 答题耗时（毫秒）。由答题页在提交时上报；NULL = 未上报（老客户端 / 直接调接口）。
-     * ★ 这是**客户端提供的值，可以伪造** —— 它只用于"质控提示"，绝不能当安全边界或计费依据。
-     */
+    /** 答题耗时（毫秒），NULL = 未上报。★ 客户端上报可伪造，只用于质控提示，不能当安全边界或计费依据 */
     private Integer durationMs;
 
-    /** 质控标记：0 = 正常，1 = 可疑（命中任一无效样本规则） */
+    /** 质控标记：0=正常，1=可疑（命中任一无效样本规则） */
     private Integer qualityFlag;
 
     /** 命中的规则码，逗号分隔（TOO_FAST / STRAIGHT_LINE / OPTION_MISMATCH / DUP_TITLE_CONFLICT） */
     private String qualityReasons;
 
-    /**
-     * 本次答卷的总分（提交那一刻的配置快照）。NULL = 未判分。
-     * ★ 存快照而不是每次按当前分值重算：作者事后改分值不能让"上周的 80 分"变成 76 分。
-     */
+    /** 本次总分（提交时的配置快照），NULL = 未判分。★ 存快照，作者事后改分值才改不动已出的成绩 */
     private Integer totalScore;
 
-    /** 本次得分。NULL = 未判分（普通问卷，或判分上线前的历史答卷）。 */
+    /** 本次得分，NULL = 未判分 */
     private Integer earnedScore;
 
-    /** 是否及格：NULL = 未设及格线或未判分；0/1 由 {@link com.survey.common.Grader} 判定。 */
+    /** 是否及格：NULL = 未设及格线或未判分；0/1 由 {@link com.survey.common.Grader} 判定 */
     private Integer isPassed;
 
-    /** 是否已签到：0=未签到（默认），1=已签到。★ 只有问卷启用签到核销后作者才会改它。 */
+    /** 是否已签到：0=未签到（默认），1=已签到；只有问卷启用签到核销后作者才会改它 */
     private Integer checkedIn;
 
-    /** 签到时间：取消签到时置回 NULL。 */
+    /** 签到时间；取消签到时置回 NULL */
     @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime checkedInAt;
 

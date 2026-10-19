@@ -11,23 +11,10 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 站内通知业务：发通知、查我的通知、标记已读、删除。
- *
- * ── 谁在调我 ──────────────────────────────────────────
- *   NotificationController  → 站内通知的全部接口
- *   AnswerService.submit()  → 有人提交答卷后，给问卷创建者发一条
- *
- * ── 涉及的表 ──────────────────────────────────────────
- *   t_notification（type 区分来源，link 存点击后要跳的前端路由）
- *
- * ── ★ 用户隔离（这个类的重点）──────────────────────────
- *   markReadByUser / deleteByUser / clearAll 都**要求传 userId**，而且 mapper 的
- *   SQL 里 WHERE 也带 user_id —— 双保险。
- *   目的：就算有人把别人的通知 id 报上来，也改不动/删不掉别人的数据。
- *
- * ── 异步 ──────────────────────────────────────────────
- *   send() 标了 @Async：发通知是"顺手做的事"，不能拖慢提交答卷的主流程。
- *   依赖 SurveyBackendApplication 上的 @EnableAsync，去掉它就会退化成同步执行。
+ * 站内通知（t_notification）：发送、我的通知、已读、删除。
+ * ★ send 是 @Async：发通知是顺手做的事，失败只记日志、绝不阻塞提交答卷等主流程。
+ * 读写都带 userId（SQL 里 WHERE user_id 再过一层），别人的通知 id 报上来也改不动 / 删不掉。
+ * link 存点击后跳转的前端路由（如 /my/surveys/98/statistics），不是后端接口。
  */
 @Service
 public class NotificationService {
@@ -38,14 +25,9 @@ public class NotificationService {
     private NotificationMapper notificationMapper;
 
     /**
-     * 发一条站内通知（异步）。
-     * ★ userId 为 null 直接返回 —— 匿名答卷没有明确的"接收者"。
+     * 发一条站内通知（异步）：只 insert，不读回；userId 为 null 直接返回（匿名答卷没有接收者）。
      *
-     * @param userId  接收者 id
-     * @param title   标题（如「收到新答卷」）
-     * @param content 正文
-     * @param type    类型标记（如 "answer"），前端可据此显示不同图标
-     * @param link    点击后跳转的前端路由（如 /my/surveys/98/statistics）
+     * @param link 前端路由（如 /my/surveys/98/statistics）
      */
     @Async
     public void send(Integer userId, String title, String content, String type, String link) {
@@ -59,11 +41,8 @@ public class NotificationService {
             n.setLink(link);
             notificationMapper.insert(n);
         } catch (Exception e) {
-            // ★ @Async 方法抛出的异常**不会传回调用方**，而项目没有注册
-            //   AsyncUncaughtExceptionHandler，所以 insert 失败只会由默认处理器打一行日志，
-            //   业务侧（提交答卷那条链路）完全不知道通知没发出去 ——
-            //   "收到新答卷"这类关键提醒就静默丢了。
-            //   所以与 ErrorLogService.save 同款：自己兜住，并留下一条可查的明确日志。
+            // @Async 抛出的异常不会传回调用方（也没有 AsyncUncaughtExceptionHandler）：
+            // 自己兜住并留明确日志，否则「收到新答卷」这类关键提醒会静默丢失
             LOG.error("发送站内通知失败：userId={} title={} —— {}", userId, title, e.getMessage(), e);
         }
     }
@@ -78,12 +57,7 @@ public class NotificationService {
         return notificationMapper.countUnread(userId);
     }
 
-    /**
-     * 标记单条通知为已读。
-     * ★ 带 userId：只能标记「自己的」通知，传别人的 id 会更新 0 行。
-     *
-     * @return 受影响行数；0 表示不是你的（或不存在）
-     */
+    /** 标记单条通知为已读（带 userId，传别人的 id 只会更新 0 行）。 */
     public int markReadByUser(Integer id, Integer userId) {
         return notificationMapper.markReadByUser(id, userId);
     }
@@ -104,22 +78,10 @@ public class NotificationService {
     }
 
     /**
-     * 删除**指向某份问卷**的通知（问卷被彻底删除 / 用户被删除时由级联逻辑调用）。
+     * 删除指向某份问卷的通知（问卷被彻底删除时调用）：不清理的话，接收人点开必然「问卷不存在」，未读红点也一直算着。
+     * ★ 只精确匹配带问卷 id 的 link；不能按 /my/surveys% 一把清 —— 协作者 / 审核 / 恢复申请的泛化入口删了仍有效。
      *
-     * ── 这修的是什么问题（C3 的「通知孤儿」）────────────────
-     *   「收到新答卷」的通知 link 是 `/my/surveys/{id}/statistics`。问卷一旦被彻底删除，
-     *   那条通知**不会**跟着消失 —— 接收人点进去必然「问卷不存在」，
-     *   未读红点也会一直算着它（前端每 30 秒轮询 `/notification/unread`）。
-     *   这不是报错，所以只能靠这里主动清理。
-     *
-     * ── 为什么能精确到"这份问卷"，而不会误删别的通知 ──────────
-     *   全站**只有** AnswerService 发的那一类通知带问卷 id；
-     *   协作者 / 举报审核 / 恢复申请的 link 都是泛化的 `/my/surveys` 或 `/admin/reviews?...`，
-     *   问卷删了之后那些入口仍然有效 ⇒ **不能**按 `/my/surveys/%` 一把清。
-     *   mapper 里用的是「等值 + 带结尾斜杠的前缀」两条，理由见 NotificationMapper。
-     *
-     * @param surveyId 被删除的问卷 id
-     * @return 清掉的通知行数（0 是正常的：没人收到过这份问卷的答卷通知）
+     * @return 清掉的行数（0 正常：没人收到过这份问卷的答卷通知）
      */
     public int deleteBySurveyLink(Integer surveyId) {
         if (surveyId == null) return 0;

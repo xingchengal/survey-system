@@ -24,36 +24,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 权限点切面 —— 实施 {@link RequirePermission}：**"这个人有没有这项能力"** 的统一闸门。
+ * 权限点切面 —— 实施 {@link RequirePermission}：判「这个人有没有这项能力」的统一闸门。
  *
- * ── 它解决什么 ────────────────────────────────────────
- *   {@code @RequireAdmin} 只分"管理员/非管理员"；一旦出现协作者（只读、只能看数据），
- *   就必须按**权限点**判。把判断写成注解 + 切面，新增端点只要挂注解就一定有校验，
- *   不会再出现"忘写一行 if → 横向越权"。
- *
- * ── 身份从哪来（可信吗）────────────────────────────────
- *   X-User-Id / X-User-Role 由 filter/JwtAuthFilter 解析 JWT 后**覆盖写入**，
- *   客户端伪造的同名头会被覆盖成真实值 —— 所以这里读它是可信的。
- *   ★ 前提同 AdminCheckAspect：请求经过了 JwtAuthFilter（白名单路径也会注入）。
- *
- * ── 判定顺序（顺序本身是安全口径，别调换）────────────────
- *   ① 非 Web 线程 → **放行**（与 AdminCheckAspect 完全一致：内部调用 Controller 方法时没有请求上下文）
- *   ② 注解未指定权限点 / 写了非法权限点 → **抛 IllegalStateException（→ 500 并记日志）**
- *      ★ 这是配置错误，不是"用户没权限"。若按拒绝处理（403），配错的人会以为"用户权限没配好"，
- *        排查方向从一开始就错了 —— 必须让它响。
- *   ③ 管理员 → **放行**（兜底；不给 admin 逐条配权限点，少一处漏配就少一个越权口子）
- *   ④ 未登录（没有 X-User-Id）→ **403**
- *   ⑤ 权限点**全部**命中才放行（AND 语义，见注解注释）
- *
- * ── 同一请求只查一次库 ────────────────────────────────
- *   权限点集合缓存在 request attribute 上：一个请求里可能命中多个带注解的方法
- *   （Controller 方法 + 内部调用），不缓存就是 N 次 SQL。
- *   ★ 只在一**次请求**内有效，不会跨请求失效问题；角色变更下一个请求即生效。
- *
- * ── 与 H2-3 的关系 ────────────────────────────────────
- *   本切面只管"能力"，不管"归属"。协作者能不能动**这一份**问卷由
- *   OwnershipGuard.canAccess(...) 判（作者 / 协作者 / 管理员三选一）。
- *   两者配合才是完整的授权：能力（能不能编辑）× 对象（能不能动这份）。
+ * ★ 判定顺序是安全口径，别调换：非 Web 线程放行 → 配置错误抛 500 → admin 兜底放行 → 未登录 403 → 权限点全部命中才放行。
+ * 注解没写权限点或写了非法值时抛 IllegalStateException（500），不能按 403 处理：那是代码 bug。
+ * 只管「能力」；「能不能动这一份问卷」由 OwnershipGuard.canAccess 判，两者合起来才是完整授权。
+ * 权限点集合缓存在 request attribute：一次请求最多查一次库，随请求结束释放。
  */
 @Aspect
 @Component
@@ -72,8 +48,7 @@ public class PermissionAspect {
     public void requirePermission(JoinPoint joinPoint) {
         RequirePermission annotation = findAnnotation(joinPoint);
         if (annotation == null) {
-            // 切点只会在注解存在时命中；走到这里说明 Spring 的代理与运行时注解不一致。
-            // 按"配置错误"直接响，不放行（失败方向必须是拒绝）。
+            // 切点只会在注解存在时命中；走到这里说明代理与运行时注解不一致，按配置错误直接响。
             throw new IllegalStateException("@RequirePermission 命中但读不到注解：" + joinPoint.getSignature());
         }
 
@@ -83,8 +58,7 @@ public class PermissionAspect {
         }
         for (String code : required) {
             if (!Permission.isValid(code)) {
-                // ★ 写错权限点（如 survey:editt）是**代码 bug**：抛 500 让它在上线前被发现，
-                //   而不是静默 403 —— 后者会被误判成"用户权限没配好"。
+                // ★ 写错权限点（如 survey:editt）是代码 bug：抛 500 让它上线前被发现，而不是静默 403。
                 throw new IllegalStateException("未知权限点：" + code + "（见 common/Permission）");
             }
         }
@@ -92,8 +66,8 @@ public class PermissionAspect {
         ServletRequestAttributes attrs =
                 (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attrs == null) {
-            // ★ 与 AdminCheckAspect 一致：非 Web 线程（内部直接调用 Controller 方法）不做权限校验。
-            //   这是**有意**的分支，改之前先确认没有异步线程在调管理方法。
+            // 非 Web 线程（内部直接调用 Controller 方法）不做权限校验，与 AdminCheckAspect 一致。
+            // 改之前先确认没有异步线程在调管理方法。
             return;
         }
 

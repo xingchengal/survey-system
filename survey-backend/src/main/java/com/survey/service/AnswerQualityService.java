@@ -20,21 +20,11 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * 答卷质量判定与质控摘要。
- *
- * ── 职责边界（很重要）─────────────────────────────────
- *   本类**只做判定**，不写库：写入 `t_answer.quality_flag/quality_reasons/duration_ms` 的
- *   动作在 `AnswerService.submit` 的同一事务里完成（判定要基于"刚插入的明细"，
- *   所以必须紧跟着提交逻辑，不能拆成独立事务）。
- *
- * ── ★ 判定只在提交那一刻做一次 ──────────────────────────
- *   规则以后调整、题目后来被编辑，都**不会**让历史答卷重新判定。
- *   否则同一份答卷今天有效、明天无效，用户无法解释图表的差异。
- *
- * ── 三件它**不做**的事（避免被误解为"AI 质检"）──────────
- *   1. 不做语义矛盾检测（"没孩子却填了孩子年龄"需要题目间约束规则，属产品能力）；
- *   2. 不相信前端上报的耗时（可伪造，只作提示）；
- *   3. 不自动删除可疑答卷 —— 只打标，是否剔除由查询方（统计接口 / 前端开关）决定。
+ * 答卷质量判定：提交时打标，统计页出质控摘要。
+ * ★ 四条规则：答题过快 / 直线作答 / 答案不在选项里 / 同题干两题矛盾；只打标，绝不删除可疑答卷。
+ * 判定只在提交那一刻做一次，历史答卷不重判（否则同一份答卷今天有效、明天无效）。
+ * 阈值写死在 AnswerQuality（如 MIN_MS_PER_QUESTION），取可解释的整数，不做动态调参。
+ * ★ 耗时来自前端上报、可伪造，只作提示；本类不写库，落库在 AnswerService.submit 同事务。
  */
 @Service
 public class AnswerQualityService {
@@ -45,8 +35,6 @@ public class AnswerQualityService {
     /**
      * 判定一份答卷是否可疑。
      *
-     * @param details           本次提交的明细（已插入，但内存里就是刚提交的这批）
-     * @param questions         该问卷的题目
      * @param optionsByQuestion 题目 → 选项（选择题才有；必须按 sort_order 排好，位次判定依赖它）
      * @param durationMs        前端上报的耗时（可空：老客户端 / 直接调接口）
      * @return 判定结果（是否可疑 + 命中原因码，顺序稳定便于断言与展示）
@@ -56,23 +44,23 @@ public class AnswerQualityService {
         List<String> reasons = new ArrayList<>();
         Map<Integer, List<String>> answersByQuestion = groupAnswers(details);
 
-        // ── 规则 1：答题过快（无耗时数据时不判 —— 不能把"没上报"当成"很快"）──
+        // 规则 1：答题过快（无耗时数据时不判 —— 不能把"没上报"当成"很快"）
         if (durationMs != null && durationMs >= 0 && questions.size() >= 2
                 && durationMs < questions.size() * AnswerQuality.MIN_MS_PER_QUESTION) {
             reasons.add(AnswerQuality.TOO_FAST);
         }
 
-        // ── 规则 2：答案不在选项里（脚本灌入的特征）──
+        // 规则 2：答案不在选项里（脚本灌入的特征）
         if (hasOptionMismatch(answersByQuestion, questions, optionsByQuestion)) {
             reasons.add(AnswerQuality.OPTION_MISMATCH);
         }
 
-        // ── 规则 3：直线作答（≥3 道选择题，位次全相同）──
+        // 规则 3：直线作答（≥3 道选择题，位次全相同）
         if (isStraightLine(answersByQuestion, questions, optionsByQuestion)) {
             reasons.add(AnswerQuality.STRAIGHT_LINE);
         }
 
-        // ── 规则 4：同题干的两道题答案不一致 ──
+        // 规则 4：同题干的两道题答案不一致
         if (hasDuplicateTitleConflict(answersByQuestion, questions)) {
             reasons.add(AnswerQuality.DUP_TITLE_CONFLICT);
         }
@@ -83,8 +71,7 @@ public class AnswerQualityService {
     /**
      * 质控摘要（统计页顶部展示）。
      *
-     * @param surveyId 问卷
-     * @param total    答卷总数
+     * @param total 答卷总数
      * @return { total, suspicious, suspiciousRate, reasons:[{code,label,count}], samples:[...] }
      */
     public Map<String, Object> summarize(Integer surveyId, int total) {
@@ -169,11 +156,8 @@ public class AnswerQualityService {
     }
 
     /**
-     * 规则 3：≥3 道选择题，且每个"选中项在选项里的位次"完全相同。
-     *
-     * ★ 多选怎么算：多选可能一次选 2 项（位次 0 和 1）—— 只要出现不同位次，
-     *   就不算直线作答（说明用户确实做了区分）。
-     * ★ 答案不在选项里的题直接跳过：那种情况由规则 2 报告，这里不重复刷同一个原因。
+     * 规则 3：≥3 道选择题，且选中项在选项里的位次完全相同。
+     * 多选只要出现不同位次就不算直线；答案不在选项里的题跳过（交给规则 2，不重复刷同一原因）。
      */
     private static boolean isStraightLine(Map<Integer, List<String>> answersByQuestion,
                                           List<Question> questions,
@@ -182,8 +166,7 @@ public class AnswerQualityService {
         int optionQuestionsConsidered = 0;
 
         for (Question q : questions) {
-            // ★ 排序题不参与"直线作答"：它的答案本来就是"全部选项各占一个名次"，
-            //   位次集合恒定包含 0..N-1，参与判定只会稀释这条规则（让真正摆烂的答卷更难被抓到）。
+            // 排序题不参与直线判定：它的位次集合恒定包含 0..N-1，参与只会稀释规则。
             if (!QuestionType.hasOptions(q.getType()) || QuestionType.isRanking(q.getType())) {
                 continue;
             }
@@ -215,10 +198,7 @@ public class AnswerQualityService {
 
     /**
      * 规则 4：题干相同的两道题，答案不一致。
-     *
-     * ★ 比较方式：把每题的全部答案排序后拼成字符串再比 ——
-     *   多选是"一选项一行"，直接比 List 顺序不稳（库里没有保证答案行的顺序）。
-     * ★ 只在**两边都作答**时比较：一边没答不算矛盾（可能是跳转跳过了）。
+     * 每题答案排序后拼串再比（多选一行一选项，库不保证行顺序）；只在两边都作答时比较。
      */
     private static boolean hasDuplicateTitleConflict(Map<Integer, List<String>> answersByQuestion,
                                                      List<Question> questions) {

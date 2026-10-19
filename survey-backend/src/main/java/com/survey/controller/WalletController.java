@@ -25,21 +25,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 额度钱包（§H-H5，模拟付费）。
- *
- * ── 端点分两档（与审计表一致）──────────────────────────
- *   需登录（3 条）：GET /api/wallet、GET /api/wallet/transactions、POST /api/wallet/recharge
- *   管理员（3 条）：GET /api/wallet/admin/page、POST /api/wallet/admin/adjust、
- *                  GET /api/wallet/admin/reconcile
- *
- * ── 设计边界 ──────────────────────────────────────────
- *   · 身份只取 X-User-Id，**没有任何"查别人钱包"的入口**（管理端除外，且限管理员）；
- *   · 充值/调整都要求幂等键，重复提交不会重复到账；
- *   · 不做真实支付：充值只改额度，不接商户号/证书，流水里写明"演示用"。
- *
- * ── 为什么管理端用 @RequireAdmin 而不是 @RequirePermission(WALLET_MANAGE) ──
- *   与本项目其它管理端点（举报审核/日志/用户）口径一致，矩阵测试可以直接覆盖；
- *   WALLET_MANAGE 权限点仍保留在 RBAC 种子里，留给以后拆细粒度角色时使用。
+ * 额度钱包（模拟付费）：余额、流水、计费目录、充值与管理员调整/对账。
+ * 用户侧只按 X-User-Id，没有任何"查别人钱包"的入口；管理侧按 wallet:manage。
+ * 充值/调整必须带幂等键，重复提交不会重复到账；不做真实支付，流水里写明"演示用"。
  */
 @Tag(name = "额度钱包", description = "余额、流水、模拟充值，以及管理端调整与对账")
 @RestController
@@ -65,9 +53,7 @@ public class WalletController {
     }
 
     /**
-     * 计费项目录（价格唯一出处 = common/WalletFeature）。
-     * ★ 前端「计费规则」从这里渲染，不再硬编码价格；以后新增计费项（如新的进阶题型包）
-     *   只要在枚举里加一条，页面自动出现，不需要改前端。
+     * 计费项目录：价格唯一出处是 common/WalletFeature，前端据此渲染，新增计费项无需改前端。
      */
     @Operation(summary = "计费项目录（价格与说明）")
     @GetMapping("/pricing")

@@ -17,23 +17,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * 次级管理员的选定、授权与降级（只有超级管理员能调用，Controller 用 @RequireAdmin）。
- *
- * ── 三条硬规则 ────────────────────────────────────────
- *   1. **超管不可被操作**：不能被设为次级管理员、不能被改权限、不能被降级；
- *   2. **权限只认 ADMIN_GRANTABLE**：对象级 survey:edit/publish/data/delete 不在这里发，
- *      否则次级管理员会被授成“能改所有人问卷”的角色；
- *   3. **角色与权限同事务**：先改 t_user.role + t_user_role，再重建 t_user_permission，
- *      中间失败必须整体回滚，不能出现“角色已降、权限还在”。
- *
- * ── 为什么权限按用户存，而不是建角色 ──────────────────
- *   需求是“每个次级管理员可以有不同模块”，按用户勾选最直观；
- *   不必为了每个人建一个 t_role（那还要一套角色 CRUD 与角色分配界面）。
+ * 次级管理员的选定、授权与降级（仅超管可调，Controller 用 @RequireAdmin）。
+ * ★ 权限只认 ADMIN_GRANTABLE：survey:edit/publish/data/delete 等对象级权限不从这里发。
+ * ★ 角色与权限同事务重建（t_user.role + t_user_role + t_user_permission），不能出现"角色已降、权限还在"。
+ * 不能操作超管、已注销账号或自己；权限按用户存而不建角色，因为每人可勾不同模块。
  */
 @Service
 public class AdminManagementService {
 
-    /** 可分配权限的展示顺序（与前端勾选框一致；也是“目录是否漏项”的自检依据） */
+    /** 可分配权限目录（顺序即前端勾选框顺序，也是"目录是否漏项"的自检依据）。 */
     private static final List<AdminPermissionOption> GRANTABLE = List.of(
             new AdminPermissionOption(Permission.SURVEY_MANAGE, "全部问卷 / 回收站 / 导出"),
             new AdminPermissionOption(Permission.TEMPLATE_MANAGE, "模板管理（含设为模板、改分类）"),
@@ -74,8 +66,8 @@ public class AdminManagementService {
     }
 
     /**
-     * 把普通用户提升为次级管理员，并写入权限。
-     * ★ 已经是 subadmin 的用户走 {@link #updatePermissions}，这里拒绝以避免误以为“重置了权限”。
+     * 把普通用户提升为次级管理员并写入权限。
+     * 已经是 subadmin 的走 {@link #updatePermissions}，这里拒绝，避免误以为"重置了权限"。
      */
     @Transactional
     public List<SubAdminView> promote(Integer userId, List<String> permissions, Integer operatorId) {
@@ -109,7 +101,7 @@ public class AdminManagementService {
         return listSubAdmins();
     }
 
-    /** 降级为普通用户（不删除账号、不动物问卷/答卷）。 */
+    /** 降级为普通用户（不删除账号、不动其问卷 / 答卷；已注销账号不能操作）。 */
     @Transactional
     public List<SubAdminView> demote(Integer userId, Integer operatorId) {
         User target = requireTarget(userId);
@@ -128,7 +120,7 @@ public class AdminManagementService {
         return listSubAdmins();
     }
 
-    /** 目标必须是存在且未注销的账号。 */
+    /** 目标必须是存在且未注销的账号（已注销账号不能授权）。 */
     private User requireTarget(Integer userId) {
         if (userId == null) {
             throw new BizException("请选择要操作的用户");
@@ -144,8 +136,8 @@ public class AdminManagementService {
     }
 
     /**
-     * 权限归一：去空白、去重、只允许 ADMIN_GRANTABLE、至少一项。
-     * ★ 顺序按用户勾选顺序保留（LinkedHashSet），存库顺序对权限判断无影响，但便于排查。
+     * 权限归一：去空白、去重、只允许 ADMIN_GRANTABLE、至少一项、最多 20 项。
+     * 顺序按勾选顺序保留（LinkedHashSet），存库顺序不影响判断，只便于排查。
      */
     private List<String> normalizePermissions(List<String> permissions) {
         if (permissions == null || permissions.isEmpty()) {

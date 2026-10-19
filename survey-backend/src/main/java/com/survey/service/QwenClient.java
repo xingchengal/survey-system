@@ -20,26 +20,10 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Qwen（硅基流动 SiliconFlow）模型调用客户端 —— 只负责"把提示词发出去、把 JSON 拿回来"。
- *
- * ── 为什么单独抽成一个客户端 ──────────────────────────
- *   项目其余链路都遵循"Controller 薄、逻辑下沉 Service"；若把 OkHttp 客户端、超时配置、
- *   429 重试、markdown 代码块剥离、JSON 提取全塞在 Controller 里：
- *   既难以单测，也让 Controller 认识了一堆 okhttp 类型。
- *
- *   现在：**本类是唯一的"外部模型"边界**。以后要换服务商（或加一个"本地模型 / 假实现"给测试用），
- *   只需要再写一个同签名的组件，业务侧（AiGenerateService）完全不用动。
- *
- * ── 它不做什么（有意为之）──────────────────────────────
- *   不写数据库、不写异常日志、不认识 HttpServletRequest、不抛 BizException ——
- *   那些都是"业务/Web 层"的事，由 AiGenerateService 负责编排。
- *   本类只抛两类异常：
- *     · {@link RateLimitedException} —— 上游 429，属**可预期**的免费额度排队；
- *     · 其它运行时异常            —— 网络/格式故障，属系统级错误。
- *
- * ── 超时取值（沿用原实现，别随手调小）────────────────────
- *   connect 30s / read **120s** / write 30s：免费额度排队时响应会很慢，
- *   read 给小了会把正常排队误判成超时失败。
+ * Qwen（硅基流动 SiliconFlow）模型客户端：唯一的"外部模型"边界，只负责发提示词、把 JSON 拿回来。
+ * ★ 外部 HTTP 不能放进事务：排队最长 120 秒，占着连接会拖垮其它请求；超时 connect/read/write = 30/120/30s，429 / 网络错误重试一次。
+ * ★ 自己持有 ObjectMapper：Spring Boot 4 不再注册 Jackson 2 的 bean，注入拿不到。
+ * 不写库、不写异常日志、不抛 BizException —— 编排与对外文案归 AiGenerateService。
  */
 @Component
 public class QwenClient {
@@ -69,19 +53,11 @@ public class QwenClient {
             .build();
 
     /**
-     * 一次完整的"主题 → 解析好的问卷结构"，**含一次失败重试**。
+     * 一次完整的「主题 → 解析好的问卷结构」，含一次失败重试（429 / 网络错误）。
+     * 退避 3s / 0.8s 相对 120s 的 read 超时不是瓶颈；失败时保留最后一次异常原样上抛。
      *
-     * ★ 重试为什么在这里：免费额度经常遇到 429 排队，网络也会抖动 ——
-     *   这是"与外部服务打交道"固有的应对方式，属于客户端自己的职责。
-     * ★ 退避 sleep 有意保留（当前可接受）：
-     *   限流退避 3 秒、其它错误 0.8 秒，最多阻塞请求线程 3 秒；
-     *   而真正耗时的是 read timeout 120 秒，相比之下这点等待不是瓶颈。
-     *   若日后压测发现线程占用问题，应改为异步重试，而不是把退避删掉。
-     *
-     * @param topic 用户输入的主题
-     * @param extra 额外要求（可为空字符串）
      * @return 形如 {title, description, questions:[{title,type,options}]} 的 Map
-     * @throws RateLimitedException 上游两次都是 429
+     * @throws RateLimitedException 两次调用都是 429
      */
     public Map<String, Object> generateSurveyJson(String topic, String extra) {
         String prompt = buildPrompt(topic, extra);
@@ -101,7 +77,7 @@ public class QwenClient {
                         // 限流退避久一点（3s），其它错误短暂等待（0.8s）
                         Thread.sleep(ex instanceof RateLimitedException ? 3000L : 800L);
                     } catch (InterruptedException ie) {
-                        // ★ 恢复中断标记：吞掉 InterruptedException 会让上层无法感知"该停了"
+                        // 恢复中断标记：吞掉 InterruptedException 会让上层无法感知"该停了"
                         Thread.currentThread().interrupt();
                         throw new IllegalStateException("AI 调用重试被中断", ie);
                     }
@@ -118,10 +94,7 @@ public class QwenClient {
         return parseAiResponse(aiResponse);
     }
 
-    /**
-     * 发一次请求并取出 content 字段。
-     * ★ 用 try-with-resources 关闭 Response。
-     */
+    /** 发一次请求并取出 content 字段（try-with-resources 关闭 Response）。 */
     private String requestOnce(String prompt) {
         try {
             Map<String, Object> bodyMap = new HashMap<>();
@@ -178,14 +151,8 @@ public class QwenClient {
     }
 
     /**
-     * 把 AI 返回的文本解析成问卷结构。
-     *
-     * ★ 容错：模型经常把 JSON 包在 markdown 代码块里，或者前后多说几句废话 ——
-     *   所以先剥 ``` 包裹，再取**第一个 { 到最后一个 }** 之间的内容。
-     *
-     * ★ 异常里**保留 AI 返回的原文**：这不是给用户看的（AiGenerateService 对外只回固定文案），
-     *   而是写进 t_error_log 供排查"模型这次到底吐了什么"。所以这里不做截断，
-     *   截断由写日志那一侧负责（900 字符）。
+     * 解析 AI 返回：先剥 ``` 包裹，再取第一个 { 到最后一个 }。
+     * 异常里保留 AI 原文供 t_error_log 排查；对外文案由 AiGenerateService 固定，不把原文透给用户。
      */
     private Map<String, Object> parseAiResponse(String content) {
         if (content == null || content.trim().isEmpty()) {
@@ -213,7 +180,7 @@ public class QwenClient {
         }
     }
 
-    /** 构造提示词（内容与原实现逐字一致，只有位置从 Controller 搬到了这里）。 */
+    /** 构造提示词：要求纯 JSON 输出、3 种题型、5~8 道题。 */
     private String buildPrompt(String topic, String extra) {
         return "你是一个问卷设计专家。请根据下面的主题设计一份问卷，返回**纯 JSON**，不要 markdown 代码块，不要任何额外说明。\n\n" +
                 "主题：" + topic + "\n" +

@@ -13,61 +13,37 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 考试判分的**唯一口径** —— 与 {@link QuestionType} / {@link TextLimits} 同级。
- *
- * ── 谁在用它 ────────────────────────────────────────────
- *   · {@code AnswerService.submit}：提交时算分，结果随 t_answer 一起落库；
- *   · {@code SurveyService.normalizeSurveySettings}：保存设置时算"本卷总分"，用于校验及格分；
- *   · {@code QuestionService.doSaveQuestions}：保存题目时校验"能不能设分值"。
- *   判分规则**只允许写在这里**，别在 Controller 或前端各写一份 —— 考试分数算错一次就无法解释。
- *
- * ── 规则（默认方案，2026-10-19 用户确认）──────────────
- *   单选(1) / 下拉(5) : 提交的那一项 == 唯一正确答案（按 content 去空白后比较）→ 得该题分值；
- *   多选(2)           : 提交集合与正确答案集合**完全一致** → 得分；错选/漏选/多选一律 0 分。
- *     ★ 有意**不做**部分得分：按比例给分会让"全选"策略稳定拿分，对考生不公平，口径也难解释。
- *   其它题型           : 不参与（保存时已拒绝给它们设分值，这里再防御性跳过）。
- *
- * ── 两个必须知道的限制 ──────────────────────────────────
- *   ① {@code t_answer_detail} 没有 option_id，只有选项原文 content —— 所以只能按文字比对。
- *      考试问卷发布后改选项文字会影响**之后**提交的判分（已存的 earned_score 不变）。
- *   ② 分值不重算：提交时把 total/earned 一起写进 t_answer，作者事后改分值不影响历史答卷。
- *      考试成绩不能因为"今天改了分值"而变化。
+ * 考试判分的**唯一口径**：提交时算分并随 t_answer 落库，保存设置时也用它算本卷总分。
+ * 单选 / 下拉按选项原文比对；多选要求集合完全一致（不设部分分，否则"全选"策略稳拿分）。
+ * ★ 判分规则只允许写在这里，别在 Controller 或前端各写一份 —— 分数算错一次就无法解释。
+ * ★ t_answer_detail 无 option_id，只能按原文比对；事后改选项文字或分值不影响已落库的历史答卷。
  */
 public final class Grader {
 
-    /** 单题分值上限。200 题 × 100 分 = 2 万分，足够任何校内考试，也挡住了"塞个 int 最大值"的脏数据。 */
+    /** 单题分值上限：200 题 × 100 分足够校内考试，也挡住"塞个 int 最大值"的脏数据。 */
     public static final int MAX_QUESTION_SCORE = 100;
 
     private Grader() {
     }
 
     /**
-     * 单题的判分结果（成绩卡"逐题对错"的数据源）。
+     * 单题判分结果（成绩卡"逐题对错"的数据源）。
      *
-     * @param questionId     题目 id
-     * @param correct        是否答对（未作答 = false）
-     * @param correctAnswers 正确答案的选项原文（按选项顺序）
-     *                       ★ 只在作者开启"提交后显示答案"时才会被返回给答题人；
-     *                       Grader 本身总是算出来，**暴露与否由 DTO 层控制**。
+     * @param correctAnswers 正确答案原文，按选项顺序；是否返回给答题人由 DTO 层控制
      */
     public record QuestionResult(Integer questionId, boolean correct, List<String> correctAnswers) {
     }
 
     /**
      * 判分结果。
-     *
-     * @param totalScore  本卷总分（所有 &gt;0 的题目分值之和）
-     * @param earnedScore 本次得分
+     * @param totalScore  本卷总分（所有 &gt;0 的可判分题目分值之和）；earnedScore 为本次得分
      * @param passed      是否及格：null = 未设及格线；0 = 不及格；1 = 及格
-     * @param questions   逐题结果（只含"设了分值的题"，顺序与题目顺序一致；不判分时为空列表）
+     * @param questions   逐题结果（只含设了分值的题，顺序与题目一致；不判分时为空列表）
      */
     public record Result(int totalScore, int earnedScore, Integer passed, List<QuestionResult> questions) {
     }
 
-    /**
-     * 这道题的题型能不能设分值 / 参与判分。
-     * ★ 只有 单选 / 多选 / 下拉 —— 判断题用"单选 2 选项"承载，不单独占一个题型（见方案文档）。
-     */
+    /** 该题型能不能设分值 / 参与判分：只有单选 / 多选 / 下拉（判断题用"单选 2 选项"承载）。 */
     public static boolean isGradable(Integer type) {
         return type != null && (type == QuestionType.SINGLE.code()
                 || type == QuestionType.MULTI.code()
@@ -75,9 +51,8 @@ public final class Grader {
     }
 
     /**
-     * 本卷总分 = 所有**可判分题型**里 {@code score > 0} 的分值之和。
-     * ★ 只算单选/多选/下拉：不可判分的题型即使被设了分值（保存时本应拒绝）也不能进总分，
-     *   否则"总分 100、实际只有 90 分可判"会让每个人看起来都差 10 分。
+     * 本卷总分 = 所有可判分题型里 {@code score > 0} 的分值之和。
+     * 不可判分题型即使被误设分值也不能进总分，否则"总分 100、实际 90 可判"会让每个人看起来都差 10 分。
      */
     public static int totalScore(List<Question> questions) {
         if (questions == null) return 0;
@@ -91,13 +66,8 @@ public final class Grader {
     }
 
     /**
-     * 算分。
-     *
-     * @param survey           问卷（取 gradeEnabled / passScore；为 null 时按"不判分"处理）
-     * @param questions        本问卷全部题目
-     * @param optionsByQuestion 题目 id → 选项（**只需传可判分题的选项**；矩阵/排序不需要）
-     * @param details          本次提交的明细
-     * @return null = 这份问卷没开考试模式（调用方不要把分数写库）；否则返回结果
+     * 算分；survey 为 null 或未开考试模式时返回 null（调用方不要把分数写库）。
+     * @param optionsByQuestion 题目 id → 选项（只需传可判分题的选项；矩阵 / 排序不需要）
      */
     public static Result grade(Survey survey,
                                List<Question> questions,
@@ -108,9 +78,7 @@ public final class Grader {
         }
         int total = totalScore(questions);
         if (total <= 0) {
-            // 防御：正常路径下 SurveyService 开启考试模式时就要求总分 > 0（QuestionService 保存时也会拦），
-            // 这里兜住"历史数据里开关开着但题目分值被清空"的脏状态 —— 不抛异常，按 0/0 记录，
-            // 至少不会让提交直接 500。
+            // 防御：开关开着但题目分值被清空的脏数据 —— 按 0/0 记录，不让提交直接 500
             return new Result(0, 0, null, List.of());
         }
 
@@ -154,9 +122,7 @@ public final class Grader {
                 right = !got.isEmpty() && got.size() == correct.size() && got.containsAll(correct);
             }
             if (right) earned += q.getScore();
-            // ★ 逐题结果（含正确答案）在这里统一算出来：
-            //   · 成绩卡的"逐题对错"用它；
-            //   · "提交后显示答案"也用它 —— 是否把 correctAnswers 返回给答题人由 DTO 层决定。
+            // 逐题结果含正确答案：成绩卡用它；是否返回给答题人由 DTO 层控制
             perQuestion.add(new QuestionResult(q.getId(), right, new ArrayList<>(correct)));
         }
 

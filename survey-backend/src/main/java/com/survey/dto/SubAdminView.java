@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 次级管理员列表项。
+ * 次级管理员列表项：用户信息 + 逐人权限点（只含 ADMIN_GRANTABLE）；超管不进这个列表（只查 role=subadmin）。
  *
  * @param userId      用户 id
  * @param username    账号

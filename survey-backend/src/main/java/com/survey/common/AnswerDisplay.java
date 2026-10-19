@@ -10,22 +10,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把"一道题的多行明细"渲染成**一行人类可读的文本**。
- *
- * ── 为什么单独抽出来 ────────────────────────────────────
- *   同一套口径现在有两个调用方：
- *     · `AnswerController` 的 Excel 导出（每个单元格一道题）；
- *     · 「我的成绩 → 查看详情」（逐题显示"我的答案"）。
- *   两处各写一遍必然漂移（多选只剩最后一项、矩阵丢行都是这么来的）。
- *   所以**渲染口径只留这一份**。
- *
- * ── 各题型的格式 ────────────────────────────────────────
- *   多选          ：`A、B、C`（按存储顺序）
- *   矩阵          ：`服务态度：满意；响应速度：一般`（按题目里配置的行顺序，脏行追加在后）
- *   排序          ：`1. A；2. B；3. C`（按名次升序）
- *   单选/填空/评分/NPS/日期：原文
- *
- * ★ 这里**不做任何转义**：Excel 单元格与页面文本都按原样展示。
+ * 把"一道题的多行明细"渲染成**一行人类可读的文本** —— 全项目唯一渲染口径（Excel 导出与成绩详情共用）。
+ * 多选 `A、B、C`；矩阵 `行：值；行：值`；排序 `1. A；2. B`；其余题型取原文。
+ * ★ 不做任何转义：Excel 单元格与页面文本都按原样展示。
  */
 public final class AnswerDisplay {
 
@@ -33,9 +20,9 @@ public final class AnswerDisplay {
     }
 
     /**
-     * @param q       题目（需要 type / matrixRows；没有也能渲染，只是矩阵会按存储顺序输出）
+     * @param q       题目（需要 type / matrixRows；缺失时矩阵按存储顺序输出）
      * @param details 该题的全部明细行（可能为 null / 空）
-     * @return 空明细返回空串；否则返回可读文本
+     * @return 空明细返回空串
      */
     public static String format(Question q, List<AnswerDetail> details) {
         if (details == null || details.isEmpty()) {
@@ -43,7 +30,7 @@ public final class AnswerDisplay {
         }
         if (q != null && QuestionType.isRanking(q.getType())) {
             List<AnswerDetail> sorted = new ArrayList<>(details);
-            // null 名次放最后（历史脏数据），不参与排序断言的稳定性
+            // null 名次（历史脏数据）放最后
             sorted.sort((a, b) -> Integer.compare(
                     a.getRankNo() == null ? Integer.MAX_VALUE : a.getRankNo(),
                     b.getRankNo() == null ? Integer.MAX_VALUE : b.getRankNo()));
@@ -70,7 +57,7 @@ public final class AnswerDisplay {
                 if (sb.length() > 0) sb.append("；");
                 sb.append(row).append("：").append(byRow.get(row));
             }
-            // ★ 不在配置里的行（历史脏数据/作者后来删了行）必须追加，不能静默丢掉
+            // ★ 配置外的行（历史脏数据 / 作者删了行）也要追加，不能静默丢掉
             for (Map.Entry<String, String> e : byRow.entrySet()) {
                 if (configuredRows.contains(e.getKey())) continue;
                 if (sb.length() > 0) sb.append("；");

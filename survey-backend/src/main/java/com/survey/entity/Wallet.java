@@ -5,13 +5,9 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 
 /**
- * 额度钱包（t_wallet）—— 一人一包，balance 是**可用点数**。
- *
- * ★ 为什么余额不放在 t_user 上：
- *   钱包的读写频率、并发要求与用户资料完全不同；拆表后扣减只锁这一行，
- *   不会与"改昵称/头像"这类高频用户写操作互相阻塞。
- * ★ balance 的单位是"点"（整数）：发布一份问卷扣 1 点，退款/充值也是整数。
- *   不做真实货币（不接支付渠道），所以不需要分/元换算与金额精度问题。
+ * 额度钱包 —— 表 t_wallet，一人一包；balance 为可用点数（整数，发布一份问卷扣 1 点）。
+ * ★ 拆表而非挂在 t_user：扣减只锁钱包行，不与改昵称/头像等用户写操作互相阻塞。
+ * ★ 不做真实货币（无支付渠道），不需要分/元换算与金额精度问题。
  */
 public class Wallet {
 

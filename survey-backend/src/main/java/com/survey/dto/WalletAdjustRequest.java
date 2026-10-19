@@ -8,9 +8,8 @@ import jakarta.validation.constraints.Size;
 
 /**
  * 管理员调整额度请求。
- *
- * ★ amount 有符号：正数加、负数扣。为 0 没有意义，由 Service 拒绝。
- * ★ reason 只用于流水备注，方便以后查"这 50 点是谁为什么调的"。
+ * ★ amount 有符号：正数加、负数扣，为 0 由 Service 拒绝；必须带 idempotencyKey，重复提交只生效一次。
+ * reason 可选，只进流水备注。
  */
 public class WalletAdjustRequest {
 
