@@ -517,8 +517,8 @@ public class SurveyService {
         if (survey == null || !survey.passwordRequired()) {
             return;
         }
-        if (Role.isAdmin(role)) {
-            return;   // 管理员：全站数据可见
+        if (Role.isStaff(role)) {
+            return;   // 管理端人员：已在可见性/权限点闸门放行，答题密码不再重复拦
         }
         Integer ownerId = survey.getUserId();
         if (ownerId != null && ownerId.equals(userId)) {

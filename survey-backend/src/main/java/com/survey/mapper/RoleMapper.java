@@ -30,16 +30,45 @@ public interface RoleMapper {
     List<String> findRoleCodesByUserId(@Param("userId") Integer userId);
 
     /**
-     * 该用户的**权限点并集**（多角色去重）。
-     * ★ 用 DISTINCT：一个人同时有 user 与自定义角色时，同一个权限点会出现两次，
-     *   不去重会让调用方误以为"配了两条"。
+     * 该用户的**权限点并集**（多角色 + 直接授权，去重）。
+     *
+     * ★ 两条来源：
+     *   ① 角色 → 权限点（t_user_role → t_role_permission）：admin / user / 未来自定义角色；
+     *   ② 用户 → 权限点（t_user_permission）：次级管理员逐项授权。
+     * ★ 用 UNION：同一个人既有角色权限又有直接授权时，同一个权限点只返回一次。
+     * ★ 超管（admin）在 PermissionAspect 里**兜底放行**，不依赖这里返回全部；
+     *   这里仍返回 admin 角色的全量种子，便于登录后前端菜单直接使用。
      */
-    @Select("SELECT DISTINCT rp.permission_code FROM t_user_role ur "
-            + "JOIN t_role_permission rp ON rp.role_id = ur.role_id "
-            + "WHERE ur.user_id = #{userId}")
+    @Select("SELECT DISTINCT permission_code FROM ("
+            + "  SELECT rp.permission_code FROM t_user_role ur "
+            + "  JOIN t_role_permission rp ON rp.role_id = ur.role_id "
+            + "  WHERE ur.user_id = #{userId} "
+            + "  UNION "
+            + "  SELECT up.permission_code FROM t_user_permission up "
+            + "  WHERE up.user_id = #{userId}"
+            + ") merged")
     List<String> findPermissionCodesByUserId(@Param("userId") Integer userId);
 
     /** 按角色码取 id（分配角色时用；不存在返回 null） */
     @Select("SELECT id FROM t_role WHERE code = #{code}")
     Integer findRoleIdByCode(@Param("code") String code);
+
+    // ===== 次级管理员授权（只由 AdminManagementService 在事务内调用） =====
+
+    @org.apache.ibatis.annotations.Delete("DELETE FROM t_user_role WHERE user_id = #{userId}")
+    int deleteUserRoles(@Param("userId") Integer userId);
+
+    @org.apache.ibatis.annotations.Insert(
+            "INSERT IGNORE INTO t_user_role(user_id, role_id) VALUES(#{userId}, #{roleId})")
+    int insertUserRole(@Param("userId") Integer userId, @Param("roleId") Integer roleId);
+
+    @org.apache.ibatis.annotations.Delete("DELETE FROM t_user_permission WHERE user_id = #{userId}")
+    int deleteUserPermissions(@Param("userId") Integer userId);
+
+    @org.apache.ibatis.annotations.Insert(
+            "INSERT IGNORE INTO t_user_permission(user_id, permission_code, created_by) "
+                    + "VALUES(#{userId}, #{permissionCode}, #{createdBy})")
+    int insertUserPermission(@Param("userId") Integer userId,
+                             @Param("permissionCode") String permissionCode,
+                             @Param("createdBy") Integer createdBy);
 }

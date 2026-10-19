@@ -1,6 +1,7 @@
 package com.survey.controller;
 
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
+import com.survey.common.Permission;
 import com.survey.entity.Announcement;
 import com.survey.entity.User;
 import com.survey.service.AnnouncementService;
@@ -46,7 +47,7 @@ public class AnnouncementController {
     @OperationLog("发布公告")
     @Operation(summary = "发布公告（管理员）")
     @PostMapping("/add")
-    @RequireAdmin
+    @RequirePermission(Permission.ANNOUNCEMENT_MANAGE)
     public Map<String, Object> add(@RequestBody Announcement announcement,
                                    @RequestHeader("X-User-Id") Integer userId) {
         // ★ 失败**抛 BizException**（400），不是 {success:false}（HTTP 200）：
@@ -69,7 +70,7 @@ public class AnnouncementController {
 
     @Operation(summary = "查询全部公告（管理员）")
     @GetMapping("/list")
-    @RequireAdmin
+    @RequirePermission(Permission.ANNOUNCEMENT_MANAGE)
     public List<Announcement> list() {
         return announcementService.listAll();
     }
@@ -82,7 +83,7 @@ public class AnnouncementController {
 
     @Operation(summary = "上下架公告（管理员）")
     @PutMapping("/status/{id}")
-    @RequireAdmin
+    @RequirePermission(Permission.ANNOUNCEMENT_MANAGE)
     public String updateStatus(@PathVariable Integer id,
                                @RequestParam Integer status) {
         // ★ 上下架只能是 0/1：若接受任意整数，传 status=2 会让
@@ -99,7 +100,7 @@ public class AnnouncementController {
     @OperationLog("删除公告")
     @Operation(summary = "删除公告（管理员）")
     @DeleteMapping("/delete/{id}")
-    @RequireAdmin
+    @RequirePermission(Permission.ANNOUNCEMENT_MANAGE)
     public String delete(@PathVariable Integer id) {
         int r = announcementService.delete(id);
         if (r <= 0) throw new BizException("删除失败");

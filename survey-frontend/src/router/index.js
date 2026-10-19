@@ -4,6 +4,9 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 //   （原因见 utils/auth.js 的类注释：解析失败会导致整个应用白屏）
 import { getUser, isLoggedIn, homePathFor, hasPermission } from '../utils/auth'
 
+/** 管理端人员（超管 + 次级管理员）；具体模块还要看 meta.permission */
+const STAFF = ['admin', 'subadmin']
+
 const routes = [
   // ===== 公开页面 =====
   {
@@ -41,13 +44,13 @@ const routes = [
     path: '/my/surveys/:id/edit',
     name: 'SurveyEdit',
     component: () => import('../views/SurveyEdit.vue'),
-    meta: { title: '编辑问卷', roles: ['user', 'admin'] }
+    meta: { title: '编辑问卷', roles: ['user', 'admin', 'subadmin'] }
   },
   {
     path: '/admin/templates/:id/edit',
     name: 'TemplateEdit',
     component: () => import('../views/SurveyEdit.vue'),
-    meta: { title: '编辑模板', roles: ['admin'], fromTemplate: true }
+    meta: { title: '编辑模板', roles: STAFF, permission: 'template:manage', fromTemplate: true }
   },
 
   // ===== 后台页面 =====
@@ -68,63 +71,77 @@ const routes = [
         path: 'admin/profile',
         name: 'AdminProfile',
         component: () => import('../views/AdminProfile.vue'),
-        meta: { title: '个人中心', roles: ['admin'] }
+        meta: { title: '个人中心', roles: STAFF }
+      },
+      {
+        // 次级管理员首页：只显示被分配的模块，避免落到没有权限的 /dashboard
+        path: 'admin/workbench',
+        name: 'AdminWorkbench',
+        component: () => import('../views/AdminWorkbench.vue'),
+        meta: { title: '管理工作台', roles: STAFF }
+      },
+      {
+        // 超管专属：选定/授权/降级次级管理员
+        path: 'admin/sub-admins',
+        name: 'SubAdminManage',
+        component: () => import('../views/SubAdminManage.vue'),
+        meta: { title: '次级管理员', roles: ['admin'] }
       },
       {
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('../views/Dashboard.vue'),
-        meta: { title: '系统总览', roles: ['admin'] }
+        meta: { title: '系统总览', roles: STAFF, permission: 'system:view' }
       },
       {
         path: 'users',
         name: 'UserManage',
         component: () => import('../views/UserManage.vue'),
-        meta: { title: '用户管理', roles: ['admin'] }
+        meta: { title: '用户管理', roles: STAFF, permission: 'user:manage' }
       },
       {
         path: 'admin/surveys',
         name: 'AdminSurveyList',
         component: () => import('../views/AdminSurveyList.vue'),
-        meta: { title: '全部问卷', roles: ['admin'] }
+        meta: { title: '全部问卷', roles: STAFF, permission: 'survey:manage' }
       },
       {
         // 模板管理：集中维护 is_template = 1 的问卷（改分类 / 编辑内容 / 取消模板 / 删除）
         path: 'admin/templates',
         name: 'TemplateManage',
         component: () => import('../views/TemplateManage.vue'),
-        meta: { title: '模板管理', roles: ['admin'] }
+        meta: { title: '模板管理', roles: STAFF, permission: 'template:manage' }
       },
       {
         path: 'statistics',
         name: 'SystemStatistics',
         component: () => import('../views/SystemStatistics.vue'),
-        meta: { title: '系统统计', roles: ['admin'] }
+        meta: { title: '系统统计', roles: STAFF, permission: 'system:view' }
       },
       {
         path: 'admin/recycle',
         name: 'AdminRecycle',
         component: () => import('../views/Recycle.vue'),
-        meta: { title: '回收站', roles: ['admin'] }
+        meta: { title: '回收站', roles: STAFF, permission: 'survey:manage' }
       },
       {
         path: 'admin/logs',
         name: 'OperationLog',
         component: () => import('../views/OperationLog.vue'),
-        meta: { title: '操作日志', roles: ['admin'] }
+        meta: { title: '操作日志', roles: STAFF, permission: 'log:view' }
       },
       {
         path: 'admin/reviews',
         name: 'ReviewManage',
         component: () => import('../views/ReviewManage.vue'),
-        meta: { title: '举报审核', roles: ['admin'] }
+        meta: { title: '举报审核', roles: STAFF, permission: 'review:handle' }
       },
       {
         // 钱包管理：用户余额、手动调整、对账（H5）
         path: 'admin/wallets',
         name: 'WalletManage',
         component: () => import('../views/WalletManage.vue'),
-        meta: { title: '钱包管理', roles: ['admin'] }
+        meta: { title: '钱包管理', roles: STAFF, permission: 'wallet:manage' }
       },
       {
         path: 'admin/demo',
@@ -136,7 +153,7 @@ const routes = [
         path: 'admin/announcements',
         name: 'AnnouncementManage',
         component: () => import('../views/AnnouncementManage.vue'),
-        meta: { title: '公告管理', roles: ['admin'] }
+        meta: { title: '公告管理', roles: STAFF, permission: 'announcement:manage' }
       },
 
       // ---- 普通用户专属 ----

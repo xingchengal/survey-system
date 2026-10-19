@@ -462,8 +462,8 @@ public class AnswerController {
         }
 
         // ★ H5：导出是进阶功能，每次 1 点。放在所有"拒绝条件"之后，保证被拒的请求不扣钱。
-        //   管理员免费（管理动作不该消耗自己的额度）。
-        if (!Role.isAdmin(role)) {
+        //   管理端人员（超管/次级管理员）免费（管理动作不该消耗自己的额度）。
+        if (!Role.isStaff(role)) {
             walletService.chargeForExport(surveyId, userId);
         }
 

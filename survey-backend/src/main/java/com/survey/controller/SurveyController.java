@@ -2,7 +2,7 @@ package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
 import com.survey.common.SurveyStatus;
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
 import com.survey.common.Permission;
@@ -148,7 +148,7 @@ public class SurveyController {
         //   · 余额不足时这次保存整体失败 —— 不会出现"设置开了、钱没扣"。
         boolean advancedNow = hasAdvancedSettings(survey);
         boolean advancedBefore = hasAdvancedSettings(old);
-        if (!Role.isAdmin(role) && advancedNow && !advancedBefore) {
+        if (!Role.isStaff(role) && advancedNow && !advancedBefore) {
             walletService.chargeAdvancedSettings(old.getId(), old.getUserId());
         }
 
@@ -186,7 +186,7 @@ public class SurveyController {
      */
     @Operation(summary = "问卷列表（含每份答卷数，管理员）")
     @GetMapping("/list-with-response-count")
-    @RequireAdmin
+    @RequirePermission(Permission.SYSTEM_VIEW)
     public List<Map<String, Object>> listWithResponseCount() {
         List<Survey> surveys = surveyService.listAll();
         // 一次 GROUP BY 拿到全部答卷数（key = surveyId；没有答卷的问卷不会出现在 Map 里）
@@ -207,7 +207,7 @@ public class SurveyController {
 
     @Operation(summary = "分页查询全部问卷（管理员，支持搜索 + 状态 + 创建时间范围筛选）")
     @GetMapping("/page")
-    @RequireAdmin
+    @RequirePermission(Permission.SURVEY_MANAGE)
     public PageResult<Survey> pageSurveys(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
@@ -231,7 +231,7 @@ public class SurveyController {
      */
     @Operation(summary = "导出问卷列表为 Excel（管理员）")
     @GetMapping("/export")
-    @RequireAdmin
+    @RequirePermission(Permission.SURVEY_MANAGE)
     public void exportSurveys(@RequestParam(required = false) String keyword,
                               @RequestParam(required = false) Integer status,
                               @RequestParam(required = false) String startDate,
@@ -387,7 +387,7 @@ public class SurveyController {
     }
 
     @OperationLog("恢复上架")
-    @RequireAdmin
+    @RequirePermission(Permission.REVIEW_HANDLE)
     @Operation(summary = "取消下架（管理员）")
     @PostMapping("/unsuspend/{id}")
     public String unsuspend(@PathVariable Integer id) {
@@ -446,7 +446,9 @@ public class SurveyController {
         if (old == null) {
             throw new BizException("问卷不存在，ID：" + id);
         }
-        OwnershipGuard.requireOwnerOrAdmin(old, userId, role, "复制");
+        // ★ 复制属于“数据外带”：editor 协作者有 survey:edit 也不能复制，
+        //   只给作者/超管/有模块权限的次级管理员（survey:manage，或模板上的 template:manage）。
+        surveyAccessService.requireOwnerOrStaff(old, userId, role, "复制");
         return surveyService.copySurvey(id, userId);
     }
 
@@ -460,7 +462,7 @@ public class SurveyController {
     //      少一个入口就少一次口径漂移的机会。
     @Operation(summary = "系统总览（含用户数、访客次数）")
     @GetMapping("/system-overview")
-    @RequireAdmin
+    @RequirePermission(Permission.SYSTEM_VIEW)
     public Map<String, Object> systemOverview() {
         Map<String, Object> result = surveyService.getSystemOverview();
         result.put("users", userService.countNormalUsers());
@@ -540,7 +542,7 @@ public class SurveyController {
             @RequestParam(required = false) String keyword,
             @RequestHeader("X-User-Id") Integer userId,
             @RequestHeader("X-User-Role") String role) {
-        if (Role.isAdmin(role)) {
+        if (surveyAccessService.hasModulePermission(userId, role, Permission.SURVEY_MANAGE)) {
             return surveyService.pageRecycleAll(pageNum, pageSize, keyword);
         }
         return surveyService.pageRecycleByUser(userId, pageNum, pageSize, keyword);
@@ -565,7 +567,7 @@ public class SurveyController {
     @OperationLog("设为模板")
     @Operation(summary = "设为模板 / 取消模板（管理员）")
     @PutMapping("/set-template/{id}")
-    @RequireAdmin
+    @RequirePermission(Permission.TEMPLATE_MANAGE)
     public String setTemplate(@PathVariable Integer id,
                               @RequestParam Integer isTemplate,
                               @RequestParam(required = false) String category) {
@@ -592,7 +594,7 @@ public class SurveyController {
      */
     @Operation(summary = "模板分类清单（管理员）")
     @GetMapping("/template-categories")
-    @RequireAdmin
+    @RequirePermission(Permission.TEMPLATE_MANAGE)
     public List<String> templateCategories() {
         return templateCategoryService.listNames();
     }
@@ -607,7 +609,7 @@ public class SurveyController {
     @OperationLog("新增模板分类")
     @Operation(summary = "新增模板分类（管理员）")
     @PostMapping("/template-categories")
-    @RequireAdmin
+    @RequirePermission(Permission.TEMPLATE_MANAGE)
     public List<String> addTemplateCategory(@RequestParam(required = false) String name) {
         return templateCategoryService.add(name);
     }

@@ -1,8 +1,9 @@
 package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.common.PageResult;
+import com.survey.common.Permission;
 import com.survey.entity.OperationLog;
 import com.survey.service.OperationLogService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -43,7 +44,7 @@ import java.util.List;
 @Tag(name = "操作日志", description = "系统操作日志查询与导出")
 @RestController
 @RequestMapping("/api/log")
-@RequireAdmin
+@RequirePermission(Permission.LOG_VIEW)
 public class OperationLogController {
 
     @Autowired

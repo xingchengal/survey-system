@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,20 +69,18 @@ class UserServiceDisabledTest {
     }
 
     /**
-     * 最后一个可用管理员不能被禁用。
-     * ★ 用 countActiveAdmins() 而不是 countAdmins()：后者把"已被禁用的管理员"也算进来，
-     *   于是"只剩 1 个管理员且已被禁用"时仍会放行 —— 那就真的没人能登录后台了。
+     * 超级管理员不能被禁用（比“最后一个可用管理员”更强：任何超管账号都不能被锁）。
      */
     @Test
-    @DisplayName("不能禁用最后一个可用管理员：countActiveAdmins() <= 1 时拒绝")
-    void cannotDisableLastActiveAdmin() {
+    @DisplayName("超级管理员不能被禁用：拒绝且不写库")
+    void cannotDisableSuperAdmin() {
         when(userMapper.findByIdIncludeDeleted(8)).thenReturn(user(8, "admin2", "admin", null, 0));
-        when(userMapper.countActiveAdmins()).thenReturn(1);
 
         BizException e = assertThrows(BizException.class, () -> userService.setDisabled(8, 1, 7));
 
-        assertTrue(e.getMessage().contains("管理员"), "实际=" + e.getMessage());
+        assertTrue(e.getMessage().contains("超级管理员"), "实际=" + e.getMessage());
         verify(userMapper, never()).updateDisabled(anyInt(), anyInt());
+        verify(userMapper, never()).countActiveAdmins();
     }
 
     /** 已注销的账号：提示先恢复，而不是"用户不存在"（那个人就在「已注销」列表里）。 */
@@ -128,14 +127,14 @@ class UserServiceDisabledTest {
     }
 
     /**
-     * 解禁：不做"最后一个管理员"检查（解禁只会让系统更可用），但**同样**作废旧票。
+     * 解禁普通用户：不做"管理员数量"检查（解禁只会让系统更可用），但**同样**作废旧票。
      * ★ 为什么解禁也要作废：禁用期间账号处于"被处置"状态，
      *   之前泄露/遗留的票不该在解禁后自动复活。
      */
     @Test
-    @DisplayName("解禁：不检查管理员数量，但仍作废旧 token")
+    @DisplayName("解禁普通用户：不检查管理员数量，但仍作废旧 token")
     void enableSkipsAdminCountButStillInvalidatesTokens() {
-        when(userMapper.findByIdIncludeDeleted(8)).thenReturn(user(8, "admin2", "admin", null, 1));
+        when(userMapper.findByIdIncludeDeleted(8)).thenReturn(user(8, "user8", "user", null, 1));
         when(userMapper.updateDisabled(8, 0)).thenReturn(1);
         when(userMapper.updateTokenValidAfter(eq(8), any())).thenReturn(1);
 
@@ -144,5 +143,24 @@ class UserServiceDisabledTest {
         verify(userMapper).updateDisabled(8, 0);
         verify(userMapper).updateTokenValidAfter(eq(8), any());
         verify(userMapper, never()).countActiveAdmins();
+    }
+
+    @Test
+    @DisplayName("★ 次级管理员只能由超管操作：普通管理员（含 self）不能禁用/解禁他")
+    void subAdminCanOnlyBeHandledBySuperAdmin() {
+        when(userMapper.findByIdIncludeDeleted(8)).thenReturn(user(8, "sub1", "subadmin", null, 0));
+        // 操作人 7 是超级管理员 → 放行
+        when(userMapper.findById(7)).thenReturn(user(7, "admin1", "admin", null, 0));
+        when(userMapper.updateDisabled(8, 1)).thenReturn(1);
+        when(userMapper.updateTokenValidAfter(eq(8), any())).thenReturn(1);
+        assertEquals("已禁用", userService.setDisabled(8, 1, 7));
+
+        // 操作人 9 是普通用户（实际接口不会让他进来，但 Service 也要自卫）→ 拒绝
+        reset(userMapper);
+        when(userMapper.findByIdIncludeDeleted(8)).thenReturn(user(8, "sub1", "subadmin", null, 0));
+        when(userMapper.findById(9)).thenReturn(user(9, "user9", "user", null, 0));
+        BizException e = assertThrows(BizException.class, () -> userService.setDisabled(8, 1, 9));
+        assertTrue(e.getMessage().contains("只有超级管理员"), "实际=" + e.getMessage());
+        verify(userMapper, never()).updateDisabled(8, 1);
     }
 }

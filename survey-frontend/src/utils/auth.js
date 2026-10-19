@@ -150,6 +150,10 @@ export function setPermissions(permissions) {
  */
 export function hasPermission(code) {
   if (!code) return true
+  // ★ 超管在**后端**是兜底放行；前端也必须同一口径：
+  //   否则老后端只下发 7 个旧权限点时，新菜单里的 survey:manage/template:manage 会被误判为“没权限”，
+  //   超管反而看不到模块入口。次级管理员不走这条分支，仍逐项判断。
+  if (getRole() === 'admin') return true
   const stored = localStorage.getItem(PERMISSIONS_KEY)
   if (stored == null) {
     const role = getRole()
@@ -179,11 +183,31 @@ export function clearAuth() {
 }
 
 /**
+ * 是否管理端人员（超级管理员 admin / 次级管理员 subadmin）。
+ * ★ 只用于“能不能进管理端外壳/菜单分组”，具体某个模块还要看 hasPermission()。
+ */
+export function isStaff(role) {
+  const r = role || getRole()
+  return r === 'admin' || r === 'subadmin'
+}
+
+/**
+ * 是否超级管理员（admin）。
+ * ★ 次级管理员即使有再多权限，也不能进“次级管理员管理 / 演示数据”等超管专属入口。
+ */
+export function isSuperAdmin(role) {
+  const r = role || getRole()
+  return r === 'admin'
+}
+
+/**
  * 按角色算出"首页"路径 —— 路由守卫和登录跳转都用它，避免两处写死同样的三元表达式。
- * 管理员首页是系统总览，普通用户是个人数据看板。
+ * 超管去系统总览；次级管理员去工作台（只显示被分配的模块）；普通用户去个人数据看板。
  */
 export function homePathFor(role) {
-  return role === 'admin' ? '/dashboard' : '/my/dashboard'
+  if (role === 'admin') return '/dashboard'
+  if (role === 'subadmin') return '/admin/workbench'
+  return '/my/dashboard'
 }
 
 export default {
@@ -198,5 +222,7 @@ export default {
   setAuth,
   setUser,
   clearAuth,
-  homePathFor
+  homePathFor,
+  isStaff,
+  isSuperAdmin
 }

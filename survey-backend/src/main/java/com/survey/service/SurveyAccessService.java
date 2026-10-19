@@ -39,11 +39,41 @@ public class SurveyAccessService {
     private SurveyCollaboratorMapper collaboratorMapper;
 
     /**
+     * 次级管理员（subadmin）模块权限查询。
+     * ★ 只有“staff 且不是超管”时才查；超管由 OwnershipGuard 直接放行，不查这张表。
+     * ★ 模块级放行口径（P1）：
+     *   · {@code survey:manage} → 任何问卷；
+     *   · {@code template:manage} → **仅模板**（isTemplate=1）。
+     *   没有这两个权限的次级管理员，仍按普通作者/协作者口径判。
+     */
+    @Autowired
+    private com.survey.mapper.RoleMapper roleMapper;
+
+    /**
+     * 次级管理员是否拥有某个**模块级权限点**（列表页这类“不是针对某一份问卷”的入口用）。
+     * ★ 超管直接 true（兜底）；普通用户/未登录 false。
+     * ★ 注意：这不是对象级授权，不能拿它替代 requirePermission。
+     */
+    public boolean hasModulePermission(Integer userId, String role, String code) {
+        if (Role.isAdmin(role)) {
+            return true;
+        }
+        if (!Role.isStaff(role) || userId == null || code == null) {
+            return false;
+        }
+        List<String> codes = roleMapper.findPermissionCodesByUserId(userId);
+        return codes != null && codes.contains(code);
+    }
+
+    /**
      * 是否拥有某个问卷级权限（不抛异常，给需要自己组织文案的调用方用）。
      *
      * @param permission 取值见 {@link com.survey.common.Permission}（如 survey:edit）
      */
     public boolean hasPermission(Survey survey, Integer userId, String role, String permission) {
+        if (staffModuleAllows(survey, userId, role)) {
+            return true;
+        }
         return OwnershipGuard.canAccess(survey, userId, role, permission,
                 collaboratorRoleCode(survey, userId, role));
     }
@@ -57,6 +87,9 @@ public class SurveyAccessService {
      */
     public void requirePermission(Survey survey, Integer userId, String role,
                                   String permission, String action) {
+        if (staffModuleAllows(survey, userId, role)) {
+            return;
+        }
         OwnershipGuard.requirePermission(survey, userId, role, permission,
                 collaboratorRoleCode(survey, userId, role), action);
     }
@@ -67,8 +100,31 @@ public class SurveyAccessService {
      *   与改造前唯一的差别是**多了协作者**——viewer 被邀请后至少要能打开问卷。
      */
     public void requireVisible(Survey survey, Integer userId, String role, String message) {
+        if (staffModuleAllows(survey, userId, role)) {
+            return;
+        }
         OwnershipGuard.requireVisible(survey, userId, role,
                 collaboratorRoleCode(survey, userId, role), message);
+    }
+
+    /**
+     * 要求"作者本人 / 超管 / 有对应模块权限的次级管理员"。
+     *
+     * ★ 为什么不能直接用 {@link #requirePermission}：
+     *   editor 协作者有 survey:edit，但**不能管理协作者名单、不能复制问卷**（会权限扩散/数据外带）。
+     *   这两个动作只开放给作者、超管，以及被授予 survey:manage / template:manage 的次级管理员。
+     */
+    public void requireOwnerOrStaff(Survey survey, Integer userId, String role, String action) {
+        if (survey == null) {
+            throw new BizException("问卷不存在");
+        }
+        if (Role.isAdmin(role) || isOwner(survey, userId)) {
+            return;
+        }
+        if (staffModuleAllows(survey, userId, role)) {
+            return;
+        }
+        throw new BizException("无权限" + action + "他人问卷");
     }
 
     /**
@@ -134,6 +190,12 @@ public class SurveyAccessService {
             return all;
         }
         boolean suspended = SurveyLifecycle.SUSPENDED.code().equals(survey.getLifecycle());
+        if (staffModuleAllows(survey, userId, role)) {
+            // 与作者同口径：下架期间收掉“能改”，保留看数据/删除
+            return suspended
+                    ? List.of(Permission.SURVEY_DATA, Permission.SURVEY_DELETE)
+                    : all;
+        }
         if (isOwner(survey, userId)) {
             return suspended
                     ? List.of(Permission.SURVEY_DATA, Permission.SURVEY_DELETE)
@@ -153,6 +215,31 @@ public class SurveyAccessService {
                 .filter(collaborator::has)
                 .filter(permission -> !suspended || !Permission.SURVEY_EDIT.equals(permission))
                 .toList();
+    }
+
+    /**
+     * 次级管理员（subadmin）是否凭**模块权限**获得这份问卷的对象级权限。
+     *
+     * ★ 只对“staff 且不是超管”生效；超管走 OwnershipGuard 的 admin 分支，不查库。
+     * ★ 两个模块权限的边界：
+     *   · survey:manage  → 任何问卷（相当于“全站问卷管理员”）；
+     *   · template:manage → 仅 isTemplate=1 的模板（不能让模板管理员顺手改用户问卷）。
+     * ★ 没有这两个权限的次级管理员，继续按作者/协作者口径判（可能什么都没有）。
+     */
+    private boolean staffModuleAllows(Survey survey, Integer userId, String role) {
+        if (survey == null || userId == null
+                || !Role.isStaff(role) || Role.isAdmin(role)) {
+            return false;
+        }
+        List<String> codes = roleMapper.findPermissionCodesByUserId(userId);
+        if (codes == null || codes.isEmpty()) {
+            return false;
+        }
+        if (codes.contains(Permission.SURVEY_MANAGE)) {
+            return true;
+        }
+        return Integer.valueOf(1).equals(survey.getIsTemplate())
+                && codes.contains(Permission.TEMPLATE_MANAGE);
     }
 
     /** 是否作者本人（与 OwnershipGuard 同口径；这里复制一份判空是为了不额外查库） */

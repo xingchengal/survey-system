@@ -403,11 +403,12 @@ public class UserService {
                 PageParams.pageNum(pageNum), PageParams.pageSize(pageSize));
     }
 
-    /** 角色筛选参数归一：只放行 admin / user，其余（含空串与非法值）一律当作"全部"。 */
+    /** 角色筛选参数归一：只放行 admin / subadmin / user，其余（含空串与非法值）一律当作"全部"。 */
     private static String normalizeRoleFilter(String role) {
         if (role == null) return null;
         String value = role.trim();
-        return Role.ADMIN.equals(value) || Role.USER.equals(value) ? value : null;
+        return Role.ADMIN.equals(value) || Role.SUB_ADMIN.equals(value) || Role.USER.equals(value)
+                ? value : null;
     }
 
     /** 禁用筛选参数归一：只放行 0 / 1，其余（含 null 与非法值）当作"不过滤"。 */
@@ -470,13 +471,18 @@ public class UserService {
         if (user.getDeletedAt() != null) {
             throw new BizException("该账号已注销，请先恢复账号再设置禁用状态");
         }
-        if (disabling) {
-            if (id.equals(currentUserId)) {
-                throw new BizException("不能禁用自己的账号");
-            }
-            if (Role.isAdmin(user.getRole()) && userMapper.countActiveAdmins() <= 1) {
-                throw new BizException("系统必须保留至少一个可用的管理员，无法禁用最后一个管理员");
-            }
+        // ★ 自己优先判：文案是“不能禁用自己”，比“超级管理员不能被禁用”更贴近用户动作。
+        if (disabling && id.equals(currentUserId)) {
+            throw new BizException("不能禁用自己的账号");
+        }
+        // ★ 超级管理员不可被禁用/解禁：这条比“最后一个管理员”更强 ——
+        //   只要超管账号存在且可用，系统就一定有人能进后台。
+        if (Role.isAdmin(user.getRole())) {
+            throw new BizException("超级管理员不能被禁用或解禁");
+        }
+        // ★ 次级管理员只有超管能操作（user:manage 可以管普通用户，但不能管同僚/上级）。
+        if (Role.SUB_ADMIN.equals(user.getRole()) && !isSuperOperator(currentUserId)) {
+            throw new BizException("只有超级管理员可以操作管理员账号");
         }
 
         int result = userMapper.updateDisabled(id, disabled);
@@ -523,14 +529,14 @@ public class UserService {
         if (id.equals(currentUserId)) {
             throw new BizException("不能删除自己的账号（如需注销，请让其他管理员操作）");
         }
-        // ★ 准确说明（别被这行的措辞误导）：这道检查在**当前唯一入口**下其实**不可达** ——
-        //   能执行删除的人自己必然是管理员，所以当目标是"另一个管理员"时库里至少有 2 个管理员，
-        //   countAdmins() <= 1 不会成立；而"目标就是自己"那种情况已被上面那句挡掉。
-        //   之所以仍然保留：不想把"系统永远留得下管理员"只建立在**一道**检查上。
-        //   将来若新增"批量删除用户""脚本直调 Service""把管理员降级为普通用户"这类入口，
-        //   它就是最后一道闸 —— 代价只有一次 COUNT 查询。
-        if (Role.isAdmin(user.getRole()) && userMapper.countAdmins() <= 1) {
-            throw new BizException("系统必须保留至少一个管理员，无法删除最后一个管理员");
+        // ★★ 超级管理员**永远不可删除**（即使调用者也是超管）：
+        //   这是“系统一定还有超管”的最强保证，不再依赖 countAdmins() 的时机判断。
+        if (Role.isAdmin(user.getRole())) {
+            throw new BizException("不能删除超级管理员账号");
+        }
+        // ★ 次级管理员只能由超管删除；user:manage 可以管普通用户，但不能管同僚/上级。
+        if (Role.SUB_ADMIN.equals(user.getRole()) && !isSuperOperator(currentUserId)) {
+            throw new BizException("只有超级管理员可以删除管理员账号");
         }
 
         // 1. 找出该用户的所有问卷（含回收站）
@@ -622,6 +628,19 @@ public class UserService {
      */
     private static java.time.LocalDateTime nowForTokenCutoff() {
         return java.time.LocalDateTime.now().withNano(0);
+    }
+
+    /**
+     * 当前操作人是不是超级管理员。
+     * ★ 只在“目标是 staff”时才查这一条：普通用户操作不增加查询。
+     * ★ 不用请求头里的 role 作为唯一依据：这里以库里的账号状态为准（被降级后立即失效）。
+     */
+    private boolean isSuperOperator(Integer userId) {
+        if (userId == null) {
+            return false;
+        }
+        User operator = userMapper.findById(userId);
+        return operator != null && Role.isAdmin(operator.getRole());
     }
 
     /**
@@ -734,6 +753,11 @@ public class UserService {
             // 包含"已经被注销过"的情况（findById 过滤了 deleted_at）—— 对调用方都是"这个账号不能用了"
             throw new BizException("账号不存在或已注销");
         }
+        // ★ 超级管理员不能自我注销（需求 4）：系统必须永远保留这个账号；
+        //   次级管理员与普通用户仍可按既有流程注销。
+        if (Role.isAdmin(user.getRole())) {
+            throw new BizException("超级管理员不能注销账号");
+        }
         // ★ 与登录用同一套校验（含 MD5 老数据的兼容）：不能在这里另写一套比较逻辑
         if (!verifyPassword(rawPassword, user.getPassword())) {
             throw new BizException("密码错误");
@@ -765,11 +789,16 @@ public class UserService {
      *     （JWT 本身无法吊销，只能靠时间点作废）。
      */
     @Transactional
-    public String restoreUser(Integer id) {
+    public String restoreUser(Integer id, Integer currentUserId) {
         if (id == null) throw new BizException("请指定要恢复的用户");
         User user = userMapper.findByIdIncludeDeleted(id);
         if (user == null) {
             throw new BizException("用户不存在");
+        }
+        // ★ 恢复一个“次级管理员”等于恢复他的管理身份，只能由超管做；
+        //   普通用户的恢复不受影响（user:manage 即可）。
+        if (Role.SUB_ADMIN.equals(user.getRole()) && !isSuperOperator(currentUserId)) {
+            throw new BizException("只有超级管理员可以恢复管理员账号");
         }
         if (user.getDeletedAt() == null) {
             throw new BizException("该账号并未注销，无需恢复");

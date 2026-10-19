@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class PermissionTest {
 
     @Test
-    @DisplayName("★ 7 个权限点字符串固定：改一个就会与数据库种子/审计表脱钩")
+    @DisplayName("★ 13 个权限点字符串固定：改一个就会与数据库种子/审计表脱钩")
     void permissionCodesAreStable() {
         assertEquals("survey:edit", Permission.SURVEY_EDIT);
         assertEquals("survey:publish", Permission.SURVEY_PUBLISH);
@@ -28,8 +28,34 @@ class PermissionTest {
         assertEquals("user:manage", Permission.USER_MANAGE);
         assertEquals("review:handle", Permission.REVIEW_HANDLE);
         assertEquals("wallet:manage", Permission.WALLET_MANAGE);
-        // ALL 必须恰好覆盖这 7 个（新增权限点时这里会先红）
-        assertEquals(7, Permission.ALL.size(), "新增/删除权限点时必须同步 sql/migration-rbac.sql 的种子");
+        // 模块级（次级管理员可分配）
+        assertEquals("survey:manage", Permission.SURVEY_MANAGE);
+        assertEquals("template:manage", Permission.TEMPLATE_MANAGE);
+        assertEquals("announcement:manage", Permission.ANNOUNCEMENT_MANAGE);
+        assertEquals("log:view", Permission.LOG_VIEW);
+        assertEquals("feedback:handle", Permission.FEEDBACK_HANDLE);
+        assertEquals("system:view", Permission.SYSTEM_VIEW);
+        // ALL 必须恰好覆盖这 13 个（新增权限点时这里会先红）
+        assertEquals(13, Permission.ALL.size(),
+                "新增/删除权限点时必须同步 sql/init.sql 与 migration 的种子");
+    }
+
+    @Test
+    @DisplayName("★ ADMIN_GRANTABLE：只含模块级权限，不含对象级 survey:edit/publish/data/delete")
+    void adminGrantableShouldExcludeObjectPermissions() {
+        assertEquals(9, Permission.ADMIN_GRANTABLE.size());
+        for (String code : Permission.ADMIN_GRANTABLE) {
+            assertTrue(Permission.isValid(code), "可分配权限点必须也是合法权限点：" + code);
+            assertFalse(code.equals(Permission.SURVEY_EDIT), "对象级权限不能直接授给次级管理员");
+            assertFalse(code.equals(Permission.SURVEY_PUBLISH));
+            assertFalse(code.equals(Permission.SURVEY_DATA));
+            assertFalse(code.equals(Permission.SURVEY_DELETE));
+        }
+        assertTrue(Permission.isAdminGrantable(Permission.TEMPLATE_MANAGE));
+        assertTrue(Permission.isAdminGrantable(Permission.FEEDBACK_HANDLE));
+        assertFalse(Permission.isAdminGrantable(Permission.SURVEY_EDIT));
+        assertFalse(Permission.isAdminGrantable(null));
+        assertFalse(Permission.isAdminGrantable("template:manage "));
     }
 
     @Test

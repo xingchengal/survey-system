@@ -24,6 +24,7 @@ import announcement from './announcement'
 import { operationLog, errorLog } from './log'
 import { demo, misc } from './demo'
 import captcha from './captcha'
+import admin from './admin'
 
 const api = {
   http,
@@ -38,7 +39,8 @@ const api = {
   errorLog, // api.errorLog.page(...)
   demo, // api.demo.init() / api.demo.reset()
   misc, // api.misc.health() / api.misc.seedTemplates()
-  captcha // api.captcha.slider()（注册页滑块验证码）
+  captcha, // api.captcha.slider()（注册页滑块验证码）
+  admin // api.admin.subAdmins() / promote() / updatePermissions() / demote()
 }
 
 export { http, ApiError, request, toQuery, notifyError, download }
@@ -54,6 +56,7 @@ export {
   errorLog,
   demo,
   misc,
-  captcha
+  captcha,
+  admin
 }
 export default api

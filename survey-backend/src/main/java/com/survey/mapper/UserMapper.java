@@ -280,6 +280,14 @@ public interface UserMapper {
     @Update("UPDATE t_user SET disabled = #{disabled} WHERE id = #{id}")
     int updateDisabled(@Param("id") Integer id, @Param("disabled") Integer disabled);
 
+    /**
+     * 改角色（admin / subadmin / user）。
+     * ★ 只由 AdminManagementService 在“提权/降级”事务里调用：
+     *   角色是安全边界，绝不能从请求体直接写库。
+     */
+    @Update("UPDATE t_user SET role = #{role} WHERE id = #{id}")
+    int updateRole(@Param("id") Integer id, @Param("role") String role);
+
     /** 改昵称。★ 昵称会显示在操作日志/回收站里，所以 Service 不允许改成全空白。 */
     @Update("UPDATE t_user SET nickname = #{nickname} WHERE id = #{id}")
     int updateNickname(@Param("id") Integer id, @Param("nickname") String nickname);

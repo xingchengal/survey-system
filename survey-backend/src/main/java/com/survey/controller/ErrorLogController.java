@@ -1,8 +1,10 @@
 package com.survey.controller;
 
 import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.common.BizException;
 import com.survey.common.PageResult;
+import com.survey.common.Permission;
 import com.survey.entity.ErrorLog;
 import com.survey.service.ErrorLogService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,14 +36,14 @@ import java.util.Map;
 @Tag(name = "异常日志", description = "系统异常记录查询")
 @RestController
 @RequestMapping("/api/error-log")
-@RequireAdmin
 public class ErrorLogController {
 
     @Autowired
     private ErrorLogService errorLogService;
 
-    // ★ 四个方法都**没有** @RequestHeader("X-User-Role") 形参（角色由类级 @RequireAdmin 统一校验）：
-    //   多一个"收了不用"的形参只会让签名变噪音、让端点审计误判成"这里另有一道校验"。
+    // ★ 读：log:view（次级管理员可被授予）；删除/清空：仍 @RequireAdmin 超管专属。
+    //   ★ 四个方法都**没有** @RequestHeader("X-User-Role") 形参（角色由切面统一校验）。
+    @RequirePermission(Permission.LOG_VIEW)
     @Operation(summary = "分页查询异常日志（管理员）")
     @GetMapping("/page")
     public PageResult<ErrorLog> page(
@@ -51,16 +53,18 @@ public class ErrorLogController {
         return errorLogService.page(pageNum, pageSize, keyword);
     }
 
+    @RequirePermission(Permission.LOG_VIEW)
     @Operation(summary = "异常数量（管理员）")
     @GetMapping("/count")
     public Map<String, Object> count() {
-        // ★ 非管理员由类级 @RequireAdmin 抛异常 → 400，前端能明确区分"没数据"和"没权限"；
+        // ★ 无权限由 @RequirePermission 抛 403，前端能明确区分"没数据"和"没权限"；
         //   若返回 {count:0}（HTTP 200），前端会把"无权限"显示成"没有异常"。
         Map<String, Object> result = new HashMap<>();
         result.put("count", errorLogService.count());
         return result;
     }
 
+    @RequireAdmin
     @Operation(summary = "删除单条异常日志（管理员）")
     @DeleteMapping("/{id}")
     public String delete(@PathVariable Integer id) {
@@ -69,6 +73,7 @@ public class ErrorLogController {
         return "已删除";
     }
 
+    @RequireAdmin
     @Operation(summary = "清空所有异常日志（管理员）")
     @DeleteMapping("/clear")
     public String clear() {

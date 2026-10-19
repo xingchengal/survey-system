@@ -1,8 +1,9 @@
 package com.survey.controller;
 
 import com.survey.annotation.OperationLog;
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.entity.Survey;
 import com.survey.service.SurveyReviewService;
 import com.survey.service.SurveyService;
@@ -49,7 +50,7 @@ public class SurveyReviewController {
         return "举报已提交，管理员会尽快处理";
     }
 
-    @RequireAdmin
+    @RequirePermission(Permission.REVIEW_HANDLE)
     @Operation(summary = "举报列表（管理员）")
     @GetMapping("/api/review/list")
     public List<Map<String, Object>> list(@RequestParam(required = false) String status) {
@@ -57,7 +58,7 @@ public class SurveyReviewController {
     }
 
     @OperationLog("处理举报")
-    @RequireAdmin
+    @RequirePermission(Permission.REVIEW_HANDLE)
     @Operation(summary = "处理举报（管理员）")
     @PostMapping("/api/review/{id}/handle")
     public String handle(@PathVariable Integer id,

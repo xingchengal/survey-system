@@ -318,7 +318,7 @@ CREATE TABLE `t_user` (
 -- =====================================================================
 CREATE TABLE `t_role` (
   `id` int NOT NULL AUTO_INCREMENT COMMENT '角色ID',
-  `code` varchar(50) NOT NULL COMMENT '角色码（唯一）：admin / user / 未来的自定义角色',
+  `code` varchar(50) NOT NULL COMMENT '角色码（唯一）：admin=超管 / subadmin=次级管理员 / user=普通用户',
   `name` varchar(50) NOT NULL COMMENT '展示名',
   `is_builtin` tinyint NOT NULL DEFAULT '0' COMMENT '1=内置角色（不允许删除）',
   `created_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -345,6 +345,19 @@ CREATE TABLE `t_user_role` (
   KEY `idx_role_id` (`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户-角色关联表';
 
+-- 次级管理员的**逐项授权**（与角色权限取并集；见 RoleMapper.findPermissionCodesByUserId）
+-- ★ 为什么按用户存：每个次级管理员可以有不同的模块组合，不必为每个人建一个角色。
+CREATE TABLE `t_user_permission` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '用户ID（t_user.id）',
+  `permission_code` varchar(64) NOT NULL COMMENT '权限点，取值为 common/Permission 里的常量；只允许 ADMIN_GRANTABLE',
+  `created_by` int DEFAULT NULL COMMENT '授权人（超管）',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_permission` (`user_id`,`permission_code`),
+  KEY `idx_user_permission_code` (`permission_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户-权限点直接授权（次级管理员）';
+
 CREATE TABLE `t_survey_collaborator` (
   `id` int NOT NULL AUTO_INCREMENT,
   `survey_id` int NOT NULL COMMENT '问卷ID',
@@ -357,10 +370,12 @@ CREATE TABLE `t_survey_collaborator` (
   KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷协作者表';
 
--- 系统种子数据（与 migration-rbac.sql 完全一致；重复导入安全）
-INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('admin', '管理员', 1);
+-- 系统种子数据（与 migration-rbac.sql + migration-subadmin-permissions.sql 完全一致；重复导入安全）
+INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('admin', '超级管理员', 1);
+INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('subadmin', '次级管理员', 1);
 INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('user', '普通用户', 1);
 
+-- admin（超管）：全部 13 个权限点（代码里还有兜底放行，这里给全是为了矩阵可展示/可审计）
 INSERT IGNORE INTO `t_role_permission` (`role_id`, `permission_code`)
 SELECT r.id, p.code FROM `t_role` r
 JOIN (
@@ -370,7 +385,13 @@ JOIN (
     SELECT 'survey:delete'  UNION ALL
     SELECT 'user:manage'    UNION ALL
     SELECT 'review:handle'  UNION ALL
-    SELECT 'wallet:manage'
+    SELECT 'wallet:manage'  UNION ALL
+    SELECT 'survey:manage'  UNION ALL
+    SELECT 'template:manage' UNION ALL
+    SELECT 'announcement:manage' UNION ALL
+    SELECT 'log:view'       UNION ALL
+    SELECT 'feedback:handle' UNION ALL
+    SELECT 'system:view'
 ) p
 WHERE r.code = 'admin';
 

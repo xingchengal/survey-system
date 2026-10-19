@@ -47,15 +47,47 @@ public final class Permission {
     /** 额度钱包管理（H5） */
     public static final String WALLET_MANAGE = "wallet:manage";
 
+    // ===== 模块级权限点（次级管理员可被逐项分配；超管兜底放行） =====
+
+    /** 管理端「全部问卷 / 回收站 / 导出」 */
+    public static final String SURVEY_MANAGE = "survey:manage";
+
+    /** 模板管理（设为模板、改分类、编辑模板内容） */
+    public static final String TEMPLATE_MANAGE = "template:manage";
+
+    /** 公告管理 */
+    public static final String ANNOUNCEMENT_MANAGE = "announcement:manage";
+
+    /** 操作日志 / 异常日志查看（清空、删除仍是超管专属） */
+    public static final String LOG_VIEW = "log:view";
+
+    /** 处理反馈与客服工单（第 1 条需求） */
+    public static final String FEEDBACK_HANDLE = "feedback:handle";
+
+    /** 系统总览 / 系统统计 */
+    public static final String SYSTEM_VIEW = "system:view";
+
     /**
      * 全部权限点（不可变）。
      * ★ 用 Set.of：重复值会在类初始化时直接抛异常 —— 比"跑起来才发现漏配"安全。
-     * ★ 新增权限点时**必须**同时改这里与 sql/migration-rbac.sql 的种子数据，
+     * ★ 新增权限点时**必须**同时改这里与 sql/init.sql / migration 的种子数据，
      *   否则 PermissionTest 会先红。
      */
     public static final Set<String> ALL = Set.of(
             SURVEY_EDIT, SURVEY_PUBLISH, SURVEY_DATA, SURVEY_DELETE,
-            USER_MANAGE, REVIEW_HANDLE, WALLET_MANAGE);
+            USER_MANAGE, REVIEW_HANDLE, WALLET_MANAGE,
+            SURVEY_MANAGE, TEMPLATE_MANAGE, ANNOUNCEMENT_MANAGE,
+            LOG_VIEW, FEEDBACK_HANDLE, SYSTEM_VIEW);
+
+    /**
+     * 可以分配给**次级管理员**的权限点。
+     * ★ 不包含 survey:edit / publish / data / delete：那四个是“对象级”权限，
+     *   由作者/协作者在自己的问卷上使用；次级管理员走 survey:manage 这类模块级权限。
+     * ★ 也不包含任何未来只给超管的点（演示数据、模板播种等）。
+     */
+    public static final Set<String> ADMIN_GRANTABLE = Set.of(
+            SURVEY_MANAGE, TEMPLATE_MANAGE, USER_MANAGE, REVIEW_HANDLE,
+            WALLET_MANAGE, ANNOUNCEMENT_MANAGE, LOG_VIEW, FEEDBACK_HANDLE, SYSTEM_VIEW);
 
     private Permission() {
     }
@@ -63,5 +95,10 @@ public final class Permission {
     /** 是否合法权限点（区分大小写；null/空一律 false） */
     public static boolean isValid(String code) {
         return code != null && ALL.contains(code);
+    }
+
+    /** 是否可分配给次级管理员（用于管理端候选清单与授权校验）。 */
+    public static boolean isAdminGrantable(String code) {
+        return code != null && ADMIN_GRANTABLE.contains(code);
     }
 }

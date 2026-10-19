@@ -116,7 +116,13 @@
       <el-table-column label="操作" :width="showTemplates ? 250 : 220" align="center" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="handleView(row)">查看</el-button>
-          <el-button type="warning" link size="small" @click="handleTemplate(row)">
+          <el-button
+            v-if="canManageTemplates"
+            type="warning"
+            link
+            size="small"
+            @click="handleTemplate(row)"
+          >
             {{ row.isTemplate === 1 ? '取消模板' : '设为模板' }}
           </el-button>
           <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
@@ -205,6 +211,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 //   分页列表 / 模板列表（"显示模板"开关用）/ 题目列表 / 设为模板 / 移入回收站 / 导出。
 //   页面不再自己取 token、拼 query、判断 res.ok、parse JSON。
 import api from '../api'
+import { hasPermission } from '../utils/auth'
 // Refresh / Search / Download / Setting 都用于「属性变量」形式（:icon="Download"），
 // 这种写法需要真实的变量，所以必须 import；
 // 若某图标只以模板标签形式出现（<Bell />），则由 main.js 全局注册即可，无需在这里 import。
@@ -317,6 +324,10 @@ export default {
     }
   },
   computed: {
+    /** 「设为/取消模板」需要 template:manage；只有 survey:manage 的次级管理员不显示该按钮 */
+    canManageTemplates() {
+      return hasPermission('template:manage')
+    },
     /**
      * 当前是否有任何筛选条件（用于「重置」按钮的置灰）。
      * ★ 为什么要它：没有筛选条件时点「重置」，界面不会有任何变化 ——

@@ -20,7 +20,7 @@
 
           <h2 class="profile-name">{{ user.nickname || user.username }}</h2>
           <div class="text-center">
-            <el-tag type="danger" effect="light" round>管理员</el-tag>
+            <el-tag type="danger" effect="light" round>{{ isSuper ? '超级管理员' : '次级管理员' }}</el-tag>
           </div>
 
           <el-divider />
@@ -246,8 +246,8 @@
               </el-form>
             </el-tab-pane>
 
-            <!-- 这个页签只放**不可逆操作**，所以页签名直接叫"账号注销"更准确。 -->
-            <el-tab-pane label="账号注销" name="privacy">
+            <!-- ★ 超级管理员不显示注销（需求 4：不能删超管）；次级管理员可正常注销。 -->
+            <el-tab-pane v-if="!isSuper" label="账号注销" name="privacy">
               <div class="form-panel">
                 <div class="danger-zone">
                   <div class="danger-title">注销账号</div>
@@ -255,9 +255,7 @@
                     注销后你将无法再登录本系统，账号会立即失效；<br />
                     <b>你不会被删除任何数据</b>：你建的问卷、以及别人在这些问卷上填过的答卷**都会保留**，
                     问卷也继续可以填写（只是不再展示发布者资料）。<br />
-                    <b>如果你是这个系统唯一的管理员</b>，注销后将没有任何人能进入管理端，
-                    只能由其他管理员（或直接改数据库）恢复 —— 请先确认还有另一个管理员。<br />
-                    如需恢复，请联系管理员。
+                    如需恢复，请联系超级管理员。
                   </div>
                   <el-button type="danger" plain :disabled="!user.id" @click="openDeleteDialog">
                     注销我的账号
@@ -314,7 +312,7 @@ import { ElMessage } from 'element-plus'
 //
 import api from '../api'
 // 登录态的读/改/清统一走 utils/auth
-import { getUser, setUser, clearAuth } from '../utils/auth'
+import { getUser, setUser, clearAuth, hasPermission } from '../utils/auth'
 // 自研头像裁剪组件（与 UserProfile.vue 用的是同一个）
 import AvatarCropper from '../components/AvatarCropper.vue'
 // 本页图标全部是模板标签形式（如 <Camera />），已由 main.js 全局注册，无需再 import
@@ -402,6 +400,10 @@ export default {
     }
   },
   computed: {
+    /** 超级管理员：不显示「账号注销」（需求 4：超管不能删） */
+    isSuper() {
+      return this.user.role === 'admin'
+    },
     avatarText() {
       const name = this.user.nickname || this.user.username || '管'
       return name.charAt(0).toUpperCase()
@@ -417,7 +419,7 @@ export default {
     async loadProfile() {
       try {
         this.user = await api.user.profile()
-        if (this.user.role !== 'admin') {
+        if (this.user.role !== 'admin' && this.user.role !== 'subadmin') {
           ElMessage.error('无权访问管理员个人中心')
           this.$router.push('/my/profile')
           return
@@ -425,9 +427,10 @@ export default {
         this.profileForm.nickname = this.user.nickname || ''
         this.contactForm.phone = this.user.phone || ''
         this.contactForm.email = this.user.email || ''
-        this.loadSysStats()
+        // 次级管理员没有对应模块权限时不要请求，否则会弹 403 红字
+        if (hasPermission('system:view')) this.loadSysStats()
         this.loadLoginLogs()
-        this.loadRecentLogs()
+        if (hasPermission('log:view')) this.loadRecentLogs()
       } catch {
         // 请求失败的提示（含 401 自动清登录态并跳 /login）已由接口层统一处理，这里不再重复弹
       }

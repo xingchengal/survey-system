@@ -1,9 +1,10 @@
 package com.survey.controller;
 
 import com.alibaba.excel.EasyExcel;
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.annotation.OperationLog;
 import com.survey.common.BizException;
+import com.survey.common.Permission;
 import com.survey.common.PageResult;
 import com.survey.dto.AccountDeleteRequest;
 import com.survey.dto.ContactRequest;
@@ -429,7 +430,7 @@ public class UserController {
     //     只会让端点审计误判成"这里另有一道校验"。
     @Operation(summary = "分页查询用户（管理员，支持关键词搜索 + 角色/禁用状态筛选）")
     @GetMapping("/page")
-    @RequireAdmin
+    @RequirePermission(Permission.USER_MANAGE)
     public PageResult<User> pageUsers(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
@@ -455,7 +456,7 @@ public class UserController {
      */
     @Operation(summary = "分页查询已注销用户（管理员，用于恢复）")
     @GetMapping("/page-deleted")
-    @RequireAdmin
+    @RequirePermission(Permission.USER_MANAGE)
     public PageResult<User> pageDeletedUsers(
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "10") int pageSize,
@@ -482,7 +483,7 @@ public class UserController {
     @OperationLog("设置用户禁用状态")
     @Operation(summary = "禁用/解禁用户（管理员）")
     @PutMapping("/{id}/disabled")
-    @RequireAdmin
+    @RequirePermission(Permission.USER_MANAGE)
     public String setUserDisabled(@PathVariable Integer id,
                                   @RequestParam(required = false) Integer disabled,
                                   @RequestHeader("X-User-Id") Integer currentUserId) {
@@ -508,7 +509,7 @@ public class UserController {
      */
     @Operation(summary = "导出用户列表为 Excel（管理员）")
     @GetMapping("/export")
-    @RequireAdmin
+    @RequirePermission(Permission.USER_MANAGE)
     public void exportUsers(@RequestParam(required = false) String keyword,
                             @RequestParam(required = false) String role,
                             @RequestParam(defaultValue = "false") boolean deleted,
@@ -526,7 +527,8 @@ public class UserController {
             row.add(u.getId() == null ? "" : String.valueOf(u.getId()));
             row.add(nullToEmpty(u.getUsername()));
             row.add(nullToEmpty(u.getNickname()));
-            row.add(Role.isAdmin(u.getRole()) ? "管理员" : "普通用户");
+            row.add(Role.isAdmin(u.getRole()) ? "超级管理员"
+                    : (Role.SUB_ADMIN.equals(u.getRole()) ? "次级管理员" : "普通用户"));
             row.add(deleted ? "已注销" : (u.getDisabled() != null && u.getDisabled() == 1 ? "已禁用" : "正常"));
             row.add(u.getCreatedTime() == null ? "" : u.getCreatedTime().format(fmt));
             row.add(deleted
@@ -558,7 +560,7 @@ public class UserController {
     @OperationLog("删除用户")
     @Operation(summary = "删除用户（管理员）")
     @DeleteMapping("/delete/{id}")
-    @RequireAdmin
+    @RequirePermission(Permission.USER_MANAGE)
     public String deleteUser(@PathVariable Integer id,
                              @RequestHeader("X-User-Id") Integer currentUserId) {
         // ★ 必须把"当前登录用户 id"传给 Service —— Service 靠它挡住"管理员删自己"；
@@ -609,9 +611,10 @@ public class UserController {
     @OperationLog("恢复已注销账号")
     @Operation(summary = "恢复已注销账号（管理员）")
     @PutMapping("/restore/{id}")
-    @RequireAdmin
-    public String restoreUser(@PathVariable Integer id) {
-        return userService.restoreUser(id);
+    @RequirePermission(Permission.USER_MANAGE)
+    public String restoreUser(@PathVariable Integer id,
+                              @RequestHeader("X-User-Id") Integer operatorId) {
+        return userService.restoreUser(id, operatorId);
     }
 
     // ★ 这里**不要**再加"普通用户数量"的独立端点：

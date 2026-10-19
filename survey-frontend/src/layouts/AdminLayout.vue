@@ -18,49 +18,58 @@
           text-color="#b9c7e6"
           active-text-color="#ffffff"
         >
-          <!-- ===== 管理员菜单 ===== -->
-          <template v-if="isAdmin">
-            <el-menu-item index="/dashboard">
+          <!-- ===== 管理端菜单（超管 + 次级管理员；按权限点过滤） ===== -->
+          <template v-if="isStaff">
+            <el-menu-item v-if="!isSuper" index="/admin/workbench">
+              <el-icon><HomeFilled /></el-icon>
+              <span>管理工作台</span>
+            </el-menu-item>
+            <el-menu-item v-if="can('system:view')" index="/dashboard">
               <el-icon><DataBoard /></el-icon>
               <span>系统总览</span>
             </el-menu-item>
-            <el-menu-item index="/users">
+            <el-menu-item v-if="can('user:manage')" index="/users">
               <el-icon><UserFilled /></el-icon>
               <span>用户管理</span>
             </el-menu-item>
-            <el-menu-item index="/admin/surveys">
+            <el-menu-item v-if="can('survey:manage')" index="/admin/surveys">
               <el-icon><Document /></el-icon>
               <span>全部问卷</span>
             </el-menu-item>
-            <el-menu-item index="/admin/templates">
+            <el-menu-item v-if="can('template:manage')" index="/admin/templates">
               <el-icon><DocumentCopy /></el-icon>
               <span>模板管理</span>
             </el-menu-item>
-            <el-menu-item index="/statistics">
+            <el-menu-item v-if="can('system:view')" index="/statistics">
               <el-icon><PieChart /></el-icon>
               <span>系统统计</span>
             </el-menu-item>
-            <el-menu-item index="/admin/recycle">
+            <el-menu-item v-if="can('survey:manage')" index="/admin/recycle">
               <el-icon><Delete /></el-icon>
               <span>回收站</span>
             </el-menu-item>
-            <el-menu-item index="/admin/announcements">
+            <el-menu-item v-if="can('announcement:manage')" index="/admin/announcements">
               <el-icon><Bell /></el-icon>
               <span>公告管理</span>
             </el-menu-item>
-            <el-menu-item index="/admin/logs">
+            <el-menu-item v-if="can('log:view')" index="/admin/logs">
               <el-icon><Memo /></el-icon>
               <span>操作日志</span>
             </el-menu-item>
-            <el-menu-item index="/admin/reviews">
+            <el-menu-item v-if="can('review:handle')" index="/admin/reviews">
               <el-icon><Warning /></el-icon>
               <span>举报审核</span>
             </el-menu-item>
-            <el-menu-item index="/admin/wallets">
+            <el-menu-item v-if="can('wallet:manage')" index="/admin/wallets">
               <el-icon><Wallet /></el-icon>
               <span>钱包管理</span>
             </el-menu-item>
-            <el-menu-item index="/admin/demo">
+            <!-- 超管专属 -->
+            <el-menu-item v-if="isSuper" index="/admin/sub-admins">
+              <el-icon><Avatar /></el-icon>
+              <span>次级管理员</span>
+            </el-menu-item>
+            <el-menu-item v-if="isSuper" index="/admin/demo">
               <el-icon><MagicStick /></el-icon>
               <span>演示数据</span>
             </el-menu-item>
@@ -93,7 +102,7 @@
       </div>
 
       <!-- 底部：接口文档按钮（仅管理员） -->
-      <div v-if="isAdmin" class="api-doc-footer">
+      <div v-if="isSuper" class="api-doc-footer">
         <div class="api-doc-btn" @click="openApiDoc">
           <div class="api-doc-btn-inner">
             <el-icon class="api-doc-icon"><DocumentCopy /></el-icon>
@@ -208,7 +217,7 @@
               </el-avatar>
               <span class="user-name">{{ displayName }}</span>
               <!-- 只给管理员挂角色标签：「用户」这个标签对普通用户没有信息量，只是占位 -->
-              <el-tag v-if="isAdmin" type="danger" size="small" effect="light" class="user-role">管理员</el-tag>
+              <el-tag v-if="isStaff" type="danger" size="small" effect="light" class="user-role">{{ isSuper ? '超级管理员' : '次级管理员' }}</el-tag>
               <el-icon class="user-caret"><ArrowDown /></el-icon>
             </span>
             <template #dropdown>
@@ -257,7 +266,7 @@
 import {
   DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
   DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-  ChatDotRound, BellFilled, InfoFilled, Close, Wallet
+  ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 // ★ 统一走接口层：不要在本布局里自己 fetch —— http.js 统一带 Authorization、
@@ -266,7 +275,7 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 // ★ 登录态统一从 utils/auth 读：避免裸 JSON.parse 遇到脏数据时抛异常，
 //   把整个后台布局（含侧边栏和顶栏）都渲染崩掉。
-import { getUser, clearAuth, homePathFor, getRefreshToken } from '../utils/auth'
+import { getUser, clearAuth, homePathFor, getRefreshToken, hasPermission } from '../utils/auth'
 import { toggleTheme } from '../utils/theme'
 // 品牌标识（替换原来的 emoji，与登录/注册页、favicon 同一图形）
 import BrandLogo from '../components/BrandLogo.vue'
@@ -276,7 +285,7 @@ export default {
     BrandLogo,
     DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
     DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-    ChatDotRound, BellFilled, InfoFilled, Close, Wallet
+    ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar
   },
   data() {
     return {
@@ -296,10 +305,15 @@ export default {
     }
   },
   computed: {
-    isAdmin() {
+    /** 管理端人员：超管 + 次级管理员（菜单外壳共用；具体模块看权限点） */
+    isStaff() {
+      return this.currentUser.role === 'admin' || this.currentUser.role === 'subadmin'
+    },
+    /** 超级管理员：只有他能进「次级管理员 / 演示数据 / 接口文档」 */
+    isSuper() {
       return this.currentUser.role === 'admin'
     },
-    /** 面包屑「首页」的落点：管理员去系统总览，普通用户去数据看板（与路由守卫同一口径） */
+    /** 面包屑「首页」的落点：管理员去系统总览/工作台，普通用户去数据看板 */
     homePath() {
       return homePathFor(this.currentUser.role)
     },
@@ -329,7 +343,7 @@ export default {
     // ★ 用 getUser() 而不是裸 JSON.parse：脏数据不会让布局/守卫抛异常
     this.currentUser = getUser() || {}
     // 只有普通用户才加载公告弹窗
-    if (!this.isAdmin) {
+    if (!this.isStaff) {
       this.loadAnnouncements()
     }
     // 加载未读数
@@ -344,6 +358,11 @@ export default {
     if (this.notifyTimer) clearInterval(this.notifyTimer)
   },
   methods: {
+    /** 菜单/按钮显隐用的权限判断（后端才是防线；超管天然全有） */
+    can(permission) {
+      return this.isSuper || hasPermission(permission)
+    },
+
     /** 切换浅色 / 深色主题 */
     handleToggleTheme() {
       this.isDark = toggleTheme() === 'dark'
@@ -379,7 +398,7 @@ export default {
         clearAuth()
         this.$router.push('/login')
       } else if (command === 'profile') {
-        if (this.isAdmin) {
+        if (this.isStaff) {
           this.$router.push('/admin/profile')
         } else {
           this.$router.push('/my/profile')
@@ -403,7 +422,7 @@ export default {
     //   （登录页也会调，未登录不该弹红字）。
     async loadAnnouncements() {
       try {
-        if (this.isAdmin) return
+        if (this.isStaff) return
 
         const list = await api.announcement.active()
         if (!list || list.length === 0) return

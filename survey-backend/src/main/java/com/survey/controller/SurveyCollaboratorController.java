@@ -160,7 +160,9 @@ public class SurveyCollaboratorController {
         if (survey == null) {
             throw new BizException("问卷不存在");
         }
-        OwnershipGuard.requireOwnerOrAdmin(survey, userId, role, "操作协作者");
+        // ★ 管理名单不能下放给 editor 协作者（会权限扩散）：
+        //   只给作者/超管/有模块权限的次级管理员。
+        surveyAccessService.requireOwnerOrStaff(survey, userId, role, "操作协作者");
         return survey;
     }
 }

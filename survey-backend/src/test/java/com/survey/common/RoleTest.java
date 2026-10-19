@@ -23,22 +23,36 @@ import static org.junit.jupiter.api.Assertions.*;
 class RoleTest {
 
     @Test
-    @DisplayName("角色字面量：ADMIN=admin、USER=user（与 JWT / t_user.role 的既有取值一致）")
+    @DisplayName("角色字面量：ADMIN=admin、SUB_ADMIN=subadmin、USER=user（与 JWT / t_user.role 的既有取值一致）")
     void constants_shouldKeepTheirWireValues() {
         // ★ 这两个值是**对外契约**：库里已有数据的 role 列、已签发的 JWT 里都写着它们。
         //   改动等于让所有存量 token 与用户记录失效，所以在这里钉死。
         assertEquals("admin", Role.ADMIN, "ADMIN 的字面量不能改（存量 JWT 与 t_user.role 里存的就是它）");
+        assertEquals("subadmin", Role.SUB_ADMIN, "SUB_ADMIN 必须与 t_role.code / t_user.role 的种子一致");
         assertEquals("user", Role.USER, "USER 的字面量不能改（注册与演示数据都会写入它）");
     }
 
     @Test
-    @DisplayName("isAdmin：只有精确的 \"admin\" 返回 true")
+    @DisplayName("isAdmin：只有精确的 \"admin\" 返回 true（subadmin 不是超管）")
     void isAdmin_shouldBeStrict() {
         assertTrue(Role.isAdmin("admin"));
+        assertFalse(Role.isAdmin("subadmin"), "次级管理员不是超管：@RequireAdmin 必须继续拒绝他");
         assertFalse(Role.isAdmin("user"), "普通用户不是管理员");
         assertFalse(Role.isAdmin("ADMIN"), "大小写敏感 —— 大小写不同在库里就是两个不同的角色");
         assertFalse(Role.isAdmin("admin "), "带空格不算（用户名/角色两侧都要靠 trim 或精确匹配，不能靠这里的宽容）");
         assertFalse(Role.isAdmin("administrator"));
+    }
+
+    @Test
+    @DisplayName("isStaff：admin 与 subadmin 为 true，其余（含 null/user/未知）为 false")
+    void isStaff_shouldCoverBothAdminLevels() {
+        assertTrue(Role.isStaff("admin"));
+        assertTrue(Role.isStaff("subadmin"));
+        assertFalse(Role.isStaff("user"));
+        assertFalse(Role.isStaff(null));
+        assertFalse(Role.isStaff(""));
+        assertFalse(Role.isStaff("ADMIN"));
+        assertFalse(Role.isStaff("administrator"));
     }
 
     @Test

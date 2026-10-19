@@ -84,7 +84,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   {@code mock-maker-subclass}（沙箱禁 Attach API）。Mapper 全是接口，不受影响。
  *
  * ── 维护口径 ───────────────────────────────────────────
- *   ALL_ENDPOINTS 是"105"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
+ *   ALL_ENDPOINTS 是"110"这个数字在测试侧的钉子：新增/删除端点后，本类会先红，
  *   逼你把它归进 PUBLIC / ADMIN / 其余（需登录）三档之一。改动时同步
  *   docs/问卷系统-端点权限审计表.md 与《交接文档》的端点数。
  */
@@ -103,7 +103,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EndpointAuthMatrixTest {
 
-    // ==================== 一、105 个端点的三档分类（与审计表逐条对应） ====================
+    // ==================== 一、110 个端点的三档分类（与审计表逐条对应） ====================
 
     /** 公开档 13 条（JwtAuthFilter 白名单）。 */
     private static final Set<String> PUBLIC = Set.of(
@@ -122,8 +122,13 @@ class EndpointAuthMatrixTest {
             "GET /api/health"
     );
 
-    /** 管理档 32 条（@RequireAdmin，类级或方法级）。 */
+    /** 管理档 37 条（@RequireAdmin，类级或方法级）。 */
     private static final Set<String> ADMIN = Set.of(
+            "GET /api/admin/permissions",
+            "GET /api/admin/sub-admins",
+            "POST /api/admin/sub-admins",
+            "PUT /api/admin/sub-admins/{userId}/permissions",
+            "DELETE /api/admin/sub-admins/{userId}",
             "GET /api/wallet/admin/page",
             "POST /api/wallet/admin/adjust",
             "GET /api/wallet/admin/reconcile",
@@ -158,8 +163,13 @@ class EndpointAuthMatrixTest {
             "POST /api/template-seeder/init"
     );
 
-    /** 全部 105 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 110 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
+            "GET /api/admin/permissions",
+            "GET /api/admin/sub-admins",
+            "POST /api/admin/sub-admins",
+            "PUT /api/admin/sub-admins/{userId}/permissions",
+            "DELETE /api/admin/sub-admins/{userId}",
             "GET /api/wallet",
             "GET /api/wallet/pricing",
             "GET /api/wallet/admin/page",
@@ -285,6 +295,13 @@ class EndpointAuthMatrixTest {
 
     @MockitoBean
     private UserMapper userMapper;
+    /**
+     * ★ 权限切面（@RequirePermission）现在覆盖了大部分管理端点：
+     *   普通用户 token 会走到“查该用户权限点”这一步。不 mock 的话，
+     *   它拿真实 Mapper 访问被 mock 掉的数据源 → 500，看起来像 403 逻辑坏了。
+     */
+    @MockitoBean
+    private RoleMapper roleMapper;
     @MockitoBean
     private SurveyMapper surveyMapper;
     @MockitoBean
@@ -424,18 +441,18 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 105；且公开 13 + 管理 32 + 其余 60")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 110；且公开 13 + 管理 37 + 其余 60")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(105, registered.size(),
+        assertEquals(110, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/问卷系统-端点权限审计表.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
                 "本类清单与注册映射有差异（多/少各列在前面）：多="
                         + diff(registered, ALL_ENDPOINTS) + " 少=" + diff(ALL_ENDPOINTS, registered));
         assertEquals(13, PUBLIC.size(), "公开档固定 13 条（新增 GET /api/survey/result/{shareCode}）");
-        assertEquals(32, ADMIN.size(), "管理档固定 32 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
-        assertEquals(105 - 13 - 32, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
+        assertEquals(37, ADMIN.size(), "管理档固定 37 条（@RequireAdmin 方法级 + 类级，含钱包管理 3 条与 G3 的 4 条）");
+        assertEquals(110 - 13 - 37, ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size());
         // 两档不能交叉
         for (String p : PUBLIC) {
             assertFalse(ADMIN.contains(p), p + " 不能同时属于公开档与管理档");
@@ -455,7 +472,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 非公开的 92 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
+    @DisplayName("★ 非公开的 97 条：不带 token 一律 401（不能只靠 Controller 里那句 if）")
     void protectedEndpoints_withoutToken_shouldBe401() throws Exception {
         for (String endpoint : ALL_ENDPOINTS) {
             if (PUBLIC.contains(endpoint)) {
@@ -468,7 +485,7 @@ class EndpointAuthMatrixTest {
     }
 
     @Test
-    @DisplayName("★ 管理档 32 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
+    @DisplayName("★ 管理档 37 条：普通用户 token → 403 +「无权限」（切面真的生效了）")
     void adminEndpoints_withNormalUser_shouldBe403Forbidden() throws Exception {
         for (String endpoint : ADMIN) {
             MvcResult r = mvc.perform(build(endpoint).header("Authorization", "Bearer " + userToken))
@@ -488,6 +505,8 @@ class EndpointAuthMatrixTest {
         //   一旦将来有人去掉 @MockitoBean，就会对真库动手。它们的"角色闸门"与只读端点
         //   走的是同一个切面，由 adminEndpoints_withNormalUser_shouldBe400NoPermission 覆盖。
         List<String> readOnly = List.of(
+                "GET /api/admin/permissions",
+                "GET /api/admin/sub-admins",
                 "GET /api/user/page",
                 "GET /api/user/page-deleted",
                 "GET /api/survey/page",

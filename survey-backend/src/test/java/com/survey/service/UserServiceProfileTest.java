@@ -221,7 +221,7 @@ class UserServiceProfileTest {
         User active = userWithPassword("x");
         active.setDeletedAt(null);
         when(userMapper.findByIdIncludeDeleted(UID)).thenReturn(active);
-        BizException e = assertThrows(BizException.class, () -> userService.restoreUser(UID));
+        BizException e = assertThrows(BizException.class, () -> userService.restoreUser(UID, 7));
         assertTrue(e.getMessage().contains("并未注销"), "实际=" + e.getMessage());
 
         User deleted = userWithPassword("x");
@@ -230,7 +230,7 @@ class UserServiceProfileTest {
         when(userMapper.restoreById(UID)).thenReturn(1);
         when(userMapper.updateTokenValidAfter(eq(UID), any())).thenReturn(1);
 
-        assertEquals("恢复成功", userService.restoreUser(UID));
+        assertEquals("恢复成功", userService.restoreUser(UID, 7));
         verify(userMapper).restoreById(UID);
         // ★ 这一行是"恢复后必须重新登录"的唯一保证，删了旧 token 就会随 deleted_at 清空而复活
         verify(userMapper).updateTokenValidAfter(eq(UID), any());
@@ -252,11 +252,11 @@ class UserServiceProfileTest {
     }
 
     /**
-     * ★ 参数归一的两条边界（G3）：role 只认 admin/user、disabled 只认 0/1，非法值一律当"不过滤"。
+     * ★ 参数归一的两条边界（G3）：role 只认 admin/subadmin/user、disabled 只认 0/1，非法值一律当"不过滤"。
      *   写成"非法值抛 400"会让前端拼错一个参数就整页打不开（它是筛选条件，不是业务入参）。
      */
     @Test
-    @DisplayName("导出用户：role 只认 admin/user、disabled 只认 0/1，非法值归一为 null")
+    @DisplayName("导出用户：role 只认 admin/subadmin/user、disabled 只认 0/1，非法值归一为 null")
     void exportUsers_shouldNormalizeFilters() {
         when(userMapper.findActiveUsersForExport(null, null, null)).thenReturn(List.of());
 

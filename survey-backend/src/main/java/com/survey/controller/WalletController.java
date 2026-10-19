@@ -1,8 +1,9 @@
 package com.survey.controller;
 
 import com.survey.annotation.OperationLog;
-import com.survey.annotation.RequireAdmin;
+import com.survey.annotation.RequirePermission;
 import com.survey.common.PageResult;
+import com.survey.common.Permission;
 import com.survey.dto.WalletAdjustRequest;
 import com.survey.dto.WalletRechargeRequest;
 import com.survey.entity.Wallet;
@@ -84,7 +85,7 @@ public class WalletController {
 
     // ==================== 管理员 ====================
 
-    @RequireAdmin
+    @RequirePermission(Permission.WALLET_MANAGE)
     @Operation(summary = "用户钱包列表（管理员，分页）")
     @GetMapping("/admin/page")
     public PageResult<Map<String, Object>> pageWallets(
@@ -95,7 +96,7 @@ public class WalletController {
     }
 
     @OperationLog("调整用户额度")
-    @RequireAdmin
+    @RequirePermission(Permission.WALLET_MANAGE)
     @Operation(summary = "调整用户额度（管理员；amount 为正加、为负扣）")
     @PostMapping("/admin/adjust")
     public WalletTransaction adjust(@Valid @RequestBody WalletAdjustRequest req) {
@@ -103,7 +104,7 @@ public class WalletController {
                 req.getIdempotencyKey());
     }
 
-    @RequireAdmin
+    @RequirePermission(Permission.WALLET_MANAGE)
     @Operation(summary = "对账：余额与流水汇总不一致的钱包（管理员）")
     @GetMapping("/admin/reconcile")
     public Map<String, Object> reconcile() {

@@ -24,7 +24,8 @@
            所以这一项才真的能筛出东西；不选 = 全部角色。 -->
       <el-select v-model="roleFilter" placeholder="全部角色" clearable class="role-select" @change="handleSearch">
         <el-option label="全部角色" value="" />
-        <el-option label="管理员" value="admin" />
+        <el-option label="超级管理员" value="admin" />
+        <el-option label="次级管理员" value="subadmin" />
         <el-option label="普通用户" value="user" />
       </el-select>
       <el-input
@@ -89,8 +90,8 @@
       <el-table-column prop="nickname" label="昵称" min-width="140" />
       <el-table-column prop="role" label="角色" width="110" align="center">
         <template #default="{ row }">
-          <el-tag :type="row.role === 'admin' ? 'danger' : 'info'">
-            {{ row.role === 'admin' ? '管理员' : '普通用户' }}
+          <el-tag :type="row.role === 'admin' ? 'danger' : (row.role === 'subadmin' ? 'warning' : 'info')">
+            {{ row.role === 'admin' ? '超级管理员' : (row.role === 'subadmin' ? '次级管理员' : '普通用户') }}
           </el-tag>
         </template>
       </el-table-column>
@@ -109,33 +110,35 @@
       <el-table-column label="操作" width="180" align="center">
         <template #default="{ row }">
           <template v-if="view === 'deleted'">
-            <el-button type="primary" link size="small" @click="handleRestore(row)">
+            <el-button v-if="canOperate(row)" type="primary" link size="small" @click="handleRestore(row)">
               恢复账号
             </el-button>
+            <span v-else class="muted">—</span>
           </template>
           <template v-else>
-            <el-button
-              v-if="row.disabled === 1"
-              type="success"
-              link
-              size="small"
-              @click="handleToggleDisabled(row)"
-            >解禁</el-button>
-            <el-button
-              v-else
-              type="warning"
-              link
-              size="small"
-              :disabled="row.id === currentUserId"
-              @click="handleToggleDisabled(row)"
-            >禁用</el-button>
-            <el-button
-              type="danger"
-              link
-              size="small"
-              :disabled="row.id === currentUserId"
-              @click="handleDelete(row)"
-            >删除</el-button>
+            <template v-if="canOperate(row)">
+              <el-button
+                v-if="row.disabled === 1"
+                type="success"
+                link
+                size="small"
+                @click="handleToggleDisabled(row)"
+              >解禁</el-button>
+              <el-button
+                v-else
+                type="warning"
+                link
+                size="small"
+                @click="handleToggleDisabled(row)"
+              >禁用</el-button>
+              <el-button
+                type="danger"
+                link
+                size="small"
+                @click="handleDelete(row)"
+              >删除</el-button>
+            </template>
+            <span v-else class="muted">—</span>
           </template>
         </template>
       </el-table-column>
@@ -205,6 +208,8 @@ export default {
       loadSeq: 0,
       // 自己的 id：禁用/删除自己会被后端拒绝，前端先把按钮置灰
       currentUserId: (getUser() && getUser().id) || null,
+      // 当前操作人角色：次级管理员不能操作管理员/次级管理员行
+      currentRole: (getUser() && getUser().role) || null,
       Search: markRaw(Search),
       Refresh: markRaw(Refresh),
       Download: markRaw(Download),
@@ -215,6 +220,11 @@ export default {
     }
   },
   computed: {
+    /** 超级管理员：只有他能操作管理员/次级管理员行 */
+    isSuper() {
+      return this.currentRole === 'admin'
+    },
+
     /** 空态文案按视图区分：三个视图"没有数据"的含义完全不同 */
     emptyText() {
       if (this.view === 'deleted') return '没有被注销的账号'
@@ -333,9 +343,23 @@ export default {
       this.selectedRows = rows || []
     },
 
-    /** 自己那一行不可勾选（后端会拒绝"禁用/删除自己"，见 UserService.setDisabled / deleteUser） */
+    /**
+     * 这一行能不能被当前操作人处理。
+     * ★ 后端还有一道硬校验；前端只是避免点出一个必然 400 的按钮：
+     *   · 自己不能操作自己；
+     *   · 超管永远不能被操作；
+     *   · 次级管理员只有超管能操作。
+     */
+    canOperate(row) {
+      if (!row || row.id === this.currentUserId) return false
+      if (row.role === 'admin') return false
+      if (row.role === 'subadmin' && !this.isSuper) return false
+      return true
+    },
+
+    /** 自己 / 无权操作的行不可勾选（批量操作同样受后端保护） */
     rowSelectable(row) {
-      return row.id !== this.currentUserId
+      return this.canOperate(row)
     },
 
     clearSelection() {

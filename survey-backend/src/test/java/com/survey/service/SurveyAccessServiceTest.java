@@ -39,6 +39,9 @@ class SurveyAccessServiceTest {
     @Mock
     private SurveyCollaboratorMapper collaboratorMapper;
 
+    @Mock
+    private com.survey.mapper.RoleMapper roleMapper;
+
     @InjectMocks
     private SurveyAccessService accessService;
 
@@ -192,5 +195,57 @@ class SurveyAccessServiceTest {
         assertEquals(List.of(), accessService.permissionsFor(null, OWNER, Role.USER));
         assertEquals(List.of(), accessService.permissionsFor(survey(OWNER), null, null));
         verifyNoInteractions(collaboratorMapper);
+    }
+
+    // ==================== 次级管理员（subadmin）的模块级数据范围 ====================
+
+    @Test
+    @DisplayName("★ subadmin + survey:manage：任何问卷都放行，且不查协作者表")
+    void subAdminWithSurveyManageCanAccessAnySurvey() {
+        Survey s = survey(OWNER);
+        when(roleMapper.findPermissionCodesByUserId(STRANGER))
+                .thenReturn(List.of(Permission.SURVEY_MANAGE));
+
+        assertTrue(accessService.hasPermission(s, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_EDIT));
+        assertDoesNotThrow(() ->
+                accessService.requirePermission(s, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_DELETE, "删除"));
+        assertDoesNotThrow(() ->
+                accessService.requireOwnerOrStaff(s, STRANGER, Role.SUB_ADMIN, "复制"));
+        assertEquals(List.of(Permission.SURVEY_EDIT, Permission.SURVEY_PUBLISH,
+                        Permission.SURVEY_DATA, Permission.SURVEY_DELETE),
+                accessService.permissionsFor(s, STRANGER, Role.SUB_ADMIN));
+        verifyNoInteractions(collaboratorMapper);
+    }
+
+    @Test
+    @DisplayName("★ subadmin + template:manage：只对 isTemplate=1 放行，用户问卷仍按普通口径拒绝")
+    void subAdminWithTemplateManageOnlyCoversTemplates() {
+        Survey template = survey(OWNER);
+        template.setIsTemplate(1);
+        Survey normal = survey(OWNER);
+        normal.setIsTemplate(0);
+        when(roleMapper.findPermissionCodesByUserId(STRANGER))
+                .thenReturn(List.of(Permission.TEMPLATE_MANAGE));
+        when(collaboratorMapper.findCollaboratorRole(100, STRANGER)).thenReturn(null);
+
+        assertTrue(accessService.hasPermission(template, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_EDIT));
+        assertNotNull(accessService.permissionsFor(template, STRANGER, Role.SUB_ADMIN));
+        // 普通问卷：模板权限不放行，且不是协作者 → 拒绝
+        assertFalse(accessService.hasPermission(normal, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_EDIT));
+        assertThrows(BizException.class, () ->
+                accessService.requireOwnerOrStaff(normal, STRANGER, Role.SUB_ADMIN, "复制"));
+    }
+
+    @Test
+    @DisplayName("★ subadmin 只有无关权限（feedback:handle）：不能碰问卷")
+    void subAdminWithoutSurveyPermissionIsDenied() {
+        Survey s = survey(OWNER);
+        when(roleMapper.findPermissionCodesByUserId(STRANGER))
+                .thenReturn(List.of(Permission.FEEDBACK_HANDLE));
+        when(collaboratorMapper.findCollaboratorRole(100, STRANGER)).thenReturn(null);
+
+        assertFalse(accessService.hasPermission(s, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_DATA));
+        assertThrows(BizException.class, () ->
+                accessService.requirePermission(s, STRANGER, Role.SUB_ADMIN, Permission.SURVEY_EDIT, "修改"));
     }
 }
