@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,13 +36,17 @@ public class AdminManagementService {
             new AdminPermissionOption(Permission.WALLET_MANAGE, "钱包管理"),
             new AdminPermissionOption(Permission.ANNOUNCEMENT_MANAGE, "公告管理"),
             new AdminPermissionOption(Permission.LOG_VIEW, "操作日志 / 异常日志查看"),
-            new AdminPermissionOption(Permission.SYSTEM_VIEW, "系统总览 / 系统统计"));
+            new AdminPermissionOption(Permission.SYSTEM_VIEW, "系统资源（数据库大小 / 表行数 / 快照占用）"));
 
     @Autowired
     private UserMapper userMapper;
 
     @Autowired
     private RoleMapper roleMapper;
+
+    /** 角色/权限变更后必须吊销 refresh token，否则旧票能续出新 access token 绕过 token_valid_after。 */
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     /** 可分配权限目录（管理端渲染勾选框）。 */
     public List<AdminPermissionOption> grantablePermissions() {
@@ -86,6 +91,7 @@ public class AdminManagementService {
         userMapper.updateRole(userId, Role.SUB_ADMIN);
         replaceRoles(userId, Role.SUB_ADMIN);
         replacePermissions(userId, normalized, operatorId);
+        invalidateCredentials(userId);
         return listSubAdmins();
     }
 
@@ -98,6 +104,7 @@ public class AdminManagementService {
         }
         List<String> normalized = normalizePermissions(permissions);
         replacePermissions(userId, normalized, operatorId);
+        invalidateCredentials(userId);
         return listSubAdmins();
     }
 
@@ -117,6 +124,7 @@ public class AdminManagementService {
         userMapper.updateRole(userId, Role.USER);
         replaceRoles(userId, Role.USER);
         roleMapper.deleteUserPermissions(userId);
+        invalidateCredentials(userId);
         return listSubAdmins();
     }
 
@@ -180,5 +188,15 @@ public class AdminManagementService {
         for (String code : permissions) {
             roleMapper.insertUserPermission(userId, code, operatorId);
         }
+    }
+
+    /**
+     * 作废该用户此刻已签发的全部凭证。
+     * ★ 只写 token_valid_after 不够：refresh token 还能续出新 access token；
+     *   两处一起做，被降级 / 改权限的人下一次请求就会 401，重新登录后菜单与后端权限才一致。
+     */
+    private void invalidateCredentials(Integer userId) {
+        userMapper.updateTokenValidAfter(userId, LocalDateTime.now().withNano(0));
+        refreshTokenService.revokeAllByUser(userId);
     }
 }

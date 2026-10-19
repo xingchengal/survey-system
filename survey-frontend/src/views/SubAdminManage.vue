@@ -4,7 +4,8 @@
       <div>
         <h2 class="page-title">次级管理员</h2>
         <p class="page-subtitle">
-          由超级管理员选定并逐项授权。次级管理员只能看到被分配的模块；超级管理员拥有全部权限。
+          由超级管理员选定并逐项授权。次级管理员只能看到被分配的模块；超级管理员拥有全部权限。<br />
+          权限或角色变更后，对方的登录状态会立即失效，需要重新登录才能拿到新菜单。
         </p>
       </div>
       <el-button type="primary" @click="openAdd">添加次级管理员</el-button>
@@ -199,7 +200,7 @@ export default {
           : await api.admin.promote(this.form.userId, this.form.permissions)
         if (Array.isArray(rows)) this.rows = rows
         else await this.load()
-        ElMessage.success(this.editing ? '权限已更新' : '已设为次级管理员')
+        ElMessage.success(this.editing ? '权限已更新，对方需重新登录生效' : '已设为次级管理员，对方需重新登录生效')
         this.dialogVisible = false
       } catch {
         // 失败提示由 http.js 统一弹出
@@ -221,7 +222,7 @@ export default {
         const rows = await api.admin.demote(row.userId)
         if (Array.isArray(rows)) this.rows = rows
         else await this.load()
-        ElMessage.success('已降为普通用户')
+        ElMessage.success('已降为普通用户，对方的登录状态已失效')
       } catch {
         // 提示由接口层统一弹出
       }

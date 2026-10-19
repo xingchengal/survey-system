@@ -45,6 +45,8 @@ class AdminManagementServiceTest {
     private UserMapper userMapper;
     @Mock
     private RoleMapper roleMapper;
+    @Mock
+    private RefreshTokenService refreshTokenService;
 
     @InjectMocks
     private AdminManagementService service;
@@ -79,6 +81,9 @@ class AdminManagementServiceTest {
         verify(roleMapper).deleteUserPermissions(TARGET);
         verify(roleMapper).insertUserPermission(TARGET, Permission.TEMPLATE_MANAGE, OPERATOR);
         verify(roleMapper).insertUserPermission(TARGET, Permission.FEEDBACK_HANDLE, OPERATOR);
+        // ★ 升级后旧票必须作废：否则对方仍拿着 user token 看不到管理端
+        verify(userMapper).updateTokenValidAfter(eq(TARGET), any(java.time.LocalDateTime.class));
+        verify(refreshTokenService).revokeAllByUser(TARGET);
     }
 
     @Test
@@ -93,6 +98,8 @@ class AdminManagementServiceTest {
         assertThrows(BizException.class, () -> service.demote(TARGET, OPERATOR));
 
         verify(userMapper, never()).updateRole(anyInt(), anyString());
+        verify(userMapper, never()).updateTokenValidAfter(anyInt(), any(java.time.LocalDateTime.class));
+        verify(refreshTokenService, never()).revokeAllByUser(anyInt());
     }
 
     @Test
@@ -136,6 +143,8 @@ class AdminManagementServiceTest {
         verify(roleMapper).deleteUserPermissions(TARGET);
         verify(roleMapper).insertUserPermission(TARGET, Permission.FEEDBACK_HANDLE, OPERATOR);
         verify(userMapper, never()).updateRole(anyInt(), anyString());
+        // ★ 改权限也要让旧票失效：否则前端菜单与后端权限对不上
+        verify(refreshTokenService).revokeAllByUser(TARGET);
     }
 
     @Test
@@ -151,6 +160,9 @@ class AdminManagementServiceTest {
         verify(roleMapper).insertUserRole(TARGET, 2);
         verify(roleMapper).deleteUserPermissions(TARGET);
         verify(userMapper, never()).deleteById(any());
+        // ★ 降级后旧 token / refresh token 都要作废：否则人还能留在管理端页面
+        verify(userMapper).updateTokenValidAfter(eq(TARGET), any(java.time.LocalDateTime.class));
+        verify(refreshTokenService).revokeAllByUser(TARGET);
     }
 
     @Test
