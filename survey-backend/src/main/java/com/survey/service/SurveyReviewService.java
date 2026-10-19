@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 举报提交与处理（t_survey_review）：report 收举报，handle 审核（通过=下架 / 驳回）并通知双方。
  * ★ 只允许 PENDING → 终态：SQL 的 WHERE status='PENDING' 保证重复处理影响 0 行，不会二次下架 / 二次通知。
- * ★ 当前 handle **未校验**“处理人 ≠ 举报人”；多管理员场景下需在入口补这一条（已记入 SPRINT 待办）。
+ * ★ 处理人不能是举报人本人：多管理员下否则等于自己批自己的举报。
  * 通过 = 只改 lifecycle 为 SUSPENDED、不动 status，并发通知作者与举报人。
  */
 @Service
@@ -92,6 +92,10 @@ public class SurveyReviewService {
         }
         Integer surveyId = (Integer) review.get("surveyId");
         Integer reporterId = (Integer) review.get("reporterId");
+        // 举报人不能处理自己的举报：否则多管理员下等于自己给自己结案
+        if (reporterId != null && reporterId.equals(adminId)) {
+            throw new BizException("不能处理自己提交的举报");
+        }
         Survey survey = surveyMapper.findById(surveyId);
 
         int affected = reviewMapper.handle(reviewId,

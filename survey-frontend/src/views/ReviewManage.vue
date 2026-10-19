@@ -2,7 +2,7 @@
   举报审核（管理端）：只处理 PENDING。
   ★ 通过 = 只把 lifecycle 转 SUSPENDED（status 不变），通知作者与举报人；驳回 = 只通知举报人。
   ★ 前端不判断「能不能通过」：非 PENDING 按钮不出现，后端 WHERE status='PENDING' 再兜一次幂等。
-  已知缺口：举报人不能自批 —— 后端当前未强制，具备 review:handle 的账号仍可处理自己的举报。
+  ★ 举报人不能处理自己提交的举报：前端显示「不可自审」，后端 handle 再拦一次。
 -->
 <template>
   <div class="review-page">
@@ -55,8 +55,11 @@
       <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
           <template v-if="row.status === 'PENDING'">
-            <el-button link type="danger" @click="handle(row, 'SUSPEND')">通过并下架</el-button>
-            <el-button link @click="handle(row, 'IGNORE')">驳回</el-button>
+            <span v-if="isSelfReport(row)" class="muted" title="自己提交的举报不能自己处理">不可自审</span>
+            <template v-else>
+              <el-button link type="danger" @click="handle(row, 'SUSPEND')">通过并下架</el-button>
+              <el-button link @click="handle(row, 'IGNORE')">驳回</el-button>
+            </template>
           </template>
           <template v-else>
             <el-button
@@ -73,7 +76,8 @@
     <p class="review-hint">
       「通过并下架」只会把问卷的业务生命周期改成 SUSPENDED（已发布的 status 不变），
       填写页会立刻显示「该问卷已被下架」，作者与举报人都会收到通知。<br />
-      「已通过」里默认只列出「仍在 下架」的问卷；恢复上架后记录自动隐藏（数据库仍保留，可开「显示已恢复」查看）。
+      「已通过」里默认只列出「仍在 下架」的问卷；恢复上架后记录自动隐藏（数据库仍保留，可开「显示已恢复」查看）。<br />
+      举报人不能处理自己提交的举报：列表里显示「不可自审」，后端也会返回 400。
     </p>
   </div>
 </template>
@@ -81,6 +85,8 @@
 <script>
 import { ElMessage, ElMessageBox } from 'element-plus'
 import reviewApi from '../api/review'
+// 登录态统一从 utils/auth 读；只用于「不可自审」的界面防呆，真正的拦截在后端
+import { getUser } from '../utils/auth'
 
 export default {
   name: 'ReviewManage',
@@ -90,7 +96,8 @@ export default {
       loading: false,
       status: 'PENDING',
       /** 「已通过」里是否显示已恢复的记录（默认关：日常只看仍在下架的） */
-      showRestored: false
+      showRestored: false,
+      currentUserId: (getUser() || {}).id
     }
   },
   computed: {
@@ -115,6 +122,11 @@ export default {
     this.load()
   },
   methods: {
+    /** 自己提交的举报：按钮换成「不可自审」（后端 handle 仍会 400） */
+    isSelfReport(row) {
+      return row.reporterId != null && row.reporterId === this.currentUserId
+    },
+
     async load() {
       this.loading = true
       try {

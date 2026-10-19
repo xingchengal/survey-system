@@ -45,7 +45,7 @@
 | 分档 | 公开 **13** / 需登录 **42** / 归属 **31** / 管理 **40** | §三~§六 活行 |
 | Controller | **20** | `controller/*.java` |
 | 数据库表 | **25** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **470 例 / 51 类** | `mvnw -o test` |
+| 后端测试 | **471 例 / 51 类** | `mvnw -o test` |
 | 前端页面 | **27** | `src/views/**/*.vue` |
 | 前端 API 模块 | **18** | `src/api/*.js` |
 | 具名路由 | **29** | `router/index.js` |
@@ -78,14 +78,14 @@
 | `GET /api/survey/share/{shareCode}` | 凭分享码打开问卷（要求 status=1）。★ 第三十三轮起：返回前把 `accessPassword` 置空，只暴露 `hasPassword` | ✅ |
 | `GET /api/survey/result/{shareCode}` | ✅ **第三十三轮新增**：公开结果页。问卷作者开启 `public_result=1` 才可读；仅返回**脱敏**汇总（选项分布/评分分布），填空题原文一律置 null | ✅ |
 | `POST /api/survey/view/{shareCode}` | 匿名访客记访问量 | ✅ |
-| `GET /api/question/list/{surveyId}` | 加载题目+选项。**半公开**：已发布任何人可读，未发布仅作者/管理员 | 🛠 前几轮修 |
+| `GET /api/question/list/{surveyId}` | 加载题目+选项。**半公开**：已发布任何人可读，未发布仅作者/管理员 | 🛠 已修 |
 | `POST /api/answer/submit-share/{shareCode}` | 凭分享码匿名提交答卷。★ **业务前置条件（缺一不可）**：问卷存在 / 不在回收站 / **已发布** / **未过截止时间** / 非空答卷 / 题数·长度·归属合法 / **该问卷未开启「仅限登录用户」**（`require_login=1` 时直接 400，因为这条路径的 userId 恒为 null）/ **匿名侧不做防重**（按 IP 去重会误伤 NAT 后的同网用户） | ✅ |
-| `GET /api/answer/participants/{shareCode}` | 公开报名名单（前 50 位，按提交时间正序）。★ 只返回**称呼与时间**，不返回手机号等其它答案；称呼取第一道单行文本题，没有则"匿名"。★ 作者未开启「公开报名名单」（`show_participants=1`）时 **400** —— 默认不公开 | ✅ 第四十五轮新增（白名单） |
+| `GET /api/answer/participants/{shareCode}` | 公开报名名单（前 50 位，按提交时间正序）。★ 只返回**称呼与时间**，不返回手机号等其它答案；称呼取第一道单行文本题，没有则"匿名"。★ 作者未开启「公开报名名单」（`show_participants=1`）时 **400** —— 默认不公开 | ✅ 白名单 |
 | `GET /api/announcement/active` | 有效公告（未过期） | ✅ |
 | `GET /api/health` | 健康检查（启动器的就绪探针） | ✅ |
-| `GET /api/captcha/slider` | ✅ **第十九轮新增**：注册页取滑块验证码。注册页此时必然没有 token；只读、不含用户数据 |
-| `POST /api/captcha/verify` | ✅ **第十九轮新增**：拖动结束后由后端判定。★ 只**标记**凭证 verified、不消费，真正的消费在注册那一步 |
-| `POST /api/user/refresh` | ✅ **第十九轮新增**：用 refresh token 换 access token。★ 必须公开 —— 调用它的时刻 access token 已失效，要求带有效 token 会让续期永远走不通；安全性由 refresh token 自身承担（只存 SHA-256、7 天过期、一次性轮换、可吊销）|
+| `GET /api/captcha/slider` | ✅ 注册页取滑块验证码。注册页此时必然没有 token；只读、不含用户数据 |
+| `POST /api/captcha/verify` | ✅ 拖动结束后由后端判定。★ 只**标记**凭证 verified、不消费，真正的消费在注册那一步 |
+| `POST /api/user/refresh` | ✅ 用 refresh token 换 access token。★ 必须公开 —— 调用它的时刻 access token 已失效，要求带有效 token 会让续期永远走不通；安全性由 refresh token 自身承担（只存 SHA-256、7 天过期、一次性轮换、可吊销）|
 
 ---
 
@@ -103,26 +103,26 @@
 
 | 端点 | 权限点 | 状态 |
 |---|---|---|
-| `GET /api/user/page` | `@RequirePermission("user:manage")` | ✅ ★ **第四十二轮（G3）改口径**：查询条件从写死的 `role='user'` 改为**含管理员**，并新增可选筛选 `role`（admin/user）与 `disabled`（0/1）。★ 为什么必须含管理员：否则页面上的「角色」列永远显示"普通用户"、"角色筛选"无从谈起，"禁用某个管理员"也没有入口。★ `disabled` 是**筛选**不是默认过滤 —— 默认必须能看到已禁用的账号，否则解禁没有入口 |
-| `GET /api/user/page-deleted` | `@RequirePermission("user:manage")` | ✅ **第二十轮·续新增**：已注销用户列表（供恢复）。★ 必须与 `/page` 并存 —— `/page` 按设计过滤 `deleted_at`，看不到已注销的人，恢复就没有入口。★ 第四十二轮起同样支持 `role` 筛选（已注销的管理员也要能被恢复） |
+| `GET /api/user/page` | `@RequirePermission("user:manage")` | ✅ ★ 查询条件从写死的 `role='user'` 改为**含管理员**，并新增可选筛选 `role`（admin/user）与 `disabled`（0/1）。★ 为什么必须含管理员：否则页面上的「角色」列永远显示"普通用户"、"角色筛选"无从谈起，"禁用某个管理员"也没有入口。★ `disabled` 是**筛选**不是默认过滤 —— 默认必须能看到已禁用的账号，否则解禁没有入口 |
+| `GET /api/user/page-deleted` | `@RequirePermission("user:manage")` | ✅ 已注销用户列表（供恢复）。★ 必须与 `/page` 并存 —— `/page` 按设计过滤 `deleted_at`，看不到已注销的人，恢复就没有入口。★ 同样支持 `role` 筛选（已注销的管理员也要能被恢复） |
 | `DELETE /api/user/delete/{id}` | `@RequirePermission("user:manage")` | ✅（物理删除 + 级联；与用户自助注销是两件事，见开头说明） |
-| `PUT /api/user/restore/{id}` | `@RequirePermission("user:manage")` | ✅ **第二十轮·续新增**：恢复已注销账号。★ 只清 `deleted_at` 一列，密码与资料都还在。★ **第四十二轮**给前端的批量恢复传入 `{ silent: true }`（逐条调用，由页面汇总提示） |
-| `PUT /api/user/{id}/disabled` | `@RequirePermission("user:manage")` | ✅ **第四十二轮（G3）新增**：禁用/解禁（`disabled=1/0`）。★ **立刻生效**：除写 `disabled` 外同时写 `token_valid_after`，该账号此前签发的 token 全部作废（JWT 无法吊销，这是唯一手段）。★ 三道保护：不能禁用自己 / 不能禁用**最后一个可用管理员**（`countActiveAdmins()`，不是 `countAdmins()`）/ 已注销账号要先恢复。★ 参数声明为**非必填**再自己判：必填 `@RequestParam` 会在切面之前抛 400，导致普通用户拿到 400 而不是 403（`EndpointAuthMatrixTest` 会红） |
-| `GET /api/user/export` | `@RequirePermission("user:manage")` | ✅ **第四十二轮（G3）新增**：用户列表导出 Excel（`deleted=true` 导「已注销」视图；筛选与 `/page` 同一套）。★ 上限 10000 行，**超出明确拒绝**而不是静默截断（静默截断会让管理员以为导出全了）。★ 不导头像（mediumtext，单张可达 2MB） |
-| `GET /api/survey/page` | `@RequirePermission("survey:manage")` | ✅ ★ **第四十二轮（G3）**新增可选筛选 `startDate`/`endDate`（`yyyy-MM-dd`，闭区间，结束补到 `23:59:59`；格式错 → 400 而不是 500）。★ 用 `created_time >= / <=` 直接比列，不包 `DATE()`（列上有索引） |
-| `GET /api/survey/export` | `@RequirePermission("survey:manage")` | ✅ **第四十二轮（G3）新增**：问卷列表导出 Excel，筛选条件与 `/survey/page` **完全一致**，口径是「全部问卷」（**不含模板**，与 page 的 SQL 一致）。★ 答卷数用一次 `GROUP BY` 补齐，不逐份 count |
-| `GET /api/survey/list-with-response-count` | `@RequirePermission("survey:manage")` | ✅ ★ 第十九轮复核时**补登记**：这个方法本来就有（第十二轮加的），但此前只在本表正文里被"提了一嘴"，行始终没进表 —— 四张明细表因此少了 1 条，正是"合计对不上"的一半原因。★ 口径是问卷数据，权限点跟随 `survey:manage`（不是 `system:view`） |
+| `PUT /api/user/restore/{id}` | `@RequirePermission("user:manage")` | ✅ 恢复已注销账号。★ 只清 `deleted_at` 一列，密码与资料都还在。★ 给前端的批量恢复传入 `{ silent: true }`（逐条调用，由页面汇总提示） |
+| `PUT /api/user/{id}/disabled` | `@RequirePermission("user:manage")` | ✅ 禁用/解禁（`disabled=1/0`）。★ **立刻生效**：除写 `disabled` 外同时写 `token_valid_after`，该账号此前签发的 token 全部作废（JWT 无法吊销，这是唯一手段）。★ 三道保护：不能禁用自己 / 不能禁用**最后一个可用管理员**（`countActiveAdmins()`，不是 `countAdmins()`）/ 已注销账号要先恢复。★ 参数声明为**非必填**再自己判：必填 `@RequestParam` 会在切面之前抛 400，导致普通用户拿到 400 而不是 403（`EndpointAuthMatrixTest` 会红） |
+| `GET /api/user/export` | `@RequirePermission("user:manage")` | ✅ 用户列表导出 Excel（`deleted=true` 导「已注销」视图；筛选与 `/page` 同一套）。★ 上限 10000 行，**超出明确拒绝**而不是静默截断（静默截断会让管理员以为导出全了）。★ 不导头像（mediumtext，单张可达 2MB） |
+| `GET /api/survey/page` | `@RequirePermission("survey:manage")` | ✅ ★ 可选筛选 `startDate`/`endDate`（`yyyy-MM-dd`，闭区间，结束补到 `23:59:59`；格式错 → 400 而不是 500）。★ 用 `created_time >= / <=` 直接比列，不包 `DATE()`（列上有索引） |
+| `GET /api/survey/export` | `@RequirePermission("survey:manage")` | ✅ 问卷列表导出 Excel，筛选条件与 `/survey/page` **完全一致**，口径是「全部问卷」（**不含模板**，与 page 的 SQL 一致）。★ 答卷数用一次 `GROUP BY` 补齐，不逐份 count |
+| `GET /api/survey/list-with-response-count` | `@RequirePermission("survey:manage")` | ✅ ★ 补登记：这个方法本来就有，但此前只在本表正文里被"提了一嘴"，行始终没进表 —— 四张明细表因此少了 1 条，正是"合计对不上"的一半原因。★ 口径是问卷数据，权限点跟随 `survey:manage`（不是 `system:view`） |
 | ~~`GET /api/survey/statistics`~~ | 🛠 前几轮修过；**第十六轮已删除**（前端零调用，是 `/system-overview` 的真子集） |
 | `PUT /api/survey/set-template/{id}` | `@RequirePermission("template:manage")` | ✅ |
-| `GET /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ **第四十六轮新增**：模板分类清单。★ 分类可以独立于模板存在（模板管理页「+ 新增分类」），所以不能从模板列表反推；管理档，因为只有管理端需要。 |
-| `POST /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ **第四十六轮新增**：新增分类（`name` 参数）。★ 非必填声明 + Service 判空：必填 `@RequestParam` 会在 `@RequireAdmin` 切面之前抛 400，普通用户拿到的就不是 403（同 `PUT /user/{id}/disabled` 的坑）。★ 返回新增后的完整清单，前端不用再 GET 一次。 |
-| `GET /api/admin/permissions` | `@RequireAdmin` | ✅ **第四十七轮新增**：可分配权限目录（9 个模块级权限点）。★ 超管专属（`@RequireAdmin`），次级管理员不能给自己加权限。 |
-| `GET /api/admin/sub-admins` | `@RequireAdmin` | ✅ **第四十七轮新增**：次级管理员列表（含逐人权限）。★ 超管专属。 |
-| `POST /api/admin/sub-admins` | `@RequireAdmin` | ✅ **第四十七轮新增**：把普通用户提升为 `subadmin` 并授权。★ 超管专属；权限只认 `ADMIN_GRANTABLE`，角色与权限同事务。 |
-| `PUT /api/admin/sub-admins/{userId}/permissions` | `@RequireAdmin` | ✅ **第四十七轮新增**：修改次级管理员权限（不改角色）。★ 超管专属。 |
-| `DELETE /api/admin/sub-admins/{userId}` | `@RequireAdmin` | ✅ **第四十七轮新增**：降为普通用户（保留账号与数据）。★ 超管专属。 |
-| `GET /api/log/page` | `@RequirePermission("log:view")` | ✅ ★ **第四十二轮（G3）**新增可选筛选 `role`（→「级别筛选」的落地口径）与 `startDate`/`endDate`。★ `t_operation_log` **没有"级别"列**，本页的"级别"= **操作人角色**（admin/user）；不新增 level 列（那要改表 + 回填 + 改 `LogAspect` 写入契约），"高危操作"用 `operation` 关键字筛即可 |
-| `GET /api/log/export` | `@RequirePermission("log:view")` | ✅ **第四十二轮（G3）新增**：操作日志导出 Excel（筛选同上）。★ 导的是**日志原文**（含 IP 与方法名），只能管理员下载；上限 10000 行，超出明确拒绝 |
+| `GET /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ 模板分类清单。★ 分类可以独立于模板存在（模板管理页「+ 新增分类」），所以不能从模板列表反推；管理档，因为只有管理端需要。 |
+| `POST /api/survey/template-categories` | `@RequirePermission("template:manage")` | ✅ 新增分类（`name` 参数）。★ 非必填声明 + Service 判空：必填 `@RequestParam` 会在 `@RequireAdmin` 切面之前抛 400，普通用户拿到的就不是 403（同 `PUT /user/{id}/disabled` 的坑）。★ 返回新增后的完整清单，前端不用再 GET 一次。 |
+| `GET /api/admin/permissions` | `@RequireAdmin` | ✅ 可分配权限目录（9 个模块级权限点）。★ 超管专属（`@RequireAdmin`），次级管理员不能给自己加权限。 |
+| `GET /api/admin/sub-admins` | `@RequireAdmin` | ✅ 次级管理员列表（含逐人权限）。★ 超管专属。 |
+| `POST /api/admin/sub-admins` | `@RequireAdmin` | ✅ 把普通用户提升为 `subadmin` 并授权。★ 超管专属；权限只认 `ADMIN_GRANTABLE`，角色与权限同事务。 |
+| `PUT /api/admin/sub-admins/{userId}/permissions` | `@RequireAdmin` | ✅ 修改次级管理员权限（不改角色）。★ 超管专属。 |
+| `DELETE /api/admin/sub-admins/{userId}` | `@RequireAdmin` | ✅ 降为普通用户（保留账号与数据）。★ 超管专属。 |
+| `GET /api/log/page` | `@RequirePermission("log:view")` | ✅ ★ 可选筛选 `role`（→「级别筛选」的落地口径）与 `startDate`/`endDate`。★ `t_operation_log` **没有"级别"列**，本页的"级别"= **操作人角色**（admin/user）；不新增 level 列（那要改表 + 回填 + 改 `LogAspect` 写入契约），"高危操作"用 `operation` 关键字筛即可 |
+| `GET /api/log/export` | `@RequirePermission("log:view")` | ✅ 操作日志导出 Excel（筛选同上）。★ 导的是**日志原文**（含 IP 与方法名），只能管理员下载；上限 10000 行，超出明确拒绝 |
 | `GET /api/error-log/page` | `@RequirePermission("log:view")` | ✅ |
 | `GET /api/error-log/count` | `@RequirePermission("log:view")` | ✅ |
 | `DELETE /api/error-log/{id}` | `@RequireAdmin` | ✅ |
@@ -133,13 +133,13 @@
 | `DELETE /api/announcement/delete/{id}` | `@RequirePermission("announcement:manage")` | ✅ |
 | `POST /api/demo/init` | `@RequireAdmin` | ✅ |
 | `DELETE /api/demo/reset` | `@RequireAdmin` | ✅ |
-| `POST /api/template-seeder/init` | `@RequireAdmin` | ✅（前几轮还补了幂等） |
-| `GET /api/review/list` | `@RequirePermission("review:handle")` | ✅ **第三十四轮新增**：举报审核列表（`status` 可选筛选）。★ 与 `/review/my` 的分界：这条是**全站**举报，含举报人 id 与理由原文，必须限管理员 |
-| `POST /api/review/{id}/handle` | `@RequirePermission("review:handle")` | ✅ **第三十四轮新增**：处理举报（`action=SUSPEND` 通过并下架 / `IGNORE` 驳回）。★ 下架只改 `lifecycle`（`status` 不变）；SQL 幂等，只有 `PENDING` 能处理 |
-| `POST /api/survey/unsuspend/{id}` | `@RequirePermission("review:handle")` | ✅ **第三十四轮新增**：取消下架（只允许 `SUSPENDED → PUBLISHED`）。★ 与第三十五轮作者侧的 `/request-restore` 分开：这条是管理员**执行**，那条只是作者**申请** |
-| `GET /api/wallet/admin/page` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：用户钱包列表（分页、按用户名/昵称搜）。★ 只读；余额单位是「点」 |
-| `POST /api/wallet/admin/adjust` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：调整用户额度（`amount` 正加负扣，必须带 `idempotencyKey`）。★ 流水类型 `ADMIN_ADJUST`，与用户自助充值是两类账 |
-| `GET /api/wallet/admin/reconcile` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：对账（余额 ≠ 流水汇总 的钱包）。★ 只报告不自动修，确认原因后用 `adjust` 补账 |
+| `POST /api/template-seeder/init` | `@RequireAdmin` | ✅（已补幂等） |
+| `GET /api/review/list` | `@RequirePermission("review:handle")` | ✅ 举报审核列表（`status` 可选筛选）。★ 与 `/review/my` 的分界：这条是**全站**举报，含举报人 id 与理由原文，必须限管理员 |
+| `POST /api/review/{id}/handle` | `@RequirePermission("review:handle")` | ✅ 处理举报（`action=SUSPEND` 通过并下架 / `IGNORE` 驳回）。★ 下架只改 `lifecycle`（`status` 不变）；SQL 幂等，只有 `PENDING` 能处理 |
+| `POST /api/survey/unsuspend/{id}` | `@RequirePermission("review:handle")` | ✅ 取消下架（只允许 `SUSPENDED → PUBLISHED`）。★ 与作者侧的 `/request-restore` 分开：这条是管理员**执行**，那条只是作者**申请** |
+| `GET /api/wallet/admin/page` | `@RequirePermission("wallet:manage")` | ✅ 用户钱包列表（分页、按用户名/昵称搜）。★ 只读；余额单位是「点」 |
+| `POST /api/wallet/admin/adjust` | `@RequirePermission("wallet:manage")` | ✅ 调整用户额度（`amount` 正加负扣，必须带 `idempotencyKey`）。★ 流水类型 `ADMIN_ADJUST`，与用户自助充值是两类账 |
+| `GET /api/wallet/admin/reconcile` | `@RequirePermission("wallet:manage")` | ✅ 对账（余额 ≠ 流水汇总 的钱包）。★ 只报告不自动修，确认原因后用 `adjust` 补账 |
 | `GET /api/feedback/admin/page` | `@RequirePermission("feedback:handle")` | ✅ 反馈 / 工单列表（分页，`type` / `status` 可选）。★ 有 `feedback:handle` 即可看全部工单，不复用 `review:handle` |
 | `GET /api/feedback/admin/{id}` | `@RequirePermission("feedback:handle")` | ✅ 工单详情（`afterId` 增量，单次最多 50 条 + `hasMore`）；进入即推进管理端已读水位 |
 | `POST /api/feedback/admin/{id}/reply` | `@RequirePermission("feedback:handle")` | ✅ 回复工单：写入 admin 消息、记 `handled_by`、通知用户；POST 限 20 次/分/用户 |
@@ -160,8 +160,8 @@
 
 | 端点 | 说明 | 状态 |
 |---|---|---|
-| `POST /api/survey/add` | 新建问卷 | 🔧 **本轮修**（原来不取 `X-User-Id`，`userId` 由请求体决定 → **可以把问卷伪造到别人名下**；现在强制用登录身份覆盖） |
-| `GET /api/survey/{id}` | 按 id 查问卷 | 🔧 **本轮修**（原来完全没校验 → 遍历 id 就能读全站问卷**含别人的草稿**；现在：管理员全可读、本人可读、**已发布的可读**，其余拒绝） |
+| `POST /api/survey/add` | 新建问卷 | 🔧 **已修**（原来不取 `X-User-Id`，`userId` 由请求体决定 → **可以把问卷伪造到别人名下**；现在强制用登录身份覆盖） |
+| `GET /api/survey/{id}` | 按 id 查问卷 | 🔧 **已修**（原来完全没校验 → 遍历 id 就能读全站问卷**含别人的草稿**；现在：管理员全可读、本人可读、**已发布的可读**，其余拒绝） |
 | `PUT /api/survey/update` | 更新问卷 | ✅（还额外 `setUserId(old.getUserId())` 防止改归属，写得好） |
 | `POST /api/survey/publish/{id}` | 发布 | ✅ |
 | `POST /api/survey/copy/{id}` | 复制 | ✅ |
@@ -169,16 +169,16 @@
 | `PUT /api/survey/restore/{id}` | 从回收站恢复 | ✅ |
 | `DELETE /api/survey/permanent/{id}` | 彻底删除（要求先移入回收站） | ✅ |
 | `POST /api/question/save/{surveyId}` | 保存题目（全量覆盖）。★ **返回值是"按下标一一对应的题目 id 列表"** `[{id, sortOrder}]`（**不是**以前的字符串"保存成功"）：新建的题在保存前没有数据库 id，而编辑器的跳转目标必须存真 id，前端要靠这份回显把它草稿阶段的**负数临时 id** 换成真 id —— 详见 `dto/QuestionIdItem`。<br>★ **跳转目标不属于本问卷 → 400 拒绝保存、不落库**（绝不静默置空 —— 那会让用户以为规则还在）。"新建的题还没有 id"这个矛盾由**前端预存时先摘掉这类目标**解决（`SurveyEdit.ensureRealQuestionIds`），后端只认最终形态 | ✅ |
-| `GET /api/answer/count/{surveyId}` | 答卷数 | 🛠 前几轮修 |
-| `GET /api/answer/statistics/{questionId}` | 单题统计 | 🛠 前几轮修 |
-| `GET /api/answer/texts/{questionId}` | 填空题文本 | 🛠 前几轮修 |
-| `GET /api/answer/list/{surveyId}` | 答卷列表（**分页**：`pageNum`/`pageSize`，默认 1/10、每页上限 100、页码上限 10000，返回 `PageResult`） | 🛠 前几轮修；第二十八轮补分页 |
-| `GET /api/answer/detail/{answerId}` | 单份答卷详情 | 🛠 前几轮修 |
-| `GET /api/answer/export/{surveyId}` | 导出 Excel | 🛠 前几轮修 |
-| `GET /api/answer/statistics/survey/{surveyId}` | 整份问卷统计（一次取回：题目 + 每题分布/文本 + 答卷数） | ✅ 第二十四轮新增；`requireSurveyOwnership` 与上面几条同一口径（admin 放行） |
-| `GET /api/answer/quality/{surveyId}` | 答卷质控摘要（可疑份数 / 原因分布 / 最近 50 条样本） | ✅ 第二十六轮新增；`requireSurveyOwnership` 同一口径。★ 只打标、不删除 |
-| `PUT /api/answer/checkin/{answerId}` | 签到 / 取消签到（`?checkedIn=true|false`）。★ `requireSurveyOwnership`（admin 放行）；问卷未启用签到（`checkin_enabled=1`）→ 400；只改签到状态与时间，不动答卷内容与分数 | ✅ 第四十五轮新增 |
-| `GET /api/survey/version/list/{surveyId}` | 版本列表（新的在前，**不含**题目快照 JSON） | ✅ 第二十五轮新增；`OwnershipGuard.requireOwnerOrAdmin`（admin 放行） |
+| `GET /api/answer/count/{surveyId}` | 答卷数 | 🛠 已修 |
+| `GET /api/answer/statistics/{questionId}` | 单题统计 | 🛠 已修 |
+| `GET /api/answer/texts/{questionId}` | 填空题文本 | 🛠 已修 |
+| `GET /api/answer/list/{surveyId}` | 答卷列表（**分页**：`pageNum`/`pageSize`，默认 1/10、每页上限 100、页码上限 10000，返回 `PageResult`） | 🛠 已修；已补分页 |
+| `GET /api/answer/detail/{answerId}` | 单份答卷详情 | 🛠 已修 |
+| `GET /api/answer/export/{surveyId}` | 导出 Excel | 🛠 已修 |
+| `GET /api/answer/statistics/survey/{surveyId}` | 整份问卷统计（一次取回：题目 + 每题分布/文本 + 答卷数） | ✅ `requireSurveyOwnership` 与上面几条同一口径（admin 放行） |
+| `GET /api/answer/quality/{surveyId}` | 答卷质控摘要（可疑份数 / 原因分布 / 最近 50 条样本） | ✅ `requireSurveyOwnership` 同一口径。★ 只打标、不删除 |
+| `PUT /api/answer/checkin/{answerId}` | 签到 / 取消签到（`?checkedIn=true|false`）。★ `requireSurveyOwnership`（admin 放行）；问卷未启用签到（`checkin_enabled=1`）→ 400；只改签到状态与时间，不动答卷内容与分数 | ✅ |
+| `GET /api/survey/version/list/{surveyId}` | 版本列表（新的在前，**不含**题目快照 JSON） | ✅ `OwnershipGuard.requireOwnerOrAdmin`（admin 放行） |
 | `GET /api/survey/version/{versionId}` | 单个版本详情（**含**题目快照 JSON） | ✅ 同上（先按版本反查 surveyId，再校归属） |
 | `GET /api/survey/version/diff/{fromId}/{toId}` | 两个版本的差异 | ✅ 同上；service 还会再校验"两个版本属于同一份问卷" |
 | `POST /api/survey/version/rollback/{versionId}` | 回滚到某个版本（生成新版本） | ✅ 同上；回滚走"全量覆盖式保存"，所以额外 `requireNotInRecycleBin` |
@@ -216,12 +216,12 @@
 | `POST /api/collaborator/invitations/{id}/accept` | 接受邀请（`PENDING → ACCEPTED`）。★ 归属按 `invitation.user_id` 校验；名额费在这一步扣，余额不足则保持 PENDING | ✅ |
 | `POST /api/collaborator/invitations/{id}/reject` | 拒绝邀请（`PENDING → REJECTED`）。★ 只作用于自己的邀请；不占名额、不扣费 | ✅ |
 | `GET /api/user/profile` | 我的资料（★ 会带出 `deletedAt`/`tokenValidAfter` 两个第二十轮新增字段） | ✅ |
-| `DELETE /api/user/account` | ✅ **第二十轮·续新增**：注销**自己**的账号（需求 三.5，**软删除**）。★ 必须带密码确认；★ 身份只取 `X-User-Id`，没有任何可传的 id（否则就是"能注销别人"的接口）；★ 与管理员那条物理删除**刻意分成两个路径** |
+| `DELETE /api/user/account` | ✅ 注销**自己**的账号（需求 三.5，**软删除**）。★ 必须带密码确认；★ 身份只取 `X-User-Id`，没有任何可传的 id（否则就是"能注销别人"的接口）；★ 与管理员那条物理删除**刻意分成两个路径** |
 | ~~`PUT /api/user/profile-public`~~ | ❌ **第二十轮·续第二轮已删除**：原「资料公开开关」（需求 三.4）。需求方明确"不需要这个需求了，对应代码也剔除" —— 端点、Service、Mapper、实体字段、前端开关与 api 封装一并删除；库里那一列保留未删 |
-| `GET /api/user/login-logs` | ✅ **第二十轮新增**：我的最近登录记录（需求 三.3）。★ 身份只取 `X-User-Id`，**不接受 userId/账号名参数**（没有查别人登录记录的口子）；返回条数上限 10 写死在 `LoginLogService`，不受请求参数影响 |
+| `GET /api/user/login-logs` | ✅ 我的最近登录记录（需求 三.3）。★ 身份只取 `X-User-Id`，**不接受 userId/账号名参数**（没有查别人登录记录的口子）；返回条数上限 10 写死在 `LoginLogService`，不受请求参数影响 |
 | `PUT /api/user/nickname` | 改昵称 | ✅ |
-| `PUT /api/user/password` | 改密码（`oldPassword`/`newPassword`） | ✅（前几轮换成 PBKDF2） |
-| `PUT /api/user/avatar` | 改头像 | ✅（★ 第二十轮加强：不再只看长度，见 §八） |
+| `PUT /api/user/password` | 改密码（`oldPassword`/`newPassword`） | ✅（已换成 PBKDF2） |
+| `PUT /api/user/avatar` | 改头像 | ✅（★ 加强：不再只看长度，见 §八） |
 | `PUT /api/user/contact` | 改手机/邮箱 | ✅ |
 | `GET /api/survey/my` | 我的问卷 | ✅ |
 | `GET /api/survey/my-statistics` | 我的统计 | ✅ |
@@ -230,26 +230,26 @@
 | `GET /api/survey/templates` | 模板广场列表 | ✅（对所有登录用户开放是合理的） |
 | `POST /api/survey/from-template/{templateId}` | 从模板创建 | ✅ |
 | `POST /api/answer/submit/{surveyId}` | 登录态提交。★ **「仅限登录用户填写」的问卷只接受这条路径**（`require_login=1`）：`submit-share` 的 userId 恒为 null，会被 400 拒收。它同时是唯一能把答题人身份写进 `t_answer.user_id` 的路径，实名答卷因此受 `uk_survey_user`（一人一份）约束。第十六轮曾按"前端零调用"删除、随即恢复，理由见 `AnswerController.submit` 的 javadoc |
-| `GET /api/answer/score/{surveyId}` | 查**自己**在某份问卷的成绩（`{totalScore,earnedScore,passScore,passed,submittedAt}`）。★ 只按 `surveyId + X-User-Id` 定位，不接受 answerId / 不带 userId 参数；匿名答卷（`user_id IS NULL`）查不到 → 400「你还没有提交过这份问卷」；未开判分的问卷 → 400。第四十五轮新增 |
-| `GET /api/answer/my` | 我答过的问卷（**分页**：`pageNum`/`pageSize`，默认 1/10、上限 100）。★ 只按 `X-User-Id` 查，不接受 userId 参数；匿名答卷没有身份可回溯、不会出现；已删除/已结束的问卷仍保留记录（前端按 `deleted`/`status` 禁用入口）。第四十五轮新增 |
-| `GET /api/answer/my/{answerId}` | 我的某份答卷详情（逐题回放：题目、我的答案、对错、正确答案）。★ 权限按**答卷归属**校验（`answer.userId == 当前用户`），不是问卷归属 —— 答题人不是作者，不能复用 `/answer/detail/{answerId}`；别人的 answerId 一律 400「无权查看该答卷」。★ `correctAnswers` 只在作者开启「提交后显示答案」时返回。第四十五轮新增 |
-| `POST /api/ai/generate` | AI 生成问卷 | ✅（正确用 `X-User-Id`，是前几轮修归属时的现成模板） |
+| `GET /api/answer/score/{surveyId}` | 查**自己**在某份问卷的成绩（`{totalScore,earnedScore,passScore,passed,submittedAt}`）。★ 只按 `surveyId + X-User-Id` 定位，不接受 answerId / 不带 userId 参数；匿名答卷（`user_id IS NULL`）查不到 → 400「你还没有提交过这份问卷」；未开判分的问卷 → 400。 |
+| `GET /api/answer/my` | 我答过的问卷（**分页**：`pageNum`/`pageSize`，默认 1/10、上限 100）。★ 只按 `X-User-Id` 查，不接受 userId 参数；匿名答卷没有身份可回溯、不会出现；已删除/已结束的问卷仍保留记录（前端按 `deleted`/`status` 禁用入口）。 |
+| `GET /api/answer/my/{answerId}` | 我的某份答卷详情（逐题回放：题目、我的答案、对错、正确答案）。★ 权限按**答卷归属**校验（`answer.userId == 当前用户`），不是问卷归属 —— 答题人不是作者，不能复用 `/answer/detail/{answerId}`；别人的 answerId 一律 400「无权查看该答卷」。★ `correctAnswers` 只在作者开启「提交后显示答案」时返回。 |
+| `POST /api/ai/generate` | AI 生成问卷 | ✅（正确用 `X-User-Id`，是已修归属时的现成模板） |
 | `GET /api/notification/list` | 我的通知 | ✅ |
 | `GET /api/notification/unread` | 未读数（顶栏 30 秒轮询） | ✅ |
 | `PUT /api/notification/read/{id}` | 标记单条已读 | ✅（service 层带 userId） |
 | `PUT /api/notification/read-all` | 全部已读 | ✅ |
 | `DELETE /api/notification/{id}` | 删单条 | ✅（service 层带 userId） |
 | `DELETE /api/notification/clear` | 清空 | ✅ |
-| `GET /api/collaborator/shared` | 「共享给我」的问卷列表。★ 只按 `X-User-Id` 查，没有任何可传的用户 id | ✅ 第三十四轮新增 |
-| `POST /api/collaborator/self/{surveyId}/apply` | 协作者主动申请变更权限（给作者发通知，**不**直接改角色） | ✅ 第三十四轮新增；报名角色只接受 viewer/editor/analyst |
-| `DELETE /api/collaborator/self/{surveyId}` | 协作者自己退出（只删自己那一行，不能借它移除他人） | ✅ 第三十四轮新增 |
-| `POST /api/survey/{surveyId}/report` | 举报问卷（只能举报已发布、不能举报自己、同一人同问卷只能有一条 `PENDING`） | ✅ 第三十四轮新增；理由 1~500 字 |
-| `GET /api/review/my` | 我的举报（只按 `X-User-Id` 查，不接受 userId 参数） | ✅ 第三十四轮新增 |
-| `POST /api/survey/{id}/request-restore` | 作者申请恢复上架。★ 只把申请变成给**全部有效管理员**（`UserMapper.findAdminIds()`）的通知，`lifecycle` 保持 `SUSPENDED`；只有「作者本人 + 确实被下架」能申请，归属判断在 Service 里 | ✅ 第三十五轮新增 |
-| `GET /api/wallet/pricing` | ✅ **第三十七轮新增**：计费项目录（发布/AI/导出/高级设置包/协作者名额的价格与说明）。★ 后端 `WalletFeature` 是价格唯一出处，前端动态渲染、不硬编码 |
-| `GET /api/wallet` | 我的钱包余额（没有钱包时自动建 0 余额包）。★ 只取 `X-User-Id`，没有任何查别人的参数 | ✅ 第三十六轮新增 |
-| `GET /api/wallet/transactions` | 我的额度流水（分页）。金额**有符号**：入账正、出账负 | ✅ 第三十六轮新增 |
-| `POST /api/wallet/recharge` | 模拟充值（演示用，不接真实支付；1~1000 点，必须带幂等键，重复提交只到账一次） | ✅ 第三十六轮新增 |
+| `GET /api/collaborator/shared` | 「共享给我」的问卷列表。★ 只按 `X-User-Id` 查，没有任何可传的用户 id | ✅ |
+| `POST /api/collaborator/self/{surveyId}/apply` | 协作者主动申请变更权限（给作者发通知，**不**直接改角色） | ✅ 报名角色只接受 viewer/editor/analyst |
+| `DELETE /api/collaborator/self/{surveyId}` | 协作者自己退出（只删自己那一行，不能借它移除他人） | ✅ |
+| `POST /api/survey/{surveyId}/report` | 举报问卷（只能举报已发布、不能举报自己、同一人同问卷只能有一条 `PENDING`） | ✅ 理由 1~500 字 |
+| `GET /api/review/my` | 我的举报（只按 `X-User-Id` 查，不接受 userId 参数） | ✅ |
+| `POST /api/survey/{id}/request-restore` | 作者申请恢复上架。★ 只把申请变成给**全部有效管理员**（`UserMapper.findAdminIds()`）的通知，`lifecycle` 保持 `SUSPENDED`；只有「作者本人 + 确实被下架」能申请，归属判断在 Service 里 | ✅ |
+| `GET /api/wallet/pricing` | ✅ 计费项目录（发布/AI/导出/高级设置包/协作者名额的价格与说明）。★ 后端 `WalletFeature` 是价格唯一出处，前端动态渲染、不硬编码 |
+| `GET /api/wallet` | 我的钱包余额（没有钱包时自动建 0 余额包）。★ 只取 `X-User-Id`，没有任何查别人的参数 | ✅ |
+| `GET /api/wallet/transactions` | 我的额度流水（分页）。金额**有符号**：入账正、出账负 | ✅ |
+| `POST /api/wallet/recharge` | 模拟充值（演示用，不接真实支付；1~1000 点，必须带幂等键，重复提交只到账一次） | ✅ |
 
 ---
 

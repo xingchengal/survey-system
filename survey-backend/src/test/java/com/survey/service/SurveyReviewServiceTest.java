@@ -156,6 +156,18 @@ class SurveyReviewServiceTest {
     }
 
     @Test
+    @DisplayName("★ 举报人不能处理自己的举报：不改状态、不发通知")
+    void handleRejectsSelfReview() {
+        when(reviewMapper.findById(9)).thenReturn(new java.util.HashMap<>(java.util.Map.of(
+                "id", 9, "surveyId", 874, "reporterId", REPORTER, "status", "PENDING")));
+
+        assertEquals("不能处理自己提交的举报", assertThrows(BizException.class,
+                () -> service.handle(9, REPORTER, "SUSPEND")).getMessage());
+        verify(reviewMapper, never()).handle(anyInt(), anyString(), anyString(), anyInt());
+        verify(notificationService, never()).send(anyInt(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
     @DisplayName("★ 非法动作 / 举报不存在 → 400")
     void handleRejectsBadInput() {
         assertTrue(assertThrows(BizException.class,
