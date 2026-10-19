@@ -148,7 +148,7 @@
             {{ q.type === 1 ? '单选' : q.type === 2 ? '多选' : '填空' }}
           </el-tag>
         </div>
-        <div v-if="q.options && q.options.length" style="padding-left: 20px; color: #666; margin-top: 6px;">
+        <div v-if="q.options && q.options.length" style="padding-left: 20px; color: var(--ink-2); margin-top: 6px;">
           <div v-for="opt in q.options" :key="opt.id">· {{ opt.content }}</div>
         </div>
       </div>

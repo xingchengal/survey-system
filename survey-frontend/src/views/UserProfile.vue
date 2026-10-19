@@ -640,11 +640,15 @@ export default {
 }
 .danger-title { font-size: 14px; font-weight: 600; color: #ef4444; }
 .danger-desc { font-size: 12px; color: var(--ink-3); line-height: 1.8; margin: 6px 0 12px 0; }
+html[data-theme="dark"] .danger-zone {
+  background: #2b1718;
+  border-color: #4a2425;
+}
 
 /* ---- 最近登录记录 ---- */
 .login-log-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .login-log-empty { font-size: 13px; color: var(--ink-3); }
-.login-log-row { padding: 7px 0; border-bottom: 1px dashed #eef3fb; }
+.login-log-row { padding: 7px 0; border-bottom: 1px dashed var(--stroke); }
 .login-log-row:last-child { border-bottom: none; }
 .login-log-time { font-size: 13px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
 .login-log-ip { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
@@ -654,7 +658,7 @@ export default {
   text-align: center;
   padding: 16px 6px;
   border-radius: var(--r-md);
-  background: #f8fbff;
+  background: var(--surface-2);
   border: 1px solid var(--stroke);
   transition:
     transform 0.22s var(--ease),
@@ -674,7 +678,7 @@ export default {
   padding: 20px 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--stroke);
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
   transition:
     transform 0.22s var(--ease),

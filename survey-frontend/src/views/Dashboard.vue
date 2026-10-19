@@ -551,7 +551,7 @@ export default {
 }
 .stat-label {
   font-size: 12px;
-  color: #999;
+  color: var(--ink-3);
   margin-bottom: 4px;
 }
 .stat-value {
@@ -586,8 +586,8 @@ export default {
   gap: 10px;
   padding: 11px 13px;
   border-radius: 12px;
-  background: #f7f9fc;
-  border: 1px solid #eef2f7;
+  background: var(--surface-2);
+  border: 1px solid var(--stroke);
 }
 .ops-summary-icon {
   width: 36px;
@@ -648,7 +648,7 @@ export default {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: #f1f5f9;
+  background: var(--stroke);
   color: #64748b;
 }
 .ops-icon.amber {
@@ -783,11 +783,11 @@ export default {
   padding: 18px 10px;
   border-radius: 12px;
   cursor: pointer;
-  border: 1px solid #f0f2f5;
+  border: 1px solid var(--stroke);
   transition: all 0.2s ease;
 }
 .quick-action:hover {
-  background: #f8fafc;
+  background: var(--surface-2);
   border-color: #409eff;
   transform: translateY(-2px);
 }

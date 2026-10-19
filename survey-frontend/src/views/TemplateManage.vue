@@ -443,7 +443,7 @@ export default {
   padding: 0 12px;
   border: 1px solid var(--stroke);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-2);
   font-size: 12px;
   cursor: pointer;

@@ -108,7 +108,7 @@ public class FeedbackService {
         if (feedback.getHandledBy() != null && !feedback.getHandledBy().equals(userId)) {
             notificationService.send(feedback.getHandledBy(), "工单已关闭",
                     "用户关闭了工单《" + feedback.getSubject() + "》", "feedback",
-                    "/admin/feedback?id=" + feedbackId);
+                    adminTicketLink(feedback));
         }
     }
 
@@ -183,7 +183,7 @@ public class FeedbackService {
         }
         notificationService.send(feedback.getUserId(), "工单已关闭",
                 "管理员关闭了工单《" + feedback.getSubject() + "》", "feedback",
-                "/feedback?ticket=" + feedbackId);
+                userTicketLink(feedback));
     }
 
     // ==================== 内部 ====================
@@ -266,13 +266,24 @@ public class FeedbackService {
             if (feedback.getHandledBy() != null && !feedback.getHandledBy().equals(senderId)) {
                 notificationService.send(feedback.getHandledBy(), "新的反馈消息",
                         "工单《" + feedback.getSubject() + "》有新的用户消息：" + preview(content),
-                        "feedback", "/admin/feedback?id=" + feedback.getId());
+                        "feedback", adminTicketLink(feedback));
             }
         } else if (feedback.getUserId() != null && !feedback.getUserId().equals(senderId)) {
             notificationService.send(feedback.getUserId(), "客服回复",
                     "工单《" + feedback.getSubject() + "》有新的回复：" + preview(content),
-                    "feedback", "/feedback?ticket=" + feedback.getId());
+                    "feedback", userTicketLink(feedback));
         }
+    }
+
+    /** 用户端落地页：反馈与客服已分页，按工单类型给不同入口。 */
+    private String userTicketLink(Feedback feedback) {
+        String path = TYPE_SERVICE.equals(feedback.getType()) ? "/support" : "/feedback";
+        return path + "?ticket=" + feedback.getId();
+    }
+
+    /** 管理端落地页：带上 type，列表直接停在对应 Tab。 */
+    private String adminTicketLink(Feedback feedback) {
+        return "/admin/feedback?type=" + feedback.getType() + "&id=" + feedback.getId();
     }
 
     private String normalizeType(String type) {

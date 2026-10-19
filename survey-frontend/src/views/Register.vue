@@ -460,7 +460,7 @@ export default {
   width: 28px;
   height: 6px;
   border-radius: 3px;
-  background: #e4ecf9;
+  background: var(--stroke);
   transition: background 0.2s var(--ease);
 }
 .strength-text {

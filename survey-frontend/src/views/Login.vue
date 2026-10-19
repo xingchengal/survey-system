@@ -344,7 +344,7 @@ export default {
 .ill-line {
   height: 8px;
   border-radius: 4px;
-  background: #e8f0fb;
+  background: var(--stroke);
 }
 .ill-line.w70 {
   width: 70%;

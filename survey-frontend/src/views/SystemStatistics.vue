@@ -1167,7 +1167,7 @@ export default {
 }
 .stat-label {
   font-size: 12px;
-  color: #999;
+  color: var(--ink-3);
   margin-bottom: 4px;
 }
 .stat-value {
@@ -1226,8 +1226,8 @@ export default {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #f0f2f5;
-  color: #909399;
+  background: var(--surface-2);
+  color: var(--ink-3);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1271,14 +1271,14 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 9px 0;
-  border-bottom: 1px dashed #f0f2f5;
+  border-bottom: 1px dashed var(--stroke);
 }
 .metric-row:last-child {
   border-bottom: none;
 }
 .metric-name {
   font-size: 13px;
-  color: #606266;
+  color: var(--ink-2);
 }
 .metric-value {
   font-size: 15px;
@@ -1298,7 +1298,7 @@ export default {
   justify-content: space-between;
   padding: 12px 14px;
   border-radius: 10px;
-  background: #f7f9fc;
+  background: var(--surface-2);
   font-size: 13px;
   color: var(--ink-2);
 }

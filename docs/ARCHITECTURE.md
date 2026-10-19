@@ -310,6 +310,10 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 - **成功响应不统一**（裸字符串 / `{success,message}` / 实体 / `PageResult`），按各接口实际返回类型处理；
   分页一律 `data.list || []` + `data.total || 0`。
 - **全部 Options API，不引入 `<script setup>`。** `views/` 下现状没有任何 `<script setup>`，保持一致。
+- **反馈 / 客服线程只走 `components/FeedbackThread.vue`。** 固定 header、消息区独立滚动、composer 常驻、
+  5 分钟时间分组、Enter 发送（中文输入法组合态不发送）都在组件内；页面只传 `loader` / `sender` /
+  `closer` / `reader`，不要各写一套轮询与排版。`pollInterval` 传 0 即不轮询（反馈是异步意见箱），
+  `readonly` 隐藏输入框与关闭按钮——轮询只用于客服工单。
 - **视觉令牌只认 `styles/theme.css`**：颜色用 `--sky-*`、渐变用 `--brand-gradient`、阴影用 `--shadow-*`、
   圆角用 `--r-*`。页面里不要写死 `#409eff` 之类的色值。
 - **路由守卫三层**：`meta.public`（免登录）→ 登录态 → `meta.roles` + `meta.permission`。

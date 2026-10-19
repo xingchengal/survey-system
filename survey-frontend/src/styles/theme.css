@@ -108,6 +108,13 @@ body {
   background: transparent;
 }
 
+/* ==================== 弹层 ==================== */
+/* 抽屉背景必须在全局兜底：组件里的 scoped :deep 选择器在 teleport 后命中不稳定 */
+.el-drawer,
+.el-drawer__body {
+  background: var(--surface);
+}
+
 /* ==================== 卡片 ==================== */
 .el-card {
   border: 1px solid var(--stroke);
@@ -121,7 +128,7 @@ body {
 
 .el-card__header {
   padding: 16px 20px;
-  border-bottom: 1px solid #eef3fb;
+  border-bottom: 1px solid var(--stroke);
   font-weight: 600;
 }
 
@@ -489,6 +496,11 @@ html[data-theme="dark"] {
   --el-color-primary-light-8: #223a5e;
   --el-color-primary-light-9: #162640;
   --el-color-primary-dark-2: #7fb4f6;
+  /* 彩色浅底块（tag effect=light / alert / 提示条）在深色下必须压暗，沿用官方 dark 口径 */
+  --el-color-success-light-9: #1c2518;
+  --el-color-warning-light-9: #292218;
+  --el-color-danger-light-9: #2b1d1d;
+  --el-color-info-light-9: #202121;
 
   --el-bg-color: #101d31;
   --el-bg-color-page: #0a1220;
@@ -559,6 +571,25 @@ html[data-theme="dark"] .el-dialog {
 }
 html[data-theme="dark"] .el-popper,
 html[data-theme="dark"] .el-dropdown__popper {
+  background: #101d31;
+  border-color: #22314a;
+}
+/* 箭头默认读 --el-bg-color-overlay（#13223a），与上面的 #101d31 有色差 */
+html[data-theme="dark"] .el-popper__arrow::before {
+  background: #101d31;
+  border-color: #22314a;
+}
+/* tooltip 默认 is-dark：箭头用 --el-text-color-primary（深色下是白），必须一起压暗 */
+html[data-theme="dark"] .el-popper.is-dark {
+  background: #101d31;
+  border-color: #22314a;
+  color: #e6edf7;
+}
+html[data-theme="dark"] .el-popper.is-dark .el-popper__arrow::before {
+  background: #101d31;
+  border-color: #22314a;
+}
+html[data-theme="dark"] .el-message-box {
   background: #101d31;
   border-color: #22314a;
 }

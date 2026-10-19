@@ -926,7 +926,7 @@ export default {
   gap: 14px;
   padding: 18px 20px;
   border-radius: var(--r-lg);
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--stroke);
   box-shadow: var(--shadow-sm);
   transition:
@@ -1000,7 +1000,7 @@ export default {
   margin-top: 6px;
 }
 .reason-tag {
-  background: #fff;
+  background: var(--surface);
   border-color: #ffe3b8;
   color: #b45309;
 }
@@ -1082,7 +1082,7 @@ export default {
   text-align: center;
 }
 .stat-matrix thead th {
-  background: #f5f9ff;
+  background: var(--surface-2);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -1095,7 +1095,7 @@ export default {
 .stat-matrix-total {
   font-weight: 600;
   color: var(--ink-2);
-  background: #fafcff;
+  background: var(--surface-2);
 }
 .matrix-count {
   margin-right: 4px;
@@ -1148,7 +1148,7 @@ export default {
   flex: 1;
   height: 14px;
   border-radius: 999px;
-  background: #eef4fd;
+  background: var(--stroke);
   overflow: hidden;
 }
 .rank-bar {
@@ -1259,7 +1259,7 @@ html[data-theme="dark"] .rank-bar-wrap {
   gap: 10px;
   padding: 11px 14px;
   border-radius: 12px;
-  background: #f8fbff;
+  background: var(--surface-2);
   border: 1px solid #eef4fd;
   transition: background 0.18s var(--ease);
 }
@@ -1308,7 +1308,7 @@ html[data-theme="dark"] .rank-bar-wrap {
   padding: 12px 14px;
   margin-bottom: 10px;
   border-radius: 12px;
-  background: #f8fbff;
+  background: var(--surface-2);
   border: 1px solid #eef4fd;
 }
 .detail-index {

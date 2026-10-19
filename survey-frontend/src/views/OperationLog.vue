@@ -69,12 +69,12 @@
           </el-table-column>
           <el-table-column prop="method" label="调用方法" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
-              <span style="font-family: monospace; color: #666; font-size: 12px;">{{ row.method }}</span>
+              <span style="font-family: monospace; color: var(--ink-2); font-size: 12px;">{{ row.method }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="ip" label="IP 地址" width="140" align="center">
             <template #default="{ row }">
-              <span style="color: #909399; font-size: 12px;">{{ row.ip }}</span>
+              <span style="color: var(--ink-3); font-size: 12px;">{{ row.ip }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="createTime" label="操作时间" width="180" />
@@ -137,7 +137,7 @@
           </el-table-column>
           <el-table-column prop="requestUri" label="请求路径" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
-              <span style="font-family: monospace; font-size: 12px; color: #606266;">{{ row.requestUri }}</span>
+              <span style="font-family: monospace; font-size: 12px; color: var(--ink-2);">{{ row.requestUri }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="errorMessage" label="异常信息" min-width="200" show-overflow-tooltip>

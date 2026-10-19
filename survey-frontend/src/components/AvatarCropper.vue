@@ -226,7 +226,7 @@ export default {
   margin: 0 auto;
   overflow: hidden;
   border-radius: 8px;
-  background: #f5f7fa;
+  background: var(--surface-2);
   cursor: grab;
   touch-action: none;   /* 触屏上禁止滚动手势抢走拖动 */
   user-select: none;
@@ -258,7 +258,7 @@ export default {
   margin: 12px 0 4px 0;
   text-align: center;
   font-size: 13px;
-  color: #606266;
+  color: var(--ink-2);
 }
-.crop-tip-dim { color: #909399; }
+.crop-tip-dim { color: var(--ink-3); }
 </style>

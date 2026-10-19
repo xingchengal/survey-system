@@ -1,6 +1,6 @@
 <template>
-  <div style="min-height: 100vh; background: #f0f2f5; padding: 30px 20px;">
-    <div v-if="loading" style="text-align: center; padding: 80px; color: #999;">
+  <div style="min-height: 100vh; background: var(--surface-2); padding: 30px 20px;">
+    <div v-if="loading" style="text-align: center; padding: 80px; color: var(--ink-3);">
       正在加载问卷...
     </div>
 
@@ -16,7 +16,7 @@
     <div v-else-if="closedReason" style="max-width: 600px; margin: 60px auto;">
       <el-card>
         <h2 style="margin: 0 0 8px 0;">{{ survey.title }}</h2>
-        <p v-if="survey.description" style="color: #666; margin: 0 0 16px;">{{ survey.description }}</p>
+        <p v-if="survey.description" style="color: var(--ink-2); margin: 0 0 16px;">{{ survey.description }}</p>
         <el-alert type="warning" show-icon :closable="false" :title="closedTitle">
           {{ closedHint }}
         </el-alert>
@@ -24,7 +24,7 @@
           <el-button v-if="survey.publicResult === 1" type="primary" @click="goPublicResult">
             查看统计结果
           </el-button>
-          <p v-else style="margin: 8px 0 0; font-size: 12px; color: #909399;">
+          <p v-else style="margin: 8px 0 0; font-size: 12px; color: var(--ink-3);">
             作者未开启公开结果，暂时看不到统计。
           </p>
         </div>
@@ -35,7 +35,7 @@
     <div v-else-if="loginRequired && !loggedIn" style="max-width: 600px; margin: 60px auto;">
       <el-card>
         <h2 style="margin: 0 0 8px 0;">{{ survey.title }}</h2>
-        <p v-if="survey.description" style="color: #666; margin: 0 0 16px;">{{ survey.description }}</p>
+        <p v-if="survey.description" style="color: var(--ink-2); margin: 0 0 16px;">{{ survey.description }}</p>
         <el-alert
           type="info"
           show-icon
@@ -106,7 +106,7 @@
       <!-- 问卷头部 -->
       <el-card class="mb-20">
         <h2 style="margin: 0 0 10px 0;">{{ survey.title }}</h2>
-        <p style="color: #666; margin: 0;">{{ survey.description }}</p>
+        <p style="color: var(--ink-2); margin: 0;">{{ survey.description }}</p>
 
         <!-- 给填写人一个体量预期（题目数 + 估算时长）；密码门未过/题目未加载时不显示 -->
         <div v-if="passwordVerified && questions.length" class="fill-meta">
@@ -137,7 +137,7 @@
 
         <!-- 进度条 -->
         <div v-if="passwordVerified" style="margin-top: 16px;">
-          <div style="display: flex; justify-content: space-between; font-size: 12px; color: #909399; margin-bottom: 6px;">
+          <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); margin-bottom: 6px;">
             <span>填写进度</span>
             <span>{{ completedSteps }} / {{ totalSteps }}</span>
           </div>
@@ -215,7 +215,7 @@
             v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
-            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid #ebeef5; border-radius: 8px; width: 100%; box-sizing: border-box;"
+            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid var(--stroke); border-radius: 8px; width: 100%; box-sizing: border-box;"
           >
             {{ opt.content }}
           </el-radio>
@@ -231,7 +231,7 @@
             v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
-            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid #ebeef5; border-radius: 8px; width: 100%; box-sizing: border-box;"
+            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid var(--stroke); border-radius: 8px; width: 100%; box-sizing: border-box;"
           >
             {{ opt.content }}
           </el-checkbox>
@@ -354,7 +354,7 @@
       <el-card v-else-if="allDone" style="margin-bottom: 16px; text-align: center; padding: 20px;">
         <el-icon :size="48" color="#67c23a"><CircleCheckFilled /></el-icon>
         <h3 style="margin: 12px 0 6px 0;">所有题目已完成</h3>
-        <p style="color: #909399; margin: 0;">请点击下方按钮提交问卷</p>
+        <p style="color: var(--ink-3); margin: 0;">请点击下方按钮提交问卷</p>
       </el-card>
 
       <!-- 操作按钮 -->
@@ -1383,7 +1383,7 @@ export default {
 .password-hint {
   margin: 0 0 16px;
   font-size: 13px;
-  color: #909399;
+  color: var(--ink-3);
 }
 .password-row {
   display: flex;
@@ -1421,7 +1421,7 @@ export default {
 .fill-rating-text {
   margin-left: 10px;
   font-size: 14px;
-  color: #909399;
+  color: var(--ink-3);
 }
 
 .submit-actions {
@@ -1433,7 +1433,7 @@ export default {
 .redirect-hint {
   margin: 14px 0 0;
   font-size: 12px;
-  color: #909399;
+  color: var(--ink-3);
 }
 
 /* el-radio/checkbox-group 默认 inline-flex 会收缩到文字宽；撑成块级满宽，选项框才占整行 */
@@ -1473,7 +1473,7 @@ export default {
   text-align: center;
 }
 .fill-matrix thead th {
-  background: #f5f9ff;
+  background: var(--surface-2);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -1536,7 +1536,7 @@ export default {
   height: 44px;
   border: 1px solid var(--stroke);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-2);
   font-size: 15px;
   cursor: pointer;

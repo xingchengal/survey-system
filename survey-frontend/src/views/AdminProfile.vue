@@ -612,17 +612,17 @@ export default {
   display: flex;
   justify-content: space-between;
   padding: 10px 0;
-  border-bottom: 1px dashed #f0f2f5;
+  border-bottom: 1px dashed var(--stroke);
   font-size: 14px;
 }
 .info-row:last-child { border-bottom: none; }
-.info-label { color: #909399; display: flex; align-items: center; }
-.info-value { color: #303133; font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.info-label { color: var(--ink-3); display: flex; align-items: center; }
+.info-value { color: var(--ink); font-weight: 500; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 账号用等宽小字（"页面内账号采用小字展示"），与昵称的视觉权重区分开 */
-.info-account { font-size: 13px; font-weight: 400; color: #606266; font-family: Consolas, Monaco, monospace; }
+.info-account { font-size: 13px; font-weight: 400; color: var(--ink-2); font-family: Consolas, Monaco, monospace; }
 
 /* ---- 表单页内提示（错误信息页内展示，不用弹窗） ---- */
-.form-hint { font-size: 12px; color: #909399; line-height: 1.6; }
+.form-hint { font-size: 12px; color: var(--ink-3); line-height: 1.6; }
 
 /* ---- 危险操作区（账号注销）：与 UserProfile.vue 同步，只把强调色换成管理员的红 ---- */
 .danger-zone {
@@ -634,25 +634,29 @@ export default {
   background: #fef8f8;
 }
 .danger-title { font-size: 14px; font-weight: 600; color: #f56c6c; }
-.danger-desc { font-size: 12px; color: #909399; line-height: 1.8; margin: 6px 0 12px 0; }
+.danger-desc { font-size: 12px; color: var(--ink-3); line-height: 1.8; margin: 6px 0 12px 0; }
+html[data-theme="dark"] .danger-zone {
+  background: #2b1718;
+  border-color: #4a2425;
+}
 
 /* ---- 最近登录记录 ---- */
 .login-log-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.login-log-empty { font-size: 13px; color: #909399; }
-.login-log-row { padding: 6px 0; border-bottom: 1px dashed #f0f2f5; }
+.login-log-empty { font-size: 13px; color: var(--ink-3); }
+.login-log-row { padding: 6px 0; border-bottom: 1px dashed var(--stroke); }
 .login-log-row:last-child { border-bottom: none; }
-.login-log-time { font-size: 13px; color: #303133; display: flex; align-items: center; gap: 6px; }
-.login-log-ip { font-size: 12px; color: #909399; margin-top: 2px; }
+.login-log-time { font-size: 13px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+.login-log-ip { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 
-.mini-card { text-align: center; padding: 14px 6px; border-radius: 10px; background: #fafbfc; transition: all 0.2s ease; }
+.mini-card { text-align: center; padding: 14px 6px; border-radius: 10px; background: var(--surface-2); transition: all 0.2s ease; }
 .mini-card:hover { background: #fef0f0; transform: translateY(-2px); }
 .mini-value { font-size: 22px; font-weight: bold; line-height: 1.2; margin-top: 6px; }
-.mini-label { font-size: 12px; color: #909399; margin-top: 2px; }
+.mini-label { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
 
-.quick-action { text-align: center; padding: 18px 10px; border-radius: 10px; border: 1px solid #f0f2f5; cursor: pointer; transition: all 0.25s ease; }
+.quick-action { text-align: center; padding: 18px 10px; border-radius: 10px; border: 1px solid var(--stroke); cursor: pointer; transition: all 0.25s ease; }
 .quick-action:hover { background: #fef0f0; border-color: #f56c6c; transform: translateY(-2px); }
-.qa-title { font-size: 13px; font-weight: 500; color: #303133; margin-top: 8px; }
-.qa-desc { font-size: 11px; color: #909399; margin-top: 2px; }
+.qa-title { font-size: 13px; font-weight: 500; color: var(--ink); margin-top: 8px; }
+.qa-desc { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
 
 .profile-page {
   max-width: 1200px;
@@ -724,7 +728,7 @@ export default {
   padding: 20px 10px;
   border-radius: var(--r-md);
   border: 1px solid var(--stroke);
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
   transition:
     transform 0.22s var(--ease),

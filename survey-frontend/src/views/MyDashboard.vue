@@ -476,6 +476,7 @@ export default {
   border: none;
 }
 .hero-btn-primary {
+  /* hero 是深色渐变，按钮必须保持白底才能读 */
   background: #fff;
   color: #1d4ed8;
 }
@@ -638,7 +639,7 @@ export default {
 .kpi-bar {
   height: 5px;
   border-radius: 999px;
-  background: #e6effc;
+  background: var(--stroke);
   margin-top: 9px;
   overflow: hidden;
 }
@@ -698,7 +699,7 @@ export default {
   align-items: center;
   gap: 12px;
   padding: 13px 8px;
-  border-bottom: 1px solid #f1f5fd;
+  border-bottom: 1px solid var(--stroke);
   border-radius: 10px;
   cursor: pointer;
   transition:
@@ -759,7 +760,7 @@ export default {
   padding: 16px 18px;
   border-radius: var(--r-lg);
   border: 1px solid var(--stroke);
-  background: #fff;
+  background: var(--surface);
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition:

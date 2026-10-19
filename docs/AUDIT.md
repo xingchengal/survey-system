@@ -45,10 +45,10 @@
 | 分档 | 公开 **13** / 需登录 **42** / 归属 **31** / 管理 **40** | §三~§六 活行 |
 | Controller | **20** | `controller/*.java` |
 | 数据库表 | **25** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **468 例 / 51 类** | `mvnw -o test` |
-| 前端页面 | **26** | `src/views/**/*.vue` |
+| 后端测试 | **470 例 / 51 类** | `mvnw -o test` |
+| 前端页面 | **27** | `src/views/**/*.vue` |
 | 前端 API 模块 | **18** | `src/api/*.js` |
-| 具名路由 | **28** | `router/index.js` |
+| 具名路由 | **29** | `router/index.js` |
 
 ### 2.2 端点分档
 

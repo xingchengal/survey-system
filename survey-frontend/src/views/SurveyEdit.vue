@@ -404,7 +404,7 @@
 
     <!-- 历史版本对话框 -->
     <el-dialog v-model="versionVisible" title="历史版本" width="820px">
-      <div style="color:#666; font-size:13px; margin-bottom:12px;">
+      <div style="color: var(--ink-2); font-size:13px; margin-bottom:12px;">
         每次「保存」只要题目结构有变化就会留一个版本（每份问卷最多保留 50 个）。
         ★ 回滚会生成一个新版本，历史不会丢 —— 回滚错了还能再回滚回去。
       </div>
@@ -428,7 +428,7 @@
 
       <!-- 版本对比 -->
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:16px;">
-        <span style="color:#666;">版本对比：</span>
+        <span style="color: var(--ink-2);">版本对比：</span>
         <el-select v-model="diffFrom" placeholder="旧版本" size="small" style="width:120px;">
           <el-option v-for="v in versions" :key="v.id" :label="'v' + v.versionNo" :value="v.id" />
         </el-select>
@@ -460,7 +460,7 @@
             <div v-for="x in versionDiff.modified" :key="'m' + x.questionId"
                  style="margin-left:8px; margin-top:4px;">
               {{ x.title }}
-              <span style="color:#999;">（{{ x.changes.join('；') }}）</span>
+              <span style="color: var(--ink-3);">（{{ x.changes.join('；') }}）</span>
             </div>
           </div>
         </div>
@@ -1976,7 +1976,7 @@ export default {
   min-height: 100vh;
   box-sizing: border-box;
   padding: 18px 22px 32px;
-  background: #f5f7fb;
+  background: var(--surface-2);
 }
 .editor-shell {
   display: flex;
@@ -2045,7 +2045,7 @@ export default {
 .empty-questions {
   text-align: center;
   padding: 48px 20px;
-  background: #fff;
+  background: var(--surface);
   border: 1px dashed var(--stroke-strong);
   border-radius: var(--r-lg);
 }
@@ -2092,7 +2092,7 @@ export default {
   flex: 1;
 }
 .q-title-input :deep(.el-input__wrapper) {
-  background: #f8fbff;
+  background: var(--surface-2);
   border: 1px solid #eef4fd;
   border-radius: 12px;
   box-shadow: none;
@@ -2115,7 +2115,7 @@ export default {
   transition: background 0.18s var(--ease);
 }
 .option-row:hover {
-  background: #f7fbff;
+  background: var(--surface-2);
 }
 .option-mark {
   width: 26px;
@@ -2225,7 +2225,7 @@ export default {
   position: sticky;
   top: 16px;
   padding: 14px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-sm);
@@ -2359,7 +2359,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: var(--surface);
   font-size: 17px;
   flex-shrink: 0;
 }
@@ -2382,7 +2382,7 @@ export default {
   border-radius: 999px;
   font-size: 12px;
   color: var(--ink-3);
-  background: #f1f5fb;
+  background: var(--surface-2);
 }
 .save-state::before {
   content: "";
@@ -2476,7 +2476,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   padding: 8px;
   border: 1px solid var(--stroke);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
 }
 .share-qr-sk {
   width: 180px;
@@ -2558,7 +2558,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   margin-bottom: 12px;
   border: 1px solid var(--stroke);
   border-radius: 14px;
-  background: #fff;
+  background: var(--surface);
 }
 .pv-q-title {
   display: flex;
@@ -2591,7 +2591,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   transition: background 0.16s var(--ease);
 }
 .pv-option:hover {
-  background: #f6faff;
+  background: var(--surface-2);
 }
 .pv-option input {
   width: 16px;
@@ -2654,7 +2654,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   text-align: center;
 }
 .pv-matrix thead th {
-  background: #f5f9ff;
+  background: var(--surface-2);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -2704,7 +2704,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   height: 28px;
   border: 1px solid var(--stroke);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -2722,7 +2722,7 @@ html[data-theme="dark"] .option-row.is-drag-over {
   height: 38px;
   border: 1px solid var(--stroke);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-2);
   font-size: 14px;
   cursor: pointer;

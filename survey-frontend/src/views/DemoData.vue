@@ -141,7 +141,7 @@ export default {
 .demo-info-box {
   padding: 16px;
   margin-bottom: 16px;
-  background: #fafbfc;
+  background: var(--surface-2);
   border: 1px solid var(--stroke);
   border-radius: var(--r-md);
 }

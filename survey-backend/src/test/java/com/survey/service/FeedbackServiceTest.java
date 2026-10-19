@@ -187,7 +187,7 @@ class FeedbackServiceTest {
 
         service.send(9, USER, "补充信息", "cid-5");
         verify(notificationService).send(eq(ADMIN), eq("新的反馈消息"), anyString(), eq("feedback"),
-                eq("/admin/feedback?id=9"));
+                eq("/admin/feedback?type=FEEDBACK&id=9"));
 
         reset(notificationService);
         when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_OPEN, null));
@@ -205,6 +205,44 @@ class FeedbackServiceTest {
 
         verify(feedbackMapper).close(9);
         verify(notificationService).send(eq(ADMIN), eq("工单已关闭"), anyString(), eq("feedback"),
-                eq("/admin/feedback?id=9"));
+                eq("/admin/feedback?type=FEEDBACK&id=9"));
+    }
+
+    @Test
+    @DisplayName("★ 客服工单：管理员回复的通知落在客服中心")
+    void serviceTicketReplyNotifiesSupportLink() {
+        Feedback ticket = feedback(9, FeedbackService.STATUS_OPEN, null);
+        ticket.setType(FeedbackService.TYPE_SERVICE);
+        when(feedbackMapper.findById(9)).thenReturn(ticket);
+        when(feedbackMapper.insertMessage(any())).thenAnswer(inv -> {
+            ((FeedbackMessage) inv.getArgument(0)).setId(46L);
+            return 1;
+        });
+        when(feedbackMapper.findDetailForAdmin(9)).thenReturn(view(9));
+        when(feedbackMapper.findMessages(eq(9), anyLong(), anyInt())).thenReturn(List.of());
+
+        service.adminReply(ADMIN, 9, "已协助处理", "cid-7");
+
+        verify(notificationService).send(eq(USER), eq("客服回复"), anyString(), eq("feedback"),
+                eq("/support?ticket=9"));
+    }
+
+    @Test
+    @DisplayName("★ 客服工单：用户追消息时管理员通知带 type=SERVICE")
+    void serviceTicketUserMessageNotifiesAdminWithType() {
+        Feedback ticket = feedback(9, FeedbackService.STATUS_OPEN, ADMIN);
+        ticket.setType(FeedbackService.TYPE_SERVICE);
+        when(feedbackMapper.findById(9)).thenReturn(ticket);
+        when(feedbackMapper.findMyViewById(9, USER)).thenReturn(view(9));
+        when(feedbackMapper.insertMessage(any())).thenAnswer(inv -> {
+            ((FeedbackMessage) inv.getArgument(0)).setId(57L);
+            return 1;
+        });
+        when(feedbackMapper.findMessages(eq(9), anyLong(), anyInt())).thenReturn(List.of());
+
+        service.send(9, USER, "再补充一件事", "cid-8");
+
+        verify(notificationService).send(eq(ADMIN), eq("新的反馈消息"), anyString(), eq("feedback"),
+                eq("/admin/feedback?type=SERVICE&id=9"));
     }
 }

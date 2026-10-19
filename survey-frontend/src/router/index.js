@@ -1,5 +1,5 @@
 /**
- * 路由表与全局守卫：27 条具名路由。
+ * 路由表与全局守卫：29 条具名路由。
  * ★ 守卫顺序固定：meta.public → 登录态 → meta.roles + meta.permission，顺序错了会放错人。
  */
 
@@ -162,11 +162,18 @@ const routes = [
 
       // ---- 普通用户专属 ----
       {
-        // 反馈中心：所有登录用户都能提交反馈 / 开客服工单
+        // 意见反馈：所有登录用户都能提交与查看自己的 FEEDBACK（客服在 /support）
         path: 'feedback',
         name: 'Feedback',
         component: () => import('../views/Feedback.vue'),
-        meta: { title: '反馈中心', roles: ['user', 'admin', 'subadmin'] }
+        meta: { title: '意见反馈', roles: ['user', 'admin', 'subadmin'] }
+      },
+      {
+        // 客服中心：帮助中心 + 在线客服，只列 SERVICE；与反馈共用同一套工单线程
+        path: 'support',
+        name: 'Support',
+        component: () => import('../views/Support.vue'),
+        meta: { title: '客服中心', roles: ['user', 'admin', 'subadmin'] }
       },
       {
         path: 'my/profile',

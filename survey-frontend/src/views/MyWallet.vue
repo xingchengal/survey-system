@@ -238,7 +238,7 @@ export default {
 }
 .wallet-card {
   padding: 18px 20px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-sm);
@@ -246,6 +246,13 @@ export default {
 .balance-card {
   background: linear-gradient(140deg, #eff6ff, #eef2ff);
   border-color: #dbeafe;
+}
+html[data-theme="dark"] .balance-card {
+  background: linear-gradient(140deg, #12233f, #1a2440);
+  border-color: #1e3a5f;
+}
+html[data-theme="dark"] .card-value {
+  color: #7fb4f6;
 }
 .card-label {
   font-size: 12px;

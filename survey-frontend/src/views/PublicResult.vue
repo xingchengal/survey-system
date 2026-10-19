@@ -247,7 +247,7 @@ export default {
   max-width: 760px;
   margin: 0 auto 18px;
   padding: 22px 24px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--stroke);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-sm);
@@ -312,6 +312,7 @@ export default {
 .hero-btn {
   border: none;
   border-radius: 10px;
+  /* hero 是深色渐变，按钮必须保持白底才能读 */
   background: #fff;
   color: #1d4ed8;
   font-weight: 600;
@@ -413,7 +414,7 @@ export default {
   flex: 1;
   height: 12px;
   border-radius: 999px;
-  background: #eef4fd;
+  background: var(--stroke);
   overflow: hidden;
 }
 .bar-track i {

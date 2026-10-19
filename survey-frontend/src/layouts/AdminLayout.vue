@@ -99,9 +99,9 @@
               <el-icon><Wallet /></el-icon>
               <span>我的钱包</span>
             </el-menu-item>
-            <el-menu-item index="/feedback">
-              <el-icon><ChatDotRound /></el-icon>
-              <span>反馈中心</span>
+            <el-menu-item index="/support">
+              <el-icon><Service /></el-icon>
+              <span>客服中心</span>
             </el-menu-item>
           </template>
         </el-menu>
@@ -152,17 +152,24 @@
 
         <div class="app-header-right">
           <!-- 主题切换（浅色 / 深色）：偏好存在 localStorage，刷新后由 main.js 恢复 -->
-          <button
-            type="button"
-            class="theme-toggle"
-            :title="isDark ? '切换到浅色' : '切换到深色'"
-            @click="handleToggleTheme"
+          <el-tooltip
+            :content="isDark ? '切换到浅色' : '切换到深色'"
+            placement="bottom"
+            :show-after="300"
           >
-            <el-icon :size="18"><Sunny v-if="isDark" /><Moon v-else /></el-icon>
-          </button>
+            <button
+              type="button"
+              class="theme-toggle"
+              :aria-label="isDark ? '切换到浅色' : '切换到深色'"
+              @click="handleToggleTheme"
+            >
+              <el-icon :size="18"><Sunny v-if="isDark" /><Moon v-else /></el-icon>
+            </button>
+          </el-tooltip>
 
           <!-- ==================== 通知铃铛 ==================== -->
           <el-popover
+            v-model:visible="notifyVisible"
             placement="bottom-end"
             :width="380"
             trigger="click"
@@ -170,14 +177,16 @@
           >
             <template #reference>
               <div class="bell-wrapper">
-                <el-badge :value="unreadCount > 0 ? unreadCount : ''" :hidden="unreadCount === 0" :max="99">
-                  <el-icon :size="20" class="bell-icon"><Bell /></el-icon>
-                </el-badge>
+                <el-tooltip content="通知中心" placement="bottom" :show-after="300">
+                  <el-badge :value="unreadCount > 0 ? unreadCount : ''" :hidden="unreadCount === 0" :max="99">
+                    <el-icon :size="20" class="bell-icon"><Bell /></el-icon>
+                  </el-badge>
+                </el-tooltip>
               </div>
             </template>
 
-            <div style="padding: 4px 0;">
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f2f5;">
+            <div class="notify-panel">
+              <div class="notify-head">
                 <span class="text-bold">消息中心</span>
                 <div>
                   <el-button type="primary" link size="small" @click="markAllRead" :disabled="unreadCount === 0">全部已读</el-button>
@@ -185,7 +194,7 @@
                 </div>
               </div>
 
-              <div style="max-height: 400px; overflow-y: auto;">
+              <div class="notify-list">
                 <div
                   v-for="n in notifications"
                   :key="n.id"
@@ -210,6 +219,19 @@
               </div>
             </div>
           </el-popover>
+
+          <!-- 意见反馈：常驻图标，入口与客服中心分开 -->
+          <el-tooltip content="意见反馈" placement="bottom" :show-after="300">
+            <button
+              type="button"
+              class="header-icon-btn"
+              :class="{ 'is-active': $route.path === '/feedback' }"
+              aria-label="意见反馈"
+              @click="goFeedback"
+            >
+              <el-icon :size="18"><EditPen /></el-icon>
+            </button>
+          </el-tooltip>
 
           <!-- ==================== 用户下拉 ==================== -->
           <el-dropdown @command="handleCommand">
@@ -253,11 +275,11 @@
       :close-on-click-modal="false"
     >
       <div v-if="currentAnnouncement">
-        <h3 style="margin: 0 0 12px 0; color: #303133;">{{ currentAnnouncement.title }}</h3>
-        <div style="color: #606266; line-height: 1.7; white-space: pre-wrap; padding: 12px; background: #fafbfc; border-radius: 6px;">
+        <h3 class="announcement-title">{{ currentAnnouncement.title }}</h3>
+        <div class="announcement-body">
           {{ currentAnnouncement.content }}
         </div>
-        <div style="color: #999; font-size: 12px; margin-top: 16px; text-align: right;">
+        <div class="announcement-time">
           发布于 {{ currentAnnouncement.createTime }}
         </div>
       </div>
@@ -272,7 +294,7 @@
 import {
   DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
   DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-  ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar
+  ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar, Service, EditPen
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 // ★ 统一走接口层：不要在本布局里自己 fetch —— http.js 统一带 Authorization、
@@ -291,7 +313,7 @@ export default {
     BrandLogo,
     DataBoard, Document, PieChart, ArrowDown, UserFilled, Delete,
     DocumentCopy, TopRight, User, SwitchButton, Memo, MagicStick, Bell,
-    ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar
+    ChatDotRound, BellFilled, InfoFilled, Close, Wallet, Avatar, Service, EditPen
   },
   data() {
     return {
@@ -308,6 +330,8 @@ export default {
       notifications: [],
       unreadCount: 0,
       notifyTimer: null,
+      /** 消息中心浮层：点「意见反馈」后手动收起 */
+      notifyVisible: false,
       // 反馈管理菜单红点（60s 轮询）
       feedbackUnread: 0,
       feedbackTimer: null
@@ -515,8 +539,15 @@ export default {
         }
       }
       if (n.link) {
+        this.notifyVisible = false
         this.$router.push(n.link)
       }
+    },
+
+    /** 顶栏图标 → 意见反馈（反馈是意见箱，不占侧栏菜单） */
+    goFeedback() {
+      this.notifyVisible = false
+      if (this.$route.path !== '/feedback') this.$router.push('/feedback')
     },
 
     async markAllRead() {
@@ -944,7 +975,7 @@ export default {
 }
 
 .notify-item:hover {
-  background: #f5f7fa;
+  background: var(--surface-2);
 }
 
 .notify-item:hover .notify-delete {
@@ -952,7 +983,7 @@ export default {
 }
 
 .notify-unread {
-  background: #f0f7ff;
+  background: var(--sky-50);
 }
 
 .notify-unread .notify-title {
@@ -982,13 +1013,13 @@ export default {
 
 .notify-title {
   font-size: 13px;
-  color: #303133;
+  color: var(--ink);
   margin-bottom: 2px;
 }
 
 .notify-text {
   font-size: 12px;
-  color: #606266;
+  color: var(--ink-2);
   line-height: 1.4;
   margin-bottom: 4px;
   word-break: break-all;
@@ -996,7 +1027,7 @@ export default {
 
 .notify-time {
   font-size: 11px;
-  color: #c0c4cc;
+  color: var(--ink-3);
 }
 
 .notify-delete {
@@ -1004,12 +1035,82 @@ export default {
   right: 8px;
   top: 8px;
   opacity: 0;
-  color: #909399;
+  color: var(--ink-3);
   transition: opacity 0.2s;
 }
 
 .notify-delete:hover {
-  color: #f56c6c;
+  color: var(--app-danger);
+}
+
+/* 顶栏图标按钮（意见反馈等常驻入口） */
+.header-icon-btn {
+  width: 38px;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.18s var(--ease),
+    color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+.header-icon-btn:hover,
+.header-icon-btn.is-active {
+  background: var(--sky-50);
+  color: var(--sky-600);
+}
+.header-icon-btn:hover {
+  transform: translateY(-1px);
+}
+
+/* 消息中心浮层 */
+.notify-panel {
+  padding: 4px 0;
+}
+.notify-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--stroke);
+}
+.notify-list {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* 公告弹窗 */
+.announcement-title {
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.announcement-body {
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.announcement-time {
+  margin-top: 16px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* 深色：浅蓝 hover / 未读底在深色下会发亮，统一压成深色块 */
+html[data-theme="dark"] .header-icon-btn:hover,
+html[data-theme="dark"] .header-icon-btn.is-active,
+html[data-theme="dark"] .notify-item:hover,
+html[data-theme="dark"] .notify-unread {
+  background: #16263f;
 }
 
 /* ==================== 响应式 ====================
