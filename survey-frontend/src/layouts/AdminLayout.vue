@@ -388,6 +388,12 @@ export default {
       this.loadFeedbackUnread()
       this.feedbackTimer = setInterval(this.loadFeedbackUnread, 60000)
     }
+    // 个人中心「待办」点击未读通知：由布局统一打开消息中心，避免页面去操作别人的 DOM
+    this.notifyOpenHandler = () => {
+      this.notifyVisible = true
+      this.loadNotifications()
+    }
+    window.addEventListener('dsh:open-notify', this.notifyOpenHandler)
     // 首次进入也归零：刷新/热更新可能恢复上一次的滚动位置
     this.$nextTick(this.resetMainScroll)
   },
@@ -395,6 +401,7 @@ export default {
     // 组件卸载时清掉 30 秒轮询未读数的定时器，避免离开后台后还在请求
     if (this.notifyTimer) clearInterval(this.notifyTimer)
     if (this.feedbackTimer) clearInterval(this.feedbackTimer)
+    window.removeEventListener('dsh:open-notify', this.notifyOpenHandler)
   },
   methods: {
     /** 菜单/按钮显隐用的权限判断（后端才是防线；超管天然全有） */

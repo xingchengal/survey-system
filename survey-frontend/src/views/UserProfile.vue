@@ -58,7 +58,20 @@
           </div>
           <div class="info-row">
             <span class="info-label">注册时间</span>
-            <span class="info-value">{{ user.createdTime }}</span>
+            <span class="info-value" :title="user.createdTime">{{ formatDateTime(user.createdTime) }}</span>
+          </div>
+
+          <!-- 使用足迹：只做展示，不做成就/积分 -->
+          <div class="footprint">
+            <div class="footprint-item">
+              <b>{{ joinedDays }}</b><span>加入天数</span>
+            </div>
+            <div class="footprint-item">
+              <b>{{ myStats.total }}</b><span>创建问卷</span>
+            </div>
+            <div class="footprint-item">
+              <b>{{ myStats.responses }}</b><span>收到答卷</span>
+            </div>
           </div>
 
           <!-- 账号安全信息（取自系统登录日志）：只展示最近 10 条登录记录，第一行就是本次登录。
@@ -69,18 +82,63 @@
             <el-button link type="primary" size="small" :loading="loginLogLoading" @click="loadLoginLogs">刷新</el-button>
           </div>
           <div v-if="!loginLogs.length" class="login-log-empty">暂无登录记录</div>
-          <div v-for="(log, idx) in loginLogs" :key="log.id" class="login-log-row">
-            <div class="login-log-time">
-              {{ log.createdTime }}
+          <div
+            v-for="(log, idx) in loginLogs"
+            :key="log.id"
+            class="login-log-row"
+            :title="log.createTime || ''"
+          >
+            <span class="login-log-time">
+              {{ relativeTime(log.createTime) }}
               <el-tag v-if="idx === 0" size="small" type="success" effect="plain">本次</el-tag>
-            </div>
-            <div class="login-log-ip">IP：{{ log.ip || '未知' }}</div>
+            </span>
+            <span class="login-log-ip">{{ formatIp(log.ip) }}</span>
           </div>
         </el-card>
       </el-col>
 
       <!-- 右侧：用户内容 -->
       <el-col :span="16" :xs="24" :sm="24" :md="16">
+        <!-- 我的待办：回答"下一步做什么"，点一下直接到对应页面 -->
+        <el-card class="mb-20 todo-card">
+          <template #header>
+            <div class="flex-between">
+              <span class="text-bold">✅ 我的待办</span>
+              <el-button link type="primary" @click="startTour">新手引导</el-button>
+            </div>
+          </template>
+          <div class="todo-grid">
+            <div class="todo-item" @click="$router.push('/my/surveys')">
+              <div class="todo-num">{{ todo.draft }}</div>
+              <div class="todo-text">
+                <div class="todo-label">草稿问卷</div>
+                <div class="todo-hint">继续编辑</div>
+              </div>
+            </div>
+            <div class="todo-item" @click="openNotify">
+              <div class="todo-num">{{ todo.unread }}</div>
+              <div class="todo-text">
+                <div class="todo-label">未读通知</div>
+                <div class="todo-hint">打开消息中心</div>
+              </div>
+            </div>
+            <div class="todo-item" @click="openNotify">
+              <div class="todo-num">{{ todo.feedback }}</div>
+              <div class="todo-text">
+                <div class="todo-label">反馈回复</div>
+                <div class="todo-hint">管理员回复</div>
+              </div>
+            </div>
+            <div class="todo-item" @click="$router.push('/my/answers')">
+              <div class="todo-num">{{ todo.answers }}</div>
+              <div class="todo-text">
+                <div class="todo-label">我答过的</div>
+                <div class="todo-hint">查看答卷</div>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
         <!-- 我的数据 -->
         <el-card class="mb-20">
           <template #header>
@@ -119,7 +177,7 @@
         </el-card>
 
         <!-- 常用功能 -->
-        <el-card class="mb-20">
+        <el-card class="mb-20 quick-actions">
           <template #header>
             <span class="text-bold">⚡ 常用功能</span>
           </template>
@@ -259,6 +317,11 @@
         <el-button type="danger" :loading="deletingAccount" @click="confirmDeleteAccount">确认注销</el-button>
       </template>
     </el-dialog>
+
+    <guide-tour
+      v-model="tourVisible"
+      :steps="tourSteps"
+    />
   </div>
 </template>
 
@@ -271,6 +334,8 @@ import api from '../api'
 import { getUser, setUser, clearAuth } from '../utils/auth'
 // 自研头像裁剪组件（零新增依赖，见组件内注释）
 import AvatarCropper from '../components/AvatarCropper.vue'
+// 新手引导浮层（localStorage 记录完成状态，可重播）
+import GuideTour from '../components/GuideTour.vue'
 
 /**
  * 联系方式校验：与后端 dto/ContactRequest 的 @Pattern 逐字一致，改这里必须同批核后端。
@@ -281,7 +346,7 @@ const EMAIL_RE = /^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/
 
 // 图标已在 main.js 全局注册，不再重复注册（Camera 是 HTML 保留标签名）
 export default {
-  components: { AvatarCropper },
+  components: { AvatarCropper, GuideTour },
   data() {
     const validatePhone = (rule, value, callback) => {
       if (!value) return callback()
@@ -344,13 +409,32 @@ export default {
         password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
       },
       deletingAccount: false,
-      myStats: { total: 0, published: 0, draft: 0, responses: 0 }
+      myStats: { total: 0, published: 0, draft: 0, responses: 0 },
+      todo: { draft: 0, unread: 0, feedback: 0, answers: 0 },
+      tourVisible: false
     }
   },
   computed: {
     avatarText() {
       const name = this.user.nickname || this.user.username || '用'
       return name.charAt(0).toUpperCase()
+    },
+    /** 注册天数，最少按 1 天算：当天注册显示 0 天不好看 */
+    joinedDays() {
+      const ts = new Date(String(this.user.createdTime || '').replace(' ', 'T')).getTime()
+      if (!ts) return 0
+      return Math.max(1, Math.floor((Date.now() - ts) / 86400000))
+    },
+    /** 步骤只依赖布局常驻元素与本页卡片，跨页引导不做 */
+    tourSteps() {
+      return [
+        { target: '.app-menu', title: '功能都在左侧', text: '问卷、答卷、钱包、客服中心都在左侧菜单，当前所在页会高亮。' },
+        { target: '.bell-wrapper', title: '通知中心', text: '答卷回收、公告、反馈回复都会在这里提醒，点铃铛查看。' },
+        { target: '.header-icon-btn', title: '意见反馈', text: '对功能有意见或想投诉，点这里一次性提交，管理员会逐条查看。' },
+        { target: '.profile-card', title: '你的资料卡', text: '头像、昵称、账号、最近登录都在这里；改密码与注销在下方页面。' },
+        { target: '.todo-card', title: '先看待办', text: '这里汇总草稿、未读通知和待查看的回复，点一下直接去处理。' },
+        { target: '.quick-actions', title: '常用入口', text: '最常用的几个页面放在这里，少点两下。' }
+      ]
     }
   },
   mounted() {
@@ -370,6 +454,7 @@ export default {
         this.contactForm.email = this.user.email || ''
         this.loadMyStats()
         this.loadLoginLogs()
+        this.loadTodo()
       } catch {
         // 保留 catch 只为挡住 rejection（提示已由接口层弹出），后面的表单初始化不再执行
       } finally {
@@ -380,6 +465,7 @@ export default {
     async loadMyStats() {
       try {
         this.myStats = await api.survey.myStatistics()
+        this.todo.draft = this.myStats.draft || 0
       } catch (e) {
         // 统计只是附带信息，失败不影响主卡片；提示已由接口层弹出，这里仅留个控制台线索
         console.error(e)
@@ -396,6 +482,53 @@ export default {
       } finally {
         this.loginLogLoading = false
       }
+    },
+
+    /** 注册时间：后端可能给 ISO（带 T）或 `yyyy-MM-dd HH:mm:ss`，统一到分钟 */
+    formatDateTime(text) {
+      const s = String(text || '').replace('T', ' ')
+      return s ? s.slice(0, 16) : '—'
+    },
+
+    /** 登录记录用相对时间；超过一天退回日期，完整时间在 title 上 */
+    relativeTime(text) {
+      const ts = new Date(String(text || '').replace(' ', 'T')).getTime()
+      if (!ts) return '—'
+      const diff = Date.now() - ts
+      if (diff < 60000) return '刚刚'
+      if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`
+      if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`
+      return this.formatDateTime(text)
+    },
+
+    /** IPv6 回环显示为「本机」，IPv4-mapped 去掉前缀 */
+    formatIp(ip) {
+      if (!ip) return '未知'
+      if (ip === '::1' || ip === '0:0:0:0:0:0:0:1') return '本机'
+      if (ip.startsWith('::ffff:')) return ip.slice(7)
+      return ip
+    },
+
+    /** 待办数字：三项各自失败互不影响，提示由接口层负责 */
+    loadTodo() {
+      api.notification.unread()
+        .then(d => { this.todo.unread = d.count || 0 })
+        .catch(() => {})
+      api.feedback.unread()
+        .then(d => { this.todo.feedback = d.userUnread || 0 })
+        .catch(() => {})
+      api.answer.my(1, 1)
+        .then(d => { this.todo.answers = d.total || 0 })
+        .catch(() => {})
+    },
+
+    /** 待办里的「未读通知 / 反馈回复」都落到顶栏消息中心 */
+    openNotify() {
+      window.dispatchEvent(new CustomEvent('dsh:open-notify'))
+    },
+
+    startTour() {
+      this.tourVisible = true
     },
 
     triggerUpload() { this.$refs.fileInput.click() },
@@ -648,10 +781,17 @@ html[data-theme="dark"] .danger-zone {
 /* ---- 最近登录记录 ---- */
 .login-log-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .login-log-empty { font-size: 13px; color: var(--ink-3); }
-.login-log-row { padding: 7px 0; border-bottom: 1px dashed var(--stroke); }
+.login-log-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--stroke);
+}
 .login-log-row:last-child { border-bottom: none; }
 .login-log-time { font-size: 13px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
-.login-log-ip { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.login-log-ip { font-size: 12px; color: var(--ink-3); text-align: right; word-break: break-all; }
 
 /* ---- 右上数据小卡 ---- */
 .mini-card {
@@ -694,4 +834,80 @@ html[data-theme="dark"] .danger-zone {
 .qa-red:hover { border-color: #fecaca; }
 .qa-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 8px; }
 .qa-desc { font-size: 11px; color: var(--ink-3); margin-top: 2px; }
+/* 我的待办 */
+.todo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    border-color 0.18s var(--ease),
+    transform 0.18s var(--ease);
+}
+.todo-item:hover {
+  border-color: var(--sky-300);
+  transform: translateY(-1px);
+}
+.todo-num {
+  min-width: 34px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--sky-600);
+}
+.todo-text {
+  min-width: 0;
+}
+.todo-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.todo-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* 使用足迹 */
+.footprint {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--stroke);
+}
+.footprint-item {
+  flex: 1;
+  text-align: center;
+}
+.footprint-item b {
+  display: block;
+  font-size: 16px;
+  color: var(--ink);
+}
+.footprint-item span {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+@media (max-width: 1200px) {
+  .todo-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .todo-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
