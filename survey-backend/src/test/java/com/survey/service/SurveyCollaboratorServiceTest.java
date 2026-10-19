@@ -1,6 +1,8 @@
 package com.survey.service;
 
 import com.survey.common.BizException;
+import com.survey.common.CollaboratorStatus;
+import com.survey.dto.InvitationView;
 import com.survey.entity.Survey;
 import com.survey.entity.User;
 import com.survey.mapper.SurveyCollaboratorMapper;
@@ -20,15 +22,16 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * 协作者管理（邀请 / 改角色 / 移除）的业务校验。
+ * 协作者管理（邀请 / 接受 / 拒绝 / 撤销 / 改角色 / 移除）的业务校验。
  *
  * ── 这里钉的是"能不能写"，不是"能不能看" ─────────────────
  *   "谁能管理协作者"（作者/管理员）在 Controller 用 OwnershipGuard 判；
- *   本类只管**业务前置条件**：角色合法、被邀请人存在、不能邀请自己/作者、不能重复。
- *   ★ 这些规则如果漏一条，后果都是"脏数据"或"权限扩散"，而不是编译错误 —— 必须测。
+ *   本类只管**业务前置条件**：角色合法、被邀请人存在、不能邀请自己/作者、状态机、
+ *   名额费只在接受时扣。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -40,6 +43,8 @@ class SurveyCollaboratorServiceTest {
     private UserMapper userMapper;
     @Mock
     private NotificationService notificationService;
+    @Mock
+    private WalletService walletService;
 
     @InjectMocks
     private SurveyCollaboratorService service;
@@ -48,11 +53,13 @@ class SurveyCollaboratorServiceTest {
     private static final Integer OWNER = 466;
     private static final Integer OPERATOR = 466;
     private static final Integer TARGET = 500;
+    private static final Integer INVITATION_ID = 9001;
 
     private static Survey survey() {
         Survey s = new Survey();
         s.setId(SURVEY_ID);
         s.setUserId(OWNER);
+        s.setTitle("问卷A");
         return s;
     }
 
@@ -63,19 +70,33 @@ class SurveyCollaboratorServiceTest {
         return u;
     }
 
+    private static InvitationView invitation(String status) {
+        InvitationView v = new InvitationView();
+        v.setId(INVITATION_ID);
+        v.setUserId(TARGET);
+        v.setSurveyId(SURVEY_ID);
+        v.setSurveyTitle("问卷A");
+        v.setOwnerId(OWNER);
+        v.setCollaboratorRole("editor");
+        v.setStatus(status);
+        return v;
+    }
+
     private static final String TARGET_NAME = "u500";
 
     @Test
-    @DisplayName("邀请成功：写入 survey_id / user_id / role / created_by")
-    void inviteWritesRow() {
+    @DisplayName("邀请成功：写入 PENDING 行并通知；★ 名额费留到接受时再扣")
+    void inviteWritesPendingRowWithoutCharging() {
         when(userMapper.findByUsername(TARGET_NAME)).thenReturn(user(TARGET));
-        when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn(null);
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET)).thenReturn(null);
 
         service.invite(survey(), TARGET_NAME, "editor", OPERATOR);
 
         verify(collaboratorMapper).insert(SURVEY_ID, TARGET, "editor", OPERATOR);
         // ★ 邀请必须通知到本人（否则对方根本不知道自己被拉进来了）
         verify(notificationService).send(eq(TARGET), eq("协作邀请"), anyString(), eq("collaborator"), eq("/my/surveys"));
+        // ★ 待接受不占名额、不扣费；拒绝/撤销因此不需要退款
+        verify(walletService, never()).chargeCollaborator(anyInt(), anyInt(), anyInt());
     }
 
     @Test
@@ -113,9 +134,11 @@ class SurveyCollaboratorServiceTest {
     }
 
     @Test
-    @DisplayName("★ 重复邀请 → 400（提示改用改角色），不覆盖原角色")
-    void duplicateInviteIsRejected() {
+    @DisplayName("★ 已生效的重复邀请 → 400（提示改用改角色），不覆盖原角色")
+    void duplicateAcceptedInviteIsRejected() {
         when(userMapper.findByUsername(TARGET_NAME)).thenReturn(user(TARGET));
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.ACCEPTED);
         when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn("viewer");
 
         BizException ex = assertThrows(BizException.class,
@@ -125,7 +148,112 @@ class SurveyCollaboratorServiceTest {
     }
 
     @Test
-    @DisplayName("改角色：必须是已存在的协作者；否则 400 且不更新")
+    @DisplayName("★ 待接受的重复邀请 → 400（不能既发邀请又改角色）")
+    void duplicatePendingInviteIsRejected() {
+        when(userMapper.findByUsername(TARGET_NAME)).thenReturn(user(TARGET));
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.PENDING);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> service.invite(survey(), TARGET_NAME, "editor", OPERATOR));
+        assertTrue(ex.getMessage().contains("等待对方接受"), "实际：" + ex.getMessage());
+        verify(collaboratorMapper, never()).insert(anyInt(), anyInt(), anyString(), anyInt());
+        verify(collaboratorMapper, never()).resetToPending(anyInt(), anyInt(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("★ 被拒绝/已撤销后再次邀请：同一行重置 PENDING，不新增行")
+    void reinviteRejectedPersonResetsSameRow() {
+        when(userMapper.findByUsername(TARGET_NAME)).thenReturn(user(TARGET));
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.REJECTED);
+        when(collaboratorMapper.resetToPending(SURVEY_ID, TARGET, "editor", OPERATOR)).thenReturn(1);
+
+        service.invite(survey(), TARGET_NAME, "editor", OPERATOR);
+
+        verify(collaboratorMapper).resetToPending(SURVEY_ID, TARGET, "editor", OPERATOR);
+        verify(collaboratorMapper, never()).insert(anyInt(), anyInt(), anyString(), anyInt());
+        verify(notificationService).send(eq(TARGET), eq("协作邀请"), anyString(), eq("collaborator"), eq("/my/surveys"));
+    }
+
+    @Test
+    @DisplayName("★ 接受邀请：PENDING → ACCEPTED；免费名额内不扣费，并通知作者")
+    void acceptMarksAcceptedWithoutChargeWhenFree() {
+        when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(invitation(CollaboratorStatus.PENDING));
+        when(collaboratorMapper.countBySurvey(SURVEY_ID)).thenReturn(0);
+        when(collaboratorMapper.updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
+                CollaboratorStatus.ACCEPTED)).thenReturn(1);
+
+        service.accept(INVITATION_ID, TARGET);
+
+        verify(collaboratorMapper).updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
+                CollaboratorStatus.ACCEPTED);
+        verify(walletService, never()).chargeCollaborator(anyInt(), anyInt(), anyInt());
+        verify(notificationService).send(eq(OWNER), eq("协作者已接受"), anyString(), eq("collaborator"), eq("/my/surveys"));
+    }
+
+    @Test
+    @DisplayName("★ 接受邀请超过免费名额：在这一步扣作者额度")
+    void acceptChargesWhenOverFreeQuota() {
+        when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(invitation(CollaboratorStatus.PENDING));
+        when(collaboratorMapper.countBySurvey(SURVEY_ID)).thenReturn(2);
+        when(collaboratorMapper.updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
+                CollaboratorStatus.ACCEPTED)).thenReturn(1);
+
+        service.accept(INVITATION_ID, TARGET);
+
+        verify(walletService).chargeCollaborator(SURVEY_ID, OWNER, TARGET);
+    }
+
+    @Test
+    @DisplayName("★ 接受邀请：不是自己的邀请 / 已处理 → 400，且不改状态")
+    void acceptRequiresOwnPendingInvitation() {
+        InvitationView other = invitation(CollaboratorStatus.PENDING);
+        other.setUserId(999);
+        when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(other);
+        assertEquals("邀请不存在或已失效", assertThrows(BizException.class,
+                () -> service.accept(INVITATION_ID, TARGET)).getMessage());
+
+        when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(invitation(CollaboratorStatus.ACCEPTED));
+        assertEquals("邀请已处理或已失效", assertThrows(BizException.class,
+                () -> service.accept(INVITATION_ID, TARGET)).getMessage());
+
+        verify(collaboratorMapper, never()).updateStatus(anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("★ 拒绝邀请：PENDING → REJECTED，通知作者；不扣费")
+    void rejectMarksRejected() {
+        when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(invitation(CollaboratorStatus.PENDING));
+        when(collaboratorMapper.updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
+                CollaboratorStatus.REJECTED)).thenReturn(1);
+
+        service.reject(INVITATION_ID, TARGET);
+
+        verify(collaboratorMapper).updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
+                CollaboratorStatus.REJECTED);
+        verify(notificationService).send(eq(OWNER), eq("协作邀请被拒绝"), anyString(), eq("collaborator"), eq("/my/surveys"));
+        verify(walletService, never()).chargeCollaborator(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    @DisplayName("★ 作者撤销：PENDING → REVOKED 并通知被邀请人；非 PENDING → 400")
+    void revokeOnlyWorksOnPending() {
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.PENDING);
+        when(collaboratorMapper.revokePending(SURVEY_ID, TARGET)).thenReturn(1);
+
+        service.revoke(survey(), TARGET);
+        verify(notificationService).send(eq(TARGET), eq("协作邀请已撤销"), anyString(), eq("collaborator"), eq("/my/surveys"));
+
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.ACCEPTED);
+        assertEquals("该用户没有待接受的邀请", assertThrows(BizException.class,
+                () -> service.revoke(survey(), TARGET)).getMessage());
+    }
+
+    @Test
+    @DisplayName("改角色：必须是已生效的协作者；否则 400 且不更新")
     void changeRoleRequiresExistingCollaborator() {
         when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn(null);
         assertEquals("该用户不是这份问卷的协作者", assertThrows(BizException.class,
@@ -139,12 +267,19 @@ class SurveyCollaboratorServiceTest {
     }
 
     @Test
-    @DisplayName("移除：必须是已存在的协作者；否则 400 且不删除")
-    void removeRequiresExistingCollaborator() {
+    @DisplayName("移除：待接受的邀请提示撤销；已生效的才删除")
+    void removeRequiresAcceptedCollaborator() {
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.PENDING);
+        assertTrue(assertThrows(BizException.class,
+                () -> service.remove(survey(), TARGET)).getMessage().contains("撤销邀请"));
+        verify(collaboratorMapper, never()).delete(anyInt(), anyInt());
+
+        when(collaboratorMapper.findCollaboratorStatus(SURVEY_ID, TARGET))
+                .thenReturn(CollaboratorStatus.ACCEPTED);
         when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn(null);
         assertEquals("该用户不是这份问卷的协作者", assertThrows(BizException.class,
                 () -> service.remove(survey(), TARGET)).getMessage());
-        verify(collaboratorMapper, never()).delete(anyInt(), anyInt());
 
         when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn("editor");
         service.remove(survey(), TARGET);
@@ -172,6 +307,17 @@ class SurveyCollaboratorServiceTest {
     void listDelegatesToMapper() {
         service.list(survey());
         verify(collaboratorMapper).listBySurveyId(SURVEY_ID);
+    }
+
+    @Test
+    @DisplayName("我的邀请只按当前用户查")
+    void myInvitationsQueryOnlyCurrentUser() {
+        when(collaboratorMapper.findPendingInvitationsByUserId(TARGET)).thenReturn(List.of(invitation(CollaboratorStatus.PENDING)));
+
+        List<InvitationView> list = service.listMyInvitations(TARGET);
+
+        assertEquals(1, list.size());
+        verify(collaboratorMapper).findPendingInvitationsByUserId(TARGET);
     }
 
     @Test

@@ -14,6 +14,8 @@ public class CollaboratorView {
     private String nickname;
     /** viewer / editor / analyst（原始值，前端按它显示中文） */
     private String collaboratorRole;
+    /** PENDING=待接受 / ACCEPTED=已生效（列表只列这两种） */
+    private String status;
     /** 邀请人 id */
     private Integer createdBy;
     private LocalDateTime createdTime;
@@ -29,6 +31,9 @@ public class CollaboratorView {
 
     public String getCollaboratorRole() { return collaboratorRole; }
     public void setCollaboratorRole(String collaboratorRole) { this.collaboratorRole = collaboratorRole; }
+
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
 
     public Integer getCreatedBy() { return createdBy; }
     public void setCreatedBy(Integer createdBy) { this.createdBy = createdBy; }

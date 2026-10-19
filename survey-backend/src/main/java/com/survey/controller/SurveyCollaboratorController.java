@@ -5,6 +5,7 @@ import com.survey.common.BizException;
 import com.survey.common.CollaboratorRole;
 import com.survey.common.OwnershipGuard;
 import com.survey.dto.CollaboratorView;
+import com.survey.dto.InvitationView;
 import com.survey.entity.Survey;
 import com.survey.service.SurveyAccessService;
 import com.survey.service.SurveyCollaboratorService;
@@ -67,7 +68,7 @@ public class SurveyCollaboratorController {
             throw new BizException("请输入要邀请的用户名");
         }
         collaboratorService.invite(survey, username, collaboratorRole, userId);
-        return "已邀请 " + username + " 成为 " + collaboratorRole + " 协作者";
+        return "已发出邀请，等待对方接受";
     }
 
     @Operation(summary = "修改协作者角色（作者/管理员）")
@@ -94,6 +95,43 @@ public class SurveyCollaboratorController {
         Survey survey = requireManageable(surveyId, userId, role);
         collaboratorService.remove(survey, targetUserId);
         return "已移除该协作者";
+    }
+
+    /** 撤销未接受的邀请：只是把 PENDING 改成 REVOKED，撤销后对方再点接受一律 400。 */
+    @Operation(summary = "撤销未接受的邀请（作者/管理员）")
+    @PostMapping("/api/survey/{surveyId}/collaborators/{targetUserId}/revoke")
+    public String revoke(@PathVariable Integer surveyId,
+                         @PathVariable Integer targetUserId,
+                         @RequestHeader("X-User-Id") Integer userId,
+                         @RequestHeader("X-User-Role") String role) {
+        Survey survey = requireManageable(surveyId, userId, role);
+        collaboratorService.revoke(survey, targetUserId);
+        return "已撤销邀请";
+    }
+
+    /** 我的待接受邀请：只按当前用户，不接受任何 userId 参数。 */
+    @Operation(summary = "我的待接受协作邀请")
+    @GetMapping("/api/collaborator/invitations")
+    public List<InvitationView> myInvitations(@RequestHeader("X-User-Id") Integer userId) {
+        return collaboratorService.listMyInvitations(userId);
+    }
+
+    /** 接受邀请：归属按 invitation.user_id 校验，接口没有可传的 userId。 */
+    @Operation(summary = "接受协作邀请")
+    @PostMapping("/api/collaborator/invitations/{id}/accept")
+    public String accept(@PathVariable Integer id,
+                         @RequestHeader("X-User-Id") Integer userId) {
+        collaboratorService.accept(id, userId);
+        return "已接受邀请";
+    }
+
+    /** 拒绝邀请：同上，只作用于自己的邀请。 */
+    @Operation(summary = "拒绝协作邀请")
+    @PostMapping("/api/collaborator/invitations/{id}/reject")
+    public String reject(@PathVariable Integer id,
+                         @RequestHeader("X-User-Id") Integer userId) {
+        collaboratorService.reject(id, userId);
+        return "已拒绝邀请";
     }
 
     /** 退出协作（本人）：只作用于"我"，URL 里没有 userId，避免"帮别人退出"的越权口子。 */

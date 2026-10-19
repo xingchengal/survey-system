@@ -2,8 +2,10 @@ package com.survey.service;
 
 import com.survey.common.BizException;
 import com.survey.common.CollaboratorRole;
+import com.survey.common.CollaboratorStatus;
 import com.survey.common.WalletFeature;
 import com.survey.dto.CollaboratorView;
+import com.survey.dto.InvitationView;
 import com.survey.entity.Survey;
 import com.survey.entity.User;
 import com.survey.mapper.SurveyCollaboratorMapper;
@@ -48,7 +50,8 @@ public class SurveyCollaboratorService {
     }
 
     /**
-     * 邀请协作者。
+     * 邀请协作者：只落一行 PENDING 并通知对方，**不扣名额费**；接受时才扣（待接受不占名额）。
+     * 被拒绝/已撤销的人再次邀请时把同一行重置回 PENDING，不新增行（唯一键仍是一人一份一行）。
      *
      * @param survey         已通过归属校验的问卷
      * @param targetUsername 被邀请人的用户名
@@ -75,21 +78,92 @@ public class SurveyCollaboratorService {
         if (ownerId != null && ownerId.equals(targetUserId)) {
             throw new BizException("作者本人拥有全部权限，不需要被邀请为协作者");
         }
-        String existing = collaboratorMapper.findCollaboratorRole(survey.getId(), targetUserId);
-        if (existing != null) {
-            throw new BizException("该用户已经是协作者（当前角色：" + existing + "），请直接改角色");
+        String existing = collaboratorMapper.findCollaboratorStatus(survey.getId(), targetUserId);
+        if (CollaboratorStatus.ACCEPTED.equals(existing)) {
+            String role = collaboratorMapper.findCollaboratorRole(survey.getId(), targetUserId);
+            throw new BizException("该用户已经是协作者（当前角色：" + role + "），请直接改角色");
         }
-        // 名额收费：前 FREE_COLLABORATORS 名免费，之后每名 1 点（同一人只扣一次）。
-        //   余额不足会在这里 400，邀请不落库（与扣费同事务）。
-        int currentCount = collaboratorMapper.countBySurvey(survey.getId());
-        if (currentCount >= WalletFeature.FREE_COLLABORATORS) {
-            walletService.chargeCollaborator(survey.getId(), survey.getUserId(), targetUserId);
+        if (CollaboratorStatus.PENDING.equals(existing)) {
+            throw new BizException("已经邀请过该用户，等待对方接受");
         }
-        collaboratorMapper.insert(survey.getId(), targetUserId, roleCode, operatorUserId);
-        // 通知被邀请人：不通知的话对方根本不知道自己被拉进来了
+        if (existing == null) {
+            collaboratorMapper.insert(survey.getId(), targetUserId, roleCode, operatorUserId);
+        } else if (collaboratorMapper.resetToPending(survey.getId(), targetUserId, roleCode, operatorUserId) <= 0) {
+            // 并发下对方刚好接受了这条邀请：不覆盖已生效的角色
+            throw new BizException("邀请状态已变化，请刷新后重试");
+        }
         notificationService.send(targetUserId, "协作邀请",
-                "邀请你协作问卷《" + survey.getTitle() + "》，角色：" + roleCode,
+                "邀请你协作问卷《" + survey.getTitle() + "》，角色：" + roleCode + "。请到「我的问卷」页接受或拒绝。",
                 "collaborator", "/my/surveys");
+    }
+
+    /**
+     * 接受邀请：PENDING → ACCEPTED；名额费在这一步扣（只有生效的协作者占名额，拒绝/撤销无需退款）。
+     * 名额判断与扣费必须同事务，余额不足时邀请保持 PENDING，不会出现"钱扣了没生效"。
+     */
+    @Transactional
+    public void accept(Integer invitationId, Integer userId) {
+        InvitationView invitation = requirePendingInvitation(invitationId, userId);
+        int accepted = collaboratorMapper.countBySurvey(invitation.getSurveyId());
+        if (accepted >= WalletFeature.FREE_COLLABORATORS) {
+            walletService.chargeCollaborator(invitation.getSurveyId(), invitation.getOwnerId(), userId);
+        }
+        if (collaboratorMapper.updateStatus(invitationId, CollaboratorStatus.PENDING,
+                CollaboratorStatus.ACCEPTED) <= 0) {
+            throw new BizException("邀请已处理或已失效");
+        }
+        notificationService.send(invitation.getOwnerId(), "协作者已接受",
+                "对方已接受《" + invitation.getSurveyTitle() + "》的协作邀请，角色："
+                        + invitation.getCollaboratorRole(),
+                "collaborator", "/my/surveys");
+    }
+
+    /** 拒绝邀请：PENDING → REJECTED；不占名额、不扣费，作者下次还能再邀请。 */
+    public void reject(Integer invitationId, Integer userId) {
+        InvitationView invitation = requirePendingInvitation(invitationId, userId);
+        if (collaboratorMapper.updateStatus(invitationId, CollaboratorStatus.PENDING,
+                CollaboratorStatus.REJECTED) <= 0) {
+            throw new BizException("邀请已处理或已失效");
+        }
+        notificationService.send(invitation.getOwnerId(), "协作邀请被拒绝",
+                "对方拒绝了《" + invitation.getSurveyTitle() + "》的协作邀请",
+                "collaborator", "/my/surveys");
+    }
+
+    /** 作者撤销未接受的邀请：PENDING → REVOKED，撤销后接受接口一律 400。 */
+    public void revoke(Survey survey, Integer targetUserId) {
+        if (targetUserId == null) {
+            throw new BizException("请选择要撤销的邀请");
+        }
+        String status = collaboratorMapper.findCollaboratorStatus(survey.getId(), targetUserId);
+        if (!CollaboratorStatus.PENDING.equals(status)) {
+            throw new BizException("该用户没有待接受的邀请");
+        }
+        if (collaboratorMapper.revokePending(survey.getId(), targetUserId) <= 0) {
+            throw new BizException("邀请已处理或已失效");
+        }
+        notificationService.send(targetUserId, "协作邀请已撤销",
+                "《" + survey.getTitle() + "》的协作邀请已被作者撤销", "collaborator", "/my/surveys");
+    }
+
+    /** 我的待接受邀请（只按当前用户）。 */
+    public List<InvitationView> listMyInvitations(Integer userId) {
+        return collaboratorMapper.findPendingInvitationsByUserId(userId);
+    }
+
+    /** 取一条仍待处理、且确实属于当前用户的邀请；不存在与不属于自己用同一句文案。 */
+    private InvitationView requirePendingInvitation(Integer invitationId, Integer userId) {
+        if (invitationId == null) {
+            throw new BizException("邀请不存在或已失效");
+        }
+        InvitationView invitation = collaboratorMapper.findInvitationById(invitationId);
+        if (invitation == null || !userId.equals(invitation.getUserId())) {
+            throw new BizException("邀请不存在或已失效");
+        }
+        if (!CollaboratorStatus.PENDING.equals(invitation.getStatus())) {
+            throw new BizException("邀请已处理或已失效");
+        }
+        return invitation;
     }
 
     /** 改协作者角色（必须是已存在的协作者） */
@@ -145,8 +219,15 @@ public class SurveyCollaboratorService {
         }
     }
 
-    /** 移除协作者（必须是已存在的协作者） */
+    /** 移除协作者（必须是已生效的协作者；待接受的邀请走撤销，不动名单）。 */
     public void remove(Survey survey, Integer targetUserId) {
+        if (targetUserId == null) {
+            throw new BizException("请选择要操作的协作者");
+        }
+        String status = collaboratorMapper.findCollaboratorStatus(survey.getId(), targetUserId);
+        if (CollaboratorStatus.PENDING.equals(status)) {
+            throw new BizException("该邀请还没被接受，请用「撤销邀请」");
+        }
         requireCollaborator(survey, targetUserId);
         collaboratorMapper.delete(survey.getId(), targetUserId);
     }

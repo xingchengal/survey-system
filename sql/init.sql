@@ -363,11 +363,13 @@ CREATE TABLE `t_survey_collaborator` (
   `survey_id` int NOT NULL COMMENT '问卷ID',
   `user_id` int NOT NULL COMMENT '被邀请的用户ID',
   `collaborator_role` varchar(20) NOT NULL COMMENT 'viewer=只读 / editor=可编辑 / analyst=可看数据',
+  `status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT '邀请状态：PENDING=待接受 / ACCEPTED=已生效 / REJECTED=已拒绝 / REVOKED=作者撤销；只有 ACCEPTED 参与权限判定',
   `created_by` int DEFAULT NULL COMMENT '邀请人（问卷作者或管理员）',
   `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_survey_user` (`survey_id`,`user_id`),
-  KEY `idx_user_id` (`user_id`)
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_user_status` (`user_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷协作者表';
 
 -- 系统种子数据（与 migration-rbac.sql + migration-subadmin-permissions.sql 完全一致；重复导入安全）

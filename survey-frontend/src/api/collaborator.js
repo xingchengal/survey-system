@@ -16,9 +16,22 @@ export default {
   changeRole: (surveyId, userId, role) =>
     http.put(`/api/survey/${surveyId}/collaborators/${userId}`, { role }),
 
-  /** 移除 */
+  /** 移除（只对已生效的协作者；待接受的邀请走 revoke） */
   remove: (surveyId, userId) =>
     http.del(`/api/survey/${surveyId}/collaborators/${userId}`),
+
+  /** 撤销未接受的邀请（作者/管理员）；撤销后对方再点接受会 400 */
+  revoke: (surveyId, userId) =>
+    http.post(`/api/survey/${surveyId}/collaborators/${userId}/revoke`),
+
+  /** 我的待接受邀请（只按当前登录用户） */
+  invitations: () => http.get('/api/collaborator/invitations'),
+
+  /** 接受邀请：PENDING → ACCEPTED，名额费在这一步扣 */
+  accept: (invitationId) => http.post(`/api/collaborator/invitations/${invitationId}/accept`),
+
+  /** 拒绝邀请：PENDING → REJECTED，不占名额、不扣费 */
+  reject: (invitationId) => http.post(`/api/collaborator/invitations/${invitationId}/reject`),
 
   /** 退出协作（本人） */
   leave: (surveyId) => http.del(`/api/collaborator/self/${surveyId}`),

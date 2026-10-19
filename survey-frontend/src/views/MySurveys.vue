@@ -207,6 +207,28 @@
       </div>
     </div>
 
+    <!-- 待接受的协作邀请：接受后才进入「共享给我」，并占协作者名额 -->
+    <div v-if="invitations.length" class="invite-block mb-16">
+      <div class="invite-head">
+        <div class="shared-title">📨 待处理的协作邀请（{{ invitations.length }}）</div>
+        <span class="invite-tip">接受后才会出现在「共享给我」；拒绝不占名额</span>
+      </div>
+      <div v-for="inv in invitations" :key="inv.id" class="invite-row">
+        <div class="invite-main">
+          <span class="invite-survey">{{ inv.surveyTitle }}<span class="id-badge">#{{ inv.surveyId }}</span></span>
+          <span class="invite-owner">来自 {{ inv.ownerNickname || inv.ownerUsername }}</span>
+          <el-tag size="small" :type="sharedRoleTagType(inv.collaboratorRole)" effect="light" round>
+            {{ sharedRoleLabel(inv.collaboratorRole) }}
+          </el-tag>
+          <span class="invite-time">{{ inv.createdTime ? inv.createdTime.slice(0, 10) : '' }}</span>
+        </div>
+        <div class="invite-actions">
+          <el-button size="small" type="primary" :loading="invitationActing === inv.id" @click="acceptInvitation(inv)">接受</el-button>
+          <el-button size="small" :disabled="invitationActing === inv.id" @click="rejectInvitation(inv)">拒绝</el-button>
+        </div>
+      </div>
+    </div>
+
     <!-- 共享给我的问卷：按作者分组，避免"多个作者 × 多份问卷"时一锅粥 -->
     <div v-if="sharedSurveys.length" class="shared-block mb-16">
       <div class="shared-head">
@@ -311,9 +333,20 @@
         <el-table-column label="成员">
           <template #default="{ row }">{{ row.nickname || row.username }}（{{ row.username }}）</template>
         </el-table-column>
+        <el-table-column label="状态" width="92" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'PENDING'" size="small" type="warning" effect="light">待接受</el-tag>
+            <el-tag v-else size="small" type="success" effect="light">已生效</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="角色" width="160">
           <template #default="{ row }">
-            <el-select :model-value="row.collaboratorRole" size="small" @change="(v) => changeCollaboratorRole(row, v)">
+            <el-select
+              :model-value="row.collaboratorRole"
+              size="small"
+              :disabled="row.status === 'PENDING'"
+              @change="(v) => changeCollaboratorRole(row, v)"
+            >
               <el-option label="只读 viewer" value="viewer" />
               <el-option label="可编辑 editor" value="editor" />
               <el-option label="只看数据 analyst" value="analyst" />
@@ -322,13 +355,14 @@
         </el-table-column>
         <el-table-column label="操作" width="110">
           <template #default="{ row }">
-            <el-button link type="danger" @click="removeCollaborator(row)">移除</el-button>
+            <el-button v-if="row.status === 'PENDING'" link type="warning" @click="revokeInvitation(row)">撤销邀请</el-button>
+            <el-button v-else link type="danger" @click="removeCollaborator(row)">移除</el-button>
           </template>
         </el-table-column>
       </el-table>
       <p class="collab-hint">只读 = 只能看问卷；可编辑 = 能改内容、不能删除；只看数据 = 只能看统计。<br />
-        被邀请人会收到站内通知；对方也可以在自己的「共享给我」里主动退出。<br />
-        <b>名额计费</b>：每份问卷前 2 名协作者免费，之后每邀请 1 名消耗 1 点（同一人只扣一次）。</p>
+        被邀请人会收到站内通知，要在「我的问卷」页接受后才会生效；作者也可以撤销未接受的邀请。<br />
+        <b>名额计费</b>：每份问卷前 2 名协作者免费，之后每<b>接受</b> 1 名扣 1 点（待接受不占名额，拒绝/撤销不扣费）。</p>
     </el-dialog>
 
     <!-- AI 创建问卷 -->
@@ -683,6 +717,10 @@ export default {
       loading: true,
       /** 共享给我的问卷 */
       sharedSurveys: [],
+      /** 待我接受的协作邀请 */
+      invitations: [],
+      /** 正在接受/拒绝的邀请 id（按钮 loading，防止连点重复提交） */
+      invitationActing: null,
       /** 共享列表的筛选：角色（all/editor/analyst/viewer）+ 标题搜索 */
       sharedRoleFilter: 'all',
       sharedKeyword: '',
@@ -853,6 +891,7 @@ export default {
     this.pageNum = readPageNum(PAGE_KEY)
     this.loadSurveys()
     this.loadSharedSurveys()
+    this.loadInvitations()
     this.startAutoRefresh()
     // 从看板快捷入口跳过来时直接打开对应弹窗；打开后清掉 query，避免刷新又弹一次
     if (this.$route.query.ai) {
@@ -927,6 +966,42 @@ export default {
       }
     },
 
+    /** 待接受的协作邀请（静默失败：没有邀请时接口就是空数组） */
+    async loadInvitations() {
+      try {
+        this.invitations = await collaboratorApi.invitations()
+      } catch {
+        this.invitations = []
+      }
+    },
+
+    async acceptInvitation(inv) {
+      this.invitationActing = inv.id
+      try {
+        await collaboratorApi.accept(inv.id)
+        ElMessage.success('已接受，问卷已加入「共享给我」')
+        await this.refreshCollaboration()
+      } finally {
+        this.invitationActing = null
+      }
+    },
+
+    async rejectInvitation(inv) {
+      this.invitationActing = inv.id
+      try {
+        await collaboratorApi.reject(inv.id)
+        ElMessage.success('已拒绝邀请')
+        await this.loadInvitations()
+      } finally {
+        this.invitationActing = null
+      }
+    },
+
+    /** 接受后同时刷新：邀请列表、共享列表、我的问卷（「已共享 N 人」角标） */
+    async refreshCollaboration() {
+      await Promise.all([this.loadInvitations(), this.loadSharedSurveys(), this.loadSurveys()])
+    },
+
     /** 我在共享问卷里的协作者角色 → 中文标签 */
     sharedRoleLabel(role) {
       const map = { editor: '可编辑', analyst: '仅看数据', viewer: '只读' }
@@ -984,6 +1059,22 @@ export default {
       }
       await collaboratorApi.remove(this.collabSurveyId, row.userId)
       ElMessage.success('已移除')
+      await this.reloadCollaborators()
+    },
+
+    /** 作者撤销未接受的邀请：撤销后对方再点接受会 400（状态已变 REVOKED） */
+    async revokeInvitation(row) {
+      try {
+        await this.$confirm(
+          `撤销发给 ${row.nickname || row.username} 的邀请？撤销后对方无法再接受。`,
+          '撤销邀请',
+          { type: 'warning' }
+        )
+      } catch {
+        return // 用户取消
+      }
+      await collaboratorApi.revoke(this.collabSurveyId, row.userId)
+      ElMessage.success('已撤销邀请')
       await this.reloadCollaborators()
     },
 
@@ -1432,6 +1523,67 @@ export default {
   border-radius: var(--r-lg);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+}
+
+/* 待接受的协作邀请 */
+.invite-block {
+  padding: 14px 18px;
+  border: 1px solid #fde68a;
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, #fffbeb, #fff7ed);
+}
+.invite-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.invite-tip {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.invite-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px dashed #fde68a;
+  flex-wrap: wrap;
+}
+.invite-row:first-of-type {
+  border-top: none;
+}
+.invite-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.invite-survey {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.invite-owner,
+.invite-time {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.invite-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+html[data-theme="dark"] .invite-block {
+  background: #2a2110;
+  border-color: #5b4a1f;
+}
+html[data-theme="dark"] .invite-row {
+  border-top-color: #5b4a1f;
 }
 
 .shared-block {
