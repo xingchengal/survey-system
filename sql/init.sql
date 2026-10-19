@@ -372,6 +372,44 @@ CREATE TABLE `t_survey_collaborator` (
   KEY `idx_user_status` (`user_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='问卷协作者表';
 
+CREATE TABLE `t_feedback` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int NOT NULL COMMENT '发起人（只允许本人读写）',
+  `type` varchar(20) NOT NULL COMMENT 'FEEDBACK=反馈 / SERVICE=客服工单',
+  `subject` varchar(200) NOT NULL COMMENT '主题（≤200 字）',
+  `status` varchar(20) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN=处理中 / CLOSED=已关闭；只关闭不删除',
+  `handled_by` int DEFAULT NULL COMMENT '最近处理的管理员（通知按它精准发）',
+  `last_message_id` bigint DEFAULT NULL COMMENT '最新消息 id（列表排序与轮询用）',
+  `last_message_time` datetime DEFAULT NULL COMMENT '最新消息时间',
+  `last_message_preview` varchar(200) DEFAULT NULL COMMENT '最新消息预览（截断）',
+  `user_last_read_message_id` bigint DEFAULT NULL COMMENT '用户已读水位',
+  `admin_last_read_message_id` bigint DEFAULT NULL COMMENT '管理员已读水位',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `open_service_user_id` int GENERATED ALWAYS AS (
+    CASE WHEN `type` = 'SERVICE' AND `status` = 'OPEN' THEN `user_id` ELSE NULL END
+  ) STORED COMMENT '并发保护：同一用户最多一个 OPEN SERVICE 工单；其他情况为 NULL（唯一键允许多个 NULL）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_open_service` (`open_service_user_id`),
+  KEY `idx_feedback_user` (`user_id`, `id`),
+  KEY `idx_feedback_status` (`status`, `id`),
+  KEY `idx_feedback_handled` (`handled_by`, `status`),
+  KEY `idx_feedback_last` (`last_message_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='反馈 / 客服工单头';
+
+CREATE TABLE `t_feedback_message` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `feedback_id` int NOT NULL COMMENT '所属工单',
+  `sender_id` int NOT NULL COMMENT '发送人 id',
+  `sender_role` varchar(20) NOT NULL COMMENT 'user / admin',
+  `content` varchar(2000) NOT NULL COMMENT '纯文本，≤2000 字；渲染禁止 v-html',
+  `client_msg_id` varchar(64) DEFAULT NULL COMMENT '客户端幂等键（UUID）；NULL 时不参与唯一键',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_feedback_client_msg` (`feedback_id`, `client_msg_id`),
+  KEY `idx_feedback_msg` (`feedback_id`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='反馈 / 客服消息线程';
+
 -- 系统种子数据（与 migration-rbac.sql + migration-subadmin-permissions.sql 完全一致；重复导入安全）
 INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('admin', '超级管理员', 1);
 INSERT IGNORE INTO `t_role` (`code`, `name`, `is_builtin`) VALUES ('subadmin', '次级管理员', 1);

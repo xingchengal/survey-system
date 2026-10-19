@@ -1,4 +1,4 @@
-# AUDIT · 端点权限与事实矩阵（全量 **115** 个方法级端点）
+# AUDIT · 端点权限与事实矩阵（全量 **126** 个方法级端点）
 
 > **定位**：四份主文档之一，**项目数字的唯一出处**（端点 / 表 / 测试 / 页面）。
 > **用途**：动任何 Controller 之前，先在下面四张明细表里找到那个端点，
@@ -7,7 +7,7 @@
 > （问卷是否已发布 / 是否在回收站 / 是否已结束……）。
 > **端点变更历史**（哪一轮加了哪几条、分档怎么订正）见 `HISTORY.md`；本文件只写**现状**。
 >
-> **当前口径（2026-10-19 按代码重核，四处一致）**：**115** 端点 = 公开 **13** + 需登录 **39** + 归属 **27** + 管理 **36**；
+> **当前口径（2026-10-19 按代码重核，四处一致）**：**126** 端点 = 公开 **13** + 需登录 **42** + 归属 **31** + 管理 **40**；
 > Controller **18**；复核命令见 §八，**改动端点后必须重跑**。
 >
 > ★ 改这张表时必须守的规矩：
@@ -41,24 +41,24 @@
 
 | 项 | 值 | 复核方式 |
 |---|---|---|
-| 方法级端点 | **115** | §八 注解计数 |
-| 分档 | 公开 **13** / 需登录 **39** / 归属 **27** / 管理 **36** | §三~§六 活行 |
-| Controller | **19** | `controller/*.java` |
-| 数据库表 | **23** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **459 例 / 50 类** | `mvnw -o test` |
-| 前端页面 | **24** | `src/views/**/*.vue` |
-| 前端 API 模块 | **17** | `src/api/*.js` |
-| 具名路由 | **26** | `router/index.js` |
+| 方法级端点 | **126** | §八 注解计数 |
+| 分档 | 公开 **13** / 需登录 **42** / 归属 **31** / 管理 **40** | §三~§六 活行 |
+| Controller | **20** | `controller/*.java` |
+| 数据库表 | **25** | `sql/init.sql` 的 `CREATE TABLE` |
+| 后端测试 | **468 例 / 51 类** | `mvnw -o test` |
+| 前端页面 | **26** | `src/views/**/*.vue` |
+| 前端 API 模块 | **18** | `src/api/*.js` |
+| 具名路由 | **28** | `router/index.js` |
 
 ### 2.2 端点分档
 
 | 应当的权限 | 端点数 |
 |---|---|
 | 公开（白名单，不需登录） | **13** |
-| 需要登录（只能碰自己的数据） | **39** |
-| 需要登录 **+ 归属校验** | **27** |
-| 需要**管理员** | **36** |
-| **合计** | **115** |
+| 需要登录（只能碰自己的数据） | **42** |
+| 需要登录 **+ 归属校验** | **31** |
+| 需要**管理员** | **40** |
+| **合计** | **126** |
 
 > ★ 历史分档订正（“总数对、分档错”、明细表漏登记 12 条等）见 `HISTORY.md` 的「审计」条目；
 >   本表只写当前口径。
@@ -89,7 +89,7 @@
 
 ---
 
-## 四、需要管理员（**36 个**）
+## 四、需要管理员（**40 个**）
 
 > ★ 第四十二轮（G3）：+4 条管理端点 —— `PUT /user/{id}/disabled`、`GET /user/export`、
 >   `GET /survey/export`、`GET /log/export`（详见变更摘要）。
@@ -140,10 +140,14 @@
 | `GET /api/wallet/admin/page` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：用户钱包列表（分页、按用户名/昵称搜）。★ 只读；余额单位是「点」 |
 | `POST /api/wallet/admin/adjust` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：调整用户额度（`amount` 正加负扣，必须带 `idempotencyKey`）。★ 流水类型 `ADMIN_ADJUST`，与用户自助充值是两类账 |
 | `GET /api/wallet/admin/reconcile` | `@RequirePermission("wallet:manage")` | ✅ **第三十六轮新增**：对账（余额 ≠ 流水汇总 的钱包）。★ 只报告不自动修，确认原因后用 `adjust` 补账 |
+| `GET /api/feedback/admin/page` | `@RequirePermission("feedback:handle")` | ✅ 反馈 / 工单列表（分页，`type` / `status` 可选）。★ 有 `feedback:handle` 即可看全部工单，不复用 `review:handle` |
+| `GET /api/feedback/admin/{id}` | `@RequirePermission("feedback:handle")` | ✅ 工单详情（`afterId` 增量，单次最多 50 条 + `hasMore`）；进入即推进管理端已读水位 |
+| `POST /api/feedback/admin/{id}/reply` | `@RequirePermission("feedback:handle")` | ✅ 回复工单：写入 admin 消息、记 `handled_by`、通知用户；POST 限 20 次/分/用户 |
+| `POST /api/feedback/admin/{id}/close` | `@RequirePermission("feedback:handle")` | ✅ 关闭工单：只改 `status`（不删除），通知用户 |
 
 ---
 
-## 五、需要登录 + 归属校验（**27 个**）
+## 五、需要登录 + 归属校验（**31 个**）
 
 > ★ 第十九轮订正：表头原写 16，表体活行是 **15** —— 表头与表体不一致时**以表体为准**（同样要复核）。
 > ★ 第二十四轮：新增 `GET /api/answer/statistics/survey/{surveyId}`（整份问卷统计，一次取回）⇒ 15 → **16**。
@@ -183,12 +187,16 @@
 | `PUT /api/survey/{surveyId}/collaborators/{targetUserId}` | **第三十四轮新增**：改协作者角色。★ 只改 `t_survey_collaborator.role`，与系统角色 `t_user.role` 是两套东西 | ✅ 同上 |
 | `DELETE /api/survey/{surveyId}/collaborators/{targetUserId}` | **第三十四轮新增**：移除协作者（作者/管理员）。★ 与下面「本人退出」是两条权限不同的路径 | ✅ 同上 |
 | `POST /api/survey/{surveyId}/collaborators/{targetUserId}/revoke` | 撤销未接受的邀请（作者/管理员）：`PENDING → REVOKED`。★ 只改状态、不删行；撤销后对方再点接受一律 400 | ✅ |
+| `GET /api/feedback/{id}` | 用户侧工单详情（`afterId` 增量）。★ 归属按 `feedback.user_id` 校验；不存在与不属于自己用同一句文案，不暴露别人的工单 id | ✅ |
+| `POST /api/feedback/{id}/messages` | 追加工单消息（`clientMsgId` 幂等）。★ 归属校验 + 关闭后 400；内容 ≤2000 字 | ✅ |
+| `POST /api/feedback/{id}/read` | 标记用户已读水位（只进不退，`GREATEST`） | ✅ |
+| `POST /api/feedback/{id}/close` | 关闭自己的工单（只关闭、不删除） | ✅ |
 
 **这几处原来是这么越权的**：`AnswerController` 的这 7 个端点方法签名里**只有 id、没有当前用户**，结构上就没法校验 —— 所以前几轮给它们加了 `requireSurveyOwnership()` / 反查 surveyId 的逻辑（admin 放行，避免弄坏管理员的系统统计页）。
 
 ---
 
-## 六、需要登录（**39 个**，其中 2 条限管理端人员）
+## 六、需要登录（**42 个**，其中 2 条限管理端人员）
 
 > ★ 第二十轮·续（第二轮）：`PUT /api/user/profile-public` **已删除**（需求撤销）⇒ 本档 **22 → 21**。
 > ★ 第二十轮·续：21 → **22**（新增 `DELETE /api/user/account`）。
@@ -201,6 +209,9 @@
 | `POST /api/user/logout` | 登出（清 `doc_token` Cookie） | ✅ |
 | `GET /api/survey/system-overview` | 系统总览。★ **管理端人员**（admin / subadmin）均可访问，方法内判 `Role.isStaff`；普通用户 403。★ 字段按模块权限裁剪：`user:manage` → users、`survey:manage` → 问卷/答卷/访客/回收站/今日、`template:manage` → templates、`review:handle` → pendingReviews、`wallet:manage` → 钱包、`log:view` → recentActivities；`system:view` 只解锁统计页资源模块，不再给业务字段。没有任何模块权限时返回空对象，前端显示「联系超管授权」 | ✅ |
 | `GET /api/system/statistics` | 系统统计（按模块）。★ **管理端人员**（admin / subadmin）均可访问，方法内判 `Role.isStaff`；普通用户 403。★ 模块字段按权限裁剪：`survey:manage` → survey、`user:manage` → user、`template:manage` → template、`review:handle` → review、`wallet:manage` → wallet、`log:view` → log；`system:view` → 只解锁 resource（数据库/表行数/版本快照占用）。没权限的模块不查库也不返回 | ✅ |
+| `POST /api/feedback` | 提交反馈 / 发起客服工单。★ 所有登录用户可用；同一用户最多一个 OPEN SERVICE（生成列唯一索引兜底，已有则续开同一条）。★ 用户侧不挂权限点，权限边界是 `feedback.user_id == 当前用户` | ✅ |
+| `GET /api/feedback/my` | 我的工单列表（最多 100 条；未读由 SQL 按已读水位算出） | ✅ |
+| `GET /api/feedback/unread-count` | 我的未读工单数；当前用户有 `feedback:handle` 时附带管理端未读数（菜单红点） | ✅ |
 | `GET /api/collaborator/invitations` | 我的待接受邀请。★ 只按 `X-User-Id` 查，不接受 userId 参数；带问卷标题与作者昵称 | ✅ |
 | `POST /api/collaborator/invitations/{id}/accept` | 接受邀请（`PENDING → ACCEPTED`）。★ 归属按 `invitation.user_id` 校验；名额费在这一步扣，余额不足则保持 PENDING | ✅ |
 | `POST /api/collaborator/invitations/{id}/reject` | 拒绝邀请（`PENDING → REJECTED`）。★ 只作用于自己的邀请；不占名额、不扣费 | ✅ |

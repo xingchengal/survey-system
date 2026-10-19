@@ -41,7 +41,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
      * @param name    规则名，进限流 key（见 RedisKeys.rateLimit）
      * @param subject 计数维度
      */
-    private record Rule(String name, String prefix, int limit, long windowMs, Subject subject) {
+    private record Rule(String name, String prefix, int limit, long windowMs, Subject subject, String method) {
+        Rule(String name, String prefix, int limit, long windowMs, Subject subject) {
+            this(name, prefix, limit, windowMs, subject, null);
+        }
     }
 
     private static final List<Rule> RULES = List.of(
@@ -61,7 +64,9 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             new Rule("captcha-slider", "/api/captcha/slider", 20, 60_000, Subject.IP),
             new Rule("captcha-verify", "/api/captcha/verify", 120, 60_000, Subject.IP),
             // refresh token：正常 12 小时一次，30 次/分覆盖多标签同时刷新，也挡住爆破
-            new Rule("refresh", "/api/user/refresh", 30, 60_000, Subject.IP)
+            new Rule("refresh", "/api/user/refresh", 30, 60_000, Subject.IP),
+            // 反馈 / 客服：只限写操作 20 次/分/用户；GET 轮询（3000ms）不能计入，否则正常使用会被拦
+            new Rule("feedback-post", "/api/feedback", 20, 60_000, Subject.USER, "POST")
     );
 
     private static final class Counter {
@@ -81,7 +86,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
             throws IOException {
 
         String uri = request.getRequestURI();
-        Rule rule = match(uri);
+        Rule rule = match(uri, request.getMethod());
         if (rule == null) {
             return true;    // 不在限流名单里，直接放行
         }
@@ -114,11 +119,16 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         return false;
     }
 
-    private Rule match(String uri) {
+    private Rule match(String uri, String method) {
         for (Rule r : RULES) {
-            if (uri.startsWith(r.prefix())) {
-                return r;
+            if (!uri.startsWith(r.prefix())) {
+                continue;
             }
+            // method 非空时只限该动作（反馈的 GET 轮询不能和 POST 共用配额）
+            if (r.method() != null && !r.method().equalsIgnoreCase(method)) {
+                continue;
+            }
+            return r;
         }
         return null;
     }

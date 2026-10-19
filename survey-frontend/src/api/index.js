@@ -17,6 +17,7 @@ import { demo, misc } from './demo'
 import captcha from './captcha'
 import admin from './admin'
 import system from './system'
+import feedback from './feedback'
 
 const api = {
   http,
@@ -33,7 +34,8 @@ const api = {
   misc, // api.misc.health() / seedTemplates()
   captcha, // api.captcha.slider()
   admin, // api.admin.subAdmins() / promote() / updatePermissions() / demote()
-  system // api.system.statistics()
+  system, // api.system.statistics()
+  feedback // api.feedback.my() / create() / adminPage()
 }
 
 export { http, ApiError, request, toQuery, notifyError, download }
@@ -51,6 +53,7 @@ export {
   misc,
   captcha,
   admin,
-  system
+  system,
+  feedback
 }
 export default api

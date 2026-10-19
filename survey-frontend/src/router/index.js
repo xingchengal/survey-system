@@ -152,8 +152,22 @@ const routes = [
         component: () => import('../views/AnnouncementManage.vue'),
         meta: { title: '公告管理', roles: STAFF, permission: 'announcement:manage' }
       },
+      {
+        // 反馈 / 客服：管理侧只认 feedback:handle（用户侧页面不在这里）
+        path: 'admin/feedback',
+        name: 'FeedbackManage',
+        component: () => import('../views/FeedbackManage.vue'),
+        meta: { title: '反馈管理', roles: STAFF, permission: 'feedback:handle' }
+      },
 
       // ---- 普通用户专属 ----
+      {
+        // 反馈中心：所有登录用户都能提交反馈 / 开客服工单
+        path: 'feedback',
+        name: 'Feedback',
+        component: () => import('../views/Feedback.vue'),
+        meta: { title: '反馈中心', roles: ['user', 'admin', 'subadmin'] }
+      },
       {
         path: 'my/profile',
         name: 'UserProfile',

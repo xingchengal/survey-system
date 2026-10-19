@@ -48,6 +48,12 @@
               <el-icon><Bell /></el-icon>
               <span>公告管理</span>
             </el-menu-item>
+            <el-menu-item v-if="can('feedback:handle')" index="/admin/feedback">
+              <el-badge :value="feedbackUnread" :hidden="feedbackUnread === 0" :max="99" class="menu-badge">
+                <el-icon><ChatDotRound /></el-icon>
+              </el-badge>
+              <span>反馈管理</span>
+            </el-menu-item>
             <el-menu-item v-if="can('log:view')" index="/admin/logs">
               <el-icon><Memo /></el-icon>
               <span>操作日志</span>
@@ -92,6 +98,10 @@
             <el-menu-item index="/my/wallet">
               <el-icon><Wallet /></el-icon>
               <span>我的钱包</span>
+            </el-menu-item>
+            <el-menu-item index="/feedback">
+              <el-icon><ChatDotRound /></el-icon>
+              <span>反馈中心</span>
             </el-menu-item>
           </template>
         </el-menu>
@@ -297,7 +307,10 @@ export default {
       // 通知相关
       notifications: [],
       unreadCount: 0,
-      notifyTimer: null
+      notifyTimer: null,
+      // 反馈管理菜单红点（60s 轮询）
+      feedbackUnread: 0,
+      feedbackTimer: null
     }
   },
   computed: {
@@ -346,12 +359,18 @@ export default {
     this.loadUnreadCount()
     // 每 30 秒刷新一次未读
     this.notifyTimer = setInterval(this.loadUnreadCount, 30000)
+    // 反馈管理红点：60 秒轮询（只有被授予 feedback:handle 才需要）
+    if (this.can('feedback:handle')) {
+      this.loadFeedbackUnread()
+      this.feedbackTimer = setInterval(this.loadFeedbackUnread, 60000)
+    }
     // 首次进入也归零：刷新/热更新可能恢复上一次的滚动位置
     this.$nextTick(this.resetMainScroll)
   },
   beforeUnmount() {
     // 组件卸载时清掉 30 秒轮询未读数的定时器，避免离开后台后还在请求
     if (this.notifyTimer) clearInterval(this.notifyTimer)
+    if (this.feedbackTimer) clearInterval(this.feedbackTimer)
   },
   methods: {
     /** 菜单/按钮显隐用的权限判断（后端才是防线；超管天然全有） */
@@ -462,6 +481,14 @@ export default {
         const data = await api.notification.unread()
         this.unreadCount = data.count || 0
       } catch { /* 忽略错误：轮询失败不该打扰用户 */ }
+    },
+
+    /** 反馈管理菜单红点：辅助信息，失败静默 */
+    async loadFeedbackUnread() {
+      try {
+        const data = await api.feedback.unread()
+        this.feedbackUnread = data.adminUnread || 0
+      } catch { /* 红点失败不影响页面 */ }
     },
 
     async loadNotifications() {
@@ -617,6 +644,12 @@ export default {
 .el-menu-item .el-icon {
   font-size: 18px;
   margin-right: 10px;
+}
+
+/* 反馈管理菜单红点：贴着图标右上角，不撑高菜单行 */
+.menu-badge :deep(.el-badge__content) {
+  top: 4px;
+  right: 6px;
 }
 
 .el-menu-item:hover {
