@@ -76,7 +76,6 @@
     </div>
 
     <template v-else>
-    <!-- 美化后的列表 -->
     <div v-if="filteredSurveys.length > 0" class="survey-list">
       <div class="list-header">
         <div class="col-title">问卷</div>
@@ -95,11 +94,11 @@
           <div class="title-main">
             <span class="title-text">{{ row.title }}</span>
             <span class="id-badge">#{{ row.id }}</span>
-            <!-- ★ 作者视角：哪几份已经共享出去了（数据来自 GET /api/survey/my 的 collaboratorCount） -->
+            <!-- 已共享人数：数据来自 GET /api/survey/my 的 collaboratorCount -->
             <span v-if="row.collaboratorCount > 0" class="shared-badge">🤝 已共享 {{ row.collaboratorCount }} 人</span>
           </div>
           <div class="title-desc">{{ row.description || '暂无描述' }}</div>
-          <!-- G6：答卷数/回收率（responseCount 由 /api/survey/my 批量回填；浏览量为 0 时不显示回收率） -->
+          <!-- 答卷数 / 回收率（responseCount 由 /api/survey/my 批量回填；浏览量为 0 时不显示回收率） -->
           <div class="row-metrics" :title="row.viewCount > 0 ? `浏览 ${row.viewCount} 次` : ''">
             <span class="row-metric">📊 {{ row.responseCount || 0 }} 份答卷</span>
             <template v-if="row.viewCount > 0">
@@ -110,8 +109,7 @@
         </div>
 
         <div class="col-status">
-          <!-- ★ 下架优先于 status 显示：被举报下架时 status 仍是 1（已发布），
-               只看 status 会显示成"已发布"、与"不能作答"的事实矛盾。 -->
+          <!-- ★ 下架优先于 status 显示：被举报下架时 status 仍是 1，只看 status 会显示成"已发布" -->
           <span v-if="row.lifecycle === 'SUSPENDED'" class="badge badge-suspended">
             <span class="dot"></span> 已下架
           </span>
@@ -140,31 +138,24 @@
 
         <div class="col-created">
           <el-icon class="mr-4"><Calendar /></el-icon>
-          <!-- ★ 包一层 span 才能做"超出省略号"：grid 单元格不裁剪内容，
-               日期文本会溢出到右侧操作列、被按钮压在下面（实测截图就是这样重叠的）。 -->
+          <!-- 包一层 span 才能做省略号：grid 单元格不裁剪内容，日期会溢出到操作列 -->
           <span class="created-text">{{ row.createdTime }}</span>
         </div>
 
         <div class="col-actions">
-          <!-- ★ 已下架（SUSPENDED）只留「申请恢复 / 统计 / 删除」：
-               下架期间内容冻结（后端也会拦编辑/发布/回滚/加协作者），
-               再摆出"编辑/分享/复制/协作"只会让人点出一串 400，行内按钮也会显得乱。 -->
+          <!-- 已下架只留「申请恢复 / 统计 / 删除」：下架期间内容冻结，后端也会拦编辑/发布/回滚，
+               再摆出编辑/分享/复制/协作只会点出一串 400。 -->
           <el-button v-if="row.lifecycle !== 'SUSPENDED'" class="row-btn rb-edit" :icon="Edit" @click="handleEdit(row)">
             <span class="btn-label">编辑</span>
           </el-button>
-          <!-- ★ 只有被举报下架（lifecycle=SUSPENDED）才有这个入口：后端会校验归属，
-               并且只把"申请"变成给全部管理员的通知，不会直接恢复上架。 -->
+          <!-- 「申请恢复」只在 lifecycle=SUSPENDED 时出现：它给全部管理员发通知，不会直接恢复上架 -->
           <el-tooltip v-if="row.lifecycle === 'SUSPENDED'" content="问卷已被举报下架，可向管理员申请恢复上架" placement="top">
             <el-button class="row-btn rb-restore" :icon="RefreshLeft" @click="handleRequestRestore(row)">
               <span class="btn-label">申请恢复</span>
             </el-button>
           </el-tooltip>
-          <!-- ★ 只要不是"已发布"就给发布入口，否则会出现"后端能救、界面无路可走"的 UI 死路
-                （后端是允许"延长（或清空）截止时间后重新发布"的）：
-                  · 草稿（含 status 为 NULL 的历史数据，后端一律视为草稿）→ 发布
-                  · 已结束 → 重新发布；若截止时间还在过去，后端会返回明确文案
-                    「问卷已结束，如需重新开放请先延长结束时间」，由 http.js 弹出
-                status 的判定与上面徽标的口径一致（NULL 也算草稿）。 -->
+          <!-- 不是"已发布"就给发布入口（后端允许延长/清空截止时间后重新发布）：
+               草稿（NULL 也算草稿）→ 发布；已结束 → 重新发布，截止时间仍在过去时后端返回明确文案。 -->
           <el-tooltip v-if="row.status !== 1" :content="row.status === 2 ? '重新发布（需先延长截止时间）' : '发布'" placement="top">
             <el-button class="row-btn rb-publish" :icon="Promotion" @click="handlePublish(row)">
               <span class="btn-label">{{ row.status === 2 ? '重新发布' : '发布' }}</span>
@@ -176,11 +167,8 @@
           <el-button class="row-btn rb-stats" :icon="DataAnalysis" @click="handleStatistics(row)">
             <span class="btn-label">统计</span>
           </el-button>
-          <!-- ★ 低频/危险操作收进「更多」：6 个彩色胶囊一字排开会把整行挤满，
-               视觉上没有主次。复制/协作/删除留在菜单里，主区只留最常用的编辑/发布/分享/统计。 -->
-          <!-- ★ 下拉内容改成与行内按钮同款的彩色胶囊（原来是白底菜单行，视觉上和左侧胶囊断层）。
-               仍用 popover 而不是 dropdown：dropdown 的菜单项样式很难覆盖成胶囊，
-               而 popover 的内容就是普通 DOM，直接复用了 .row-btn 的四套配色。 -->
+          <!-- 低频/危险操作收进「更多」：主区只留编辑/发布/分享/统计，避免整行被胶囊挤满 -->
+          <!-- 用 popover 而非 dropdown：内容直接复用 .row-btn 的胶囊样式 -->
           <el-popover
             v-model:visible="moreOpen[row.id]"
             class="row-more"
@@ -199,7 +187,7 @@
                 <el-icon><component :is="CopyDocument" /></el-icon>
                 <span>复制问卷</span>
               </button>
-              <!-- ★ 只有作者/管理员能管名单（后端判）；别人的问卷这里点了也会 400，所以先按"是不是自己的"显示 -->
+              <!-- 只有作者/管理员能管名单（后端判）：先按"是不是自己的"显示，别人的点了也会 400 -->
               <button
                 v-if="row.userId === currentUserId() && row.lifecycle !== 'SUSPENDED'"
                 type="button"
@@ -219,7 +207,7 @@
       </div>
     </div>
 
-    <!-- ★ 共享给我的问卷（H2 协作）：按作者分组，避免"多个作者 × 多份问卷"时一锅粥 -->
+    <!-- 共享给我的问卷：按作者分组，避免"多个作者 × 多份问卷"时一锅粥 -->
     <div v-if="sharedSurveys.length" class="shared-block mb-16">
       <div class="shared-head">
         <div class="shared-title">🤝 共享给我的问卷（{{ sharedSurveys.length }}）</div>
@@ -264,7 +252,7 @@
           </el-tag>
           <span class="shared-time">{{ item.sharedTime ? item.sharedTime.slice(0, 10) : '' }}</span>
           <div class="shared-actions">
-            <!-- ★ 下架后协作者只能看数据/退出：不能再进编辑器改内容，也不再受理"申请权限" -->
+            <!-- 下架后协作者只能看数据/退出：不能再进编辑器改内容，也不再受理"申请权限" -->
             <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="primary" plain @click="handleEdit(item)">打开</el-button>
             <el-button size="small" @click="handleStatistics(item)">统计</el-button>
             <el-button v-if="item.lifecycle !== 'SUSPENDED'" size="small" type="warning" plain @click="openApply(item)">申请权限</el-button>
@@ -274,7 +262,7 @@
       </div>
     </div>
 
-    <!-- 分页：与表格页同一套 .pager-row + el-pagination 胶囊风格（数据是前端全量拿的，这里只切页） -->
+    <!-- 分页：问卷是一次性全量拿回的，这里只做前端分页 -->
     <div v-if="filteredSurveys.length > 0" class="pager-row">
       <el-pagination
         :current-page="pageNum"
@@ -291,7 +279,7 @@
     <el-empty v-if="filteredSurveys.length === 0" description="没有匹配的问卷" />
     </template>
 
-    <!-- ========== 申请变更权限（被邀请人） ========== -->
+    <!-- 申请变更权限（被邀请人） -->
     <el-dialog v-model="applyVisible" title="申请变更权限" width="430px">
       <p class="apply-tip">
         问卷：{{ applySurvey && applySurvey.title }}<br />
@@ -308,7 +296,7 @@
       </template>
     </el-dialog>
 
-    <!-- ========== 协作者管理（作者/管理员） ========== -->
+    <!-- 协作者管理（作者/管理员） -->
     <el-dialog v-model="collabVisible" title="协作者" width="560px">
       <div class="collab-add">
         <el-input v-model="collabForm.username" placeholder="对方的用户名" style="width: 190px;" />
@@ -343,7 +331,7 @@
         <b>名额计费</b>：每份问卷前 2 名协作者免费，之后每邀请 1 名消耗 1 点（同一人只扣一次）。</p>
     </el-dialog>
 
-    <!-- ========== AI 创建问卷对话框 ========== -->
+    <!-- AI 创建问卷 -->
     <el-dialog
       v-model="aiDialogVisible"
       width="620px"
@@ -410,10 +398,9 @@
       </template>
     </el-dialog>
 
-    <!-- ========== 新建问卷对话框（带模板） ========== -->
+    <!-- 新建问卷：空白创建 / 从模板创建 -->
     <el-dialog v-model="createDialogVisible" title="新建问卷" width="960px" top="8vh">
-      <!-- ★ 双卡片入口：比灰字 tab 更能说明"两种开始方式"，且按用户要求**不放数量徽标**。
-           键盘：左右方向键切换，role=tab + aria-selected 保持可访问性。 -->
+      <!-- 双卡片入口：说明两种开始方式；键盘左右键切换，role=tab + aria-selected 保持可访问性 -->
       <div class="create-switch" role="tablist" aria-label="新建问卷方式">
         <button
           id="create-tab-blank"
@@ -464,9 +451,8 @@
         role="tabpanel"
         aria-labelledby="create-tab-blank"
       >
-          <!-- ★ 场景类型：像问卷星一样先选"要做什么"，再进入编辑。
-               选择后会预填标题/描述与一套可直接改的题目；选「基础问卷」则完全空白。
-               ★ 模板只是前端预设（调 add + question.save 两步），不新增后端概念。 -->
+          <!-- 场景类型：先选"要做什么"，再进入编辑；选择后预填标题/描述与一套可改的题目。
+               模板只是前端预设（add + question.save 两步），不新增后端概念。 -->
           <div class="scene-picker">
             <button
               v-for="s in sceneTemplates"
@@ -484,7 +470,7 @@
 
           <el-form class="form-panel" :model="newForm" label-width="80px">
             <el-form-item label="标题">
-              <!-- ★ maxlength 与后端 TextLimits.SURVEY_TITLE(200) / SURVEY_DESCRIPTION(500) 对齐，否则超长只有提交后吃 400 -->
+              <!-- maxlength 与后端 TextLimits.SURVEY_TITLE(200) / SURVEY_DESCRIPTION(500) 对齐 -->
               <el-input v-model="newForm.title" placeholder="请输入问卷标题" maxlength="200" show-word-limit />
             </el-form-item>
             <el-form-item label="描述">
@@ -513,7 +499,7 @@
           role="tabpanel"
           aria-labelledby="create-tab-template"
         >
-          <!-- 分类 + 搜索合一行：分类用带计数的下拉，避免 8 个分类胶囊在 900px 里换两行 -->
+          <!-- 分类 + 搜索合一行：分类用带计数的下拉，避免多个分类胶囊在窄弹窗里换行 -->
           <div class="tpl-toolbar">
             <el-select v-model="templateCategory" class="tpl-category" size="default">
               <el-option label="全部分类" value="全部" />
@@ -550,7 +536,7 @@
               >
                 <div class="tpl-header">
                   <el-tag size="small" type="success">{{ tpl.templateCategory || '通用' }}</el-tag>
-                  <!-- 热度：来自 t_survey.template_use_count（后端按它降序返回，热门模板排在前面） -->
+                  <!-- 热度：来自 t_survey.template_use_count，后端按它降序返回 -->
                   <span v-if="tpl.templateUseCount > 0" class="tpl-usage">🔥 {{ tpl.templateUseCount }} 次</span>
                 </div>
                 <h4 class="tpl-title">{{ tpl.title }}</h4>
@@ -565,7 +551,7 @@
         </div>
     </el-dialog>
 
-    <!-- ========== 分享对话框 ========== -->
+    <!-- 分享问卷 -->
     <el-dialog v-model="shareVisible" title="分享问卷" width="550px">
       <p class="text-secondary">把下面的链接发给需要填写的人，他们无需登录即可填写：</p>
       <el-input v-model="shareLink" readonly style="margin-top: 10px;">
@@ -589,10 +575,8 @@ import {
   Plus, CopyDocument, Edit, EditPen, Promotion, Share, DataAnalysis, Delete,
   Search, MagicStick, Connection, RefreshLeft, MoreFilled } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
-// ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
-//   http.js 统一带 Authorization: Bearer token、统一按 HTTP 状态码判成败、统一弹后端 message，
-//   页面只关心「调哪个接口、拿到什么数据」。
-//   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
+// 请求统一走 src/api/http.js：鉴权、成败判断、错误提示都收口在那里，页面只关心调哪个接口。
+// 路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
 import api from '../api'
 import { getUser } from '../utils/auth'
 import collaboratorApi from '../api/collaborator'
@@ -603,12 +587,8 @@ import { readPageNum, savePageNum } from '../utils/pageMemory'
 const PAGE_KEY = 'MySurveys'
 
 /**
- * 场景模板（问卷星式"先选类型再创建"）。
- *
- * ★ 只是**前端预设**：创建时先 POST /api/survey/add，再把 questions 用
- *   POST /api/question/save/{id} 落库（type 取值与 common/QuestionType 一致）。
- *   所以不需要后端新增"问卷类型"概念，也不会限制用户之后随便改。
- * ★ 基础问卷 = 完全空白（默认），其余类型给一套可直接改的题目。
+ * 场景模板（"先选类型再创建"）：纯前端预设，创建时先 add 再 question.save 落库。
+ * 基础问卷 = 完全空白（默认），其余类型给一套可直接改的题目。
  */
 const SCENE_TEMPLATES = [
   {
@@ -692,8 +672,7 @@ const SCENE_TEMPLATES = [
   }
 ]
 
-// 图标已在 main.js 里全局注册，这里不再重复注册
-// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
+// 图标已在 main.js 全局注册；:icon / :prefix-icon 用的图标变量仍需从本文件 import 并 markRaw
 export default {
   data() {
     return {
@@ -702,7 +681,7 @@ export default {
       moreOpen: {},
       /** 首次加载骨架屏（数据回来即关，失败也关，避免一直闪） */
       loading: true,
-      /** 共享给我的问卷（H2） */
+      /** 共享给我的问卷 */
       sharedSurveys: [],
       /** 共享列表的筛选：角色（all/editor/analyst/viewer）+ 标题搜索 */
       sharedRoleFilter: 'all',
@@ -720,7 +699,6 @@ export default {
       /** 列表静默刷新的定时器 / 可见性监听（定时任务每分钟才改 status，列表不能只取一次） */
       refreshTimer: null,
       visibilityHandler: null,
-      // 新建对话框
       createDialogVisible: false,
       createTab: 'blank',
       newForm: { title: '', description: '', scene: 'basic' },
@@ -728,28 +706,23 @@ export default {
       sceneTemplates: SCENE_TEMPLATES,
       /** 当前场景带出的题目（创建时随问卷一起保存） */
       sceneQuestions: [],
-      // 模板相关
       templateKeyword: '',
       templateCategory: '全部',
       templates: [],
       templateLoading: false,
-      // AI 创建
       aiDialogVisible: false,
       aiForm: { topic: '', extra: '' },
       aiLoading: false,
-      // 分享
       shareVisible: false,
       shareLink: '',
-      // 筛选
       keyword: '',
       sortOrder: 'desc',
       statusFilter: 'all',
-      // 列表分页：问卷是 api.survey.my() 一次性拿回来的，这里只做**前端分页**
-      // （不新增后端分页接口）；页码按 sessionStorage 记忆，与表格页同一套工具
+      // 列表分页：survey.my() 一次性拿回，这里只做前端分页；页码用 sessionStorage 记忆
       pageNum: 1,
       pageSize: 10,
 
-      // ★ 所有在模板里通过 :icon / :prefix-icon 使用的图标，都要在这里 markRaw 暴露
+      // 所有在模板里通过 :icon / :prefix-icon 使用的图标，都要在这里 markRaw 暴露
       Plus: markRaw(Plus),
       CopyDocument: markRaw(CopyDocument),
       Edit: markRaw(Edit),
@@ -776,10 +749,8 @@ export default {
     filteredSurveys() {
       let list = [...this.surveys]
       if (this.statusFilter !== 'all') {
-        // ★ 不能用**严格相等** `s.status === Number(statusFilter)`：全项目的口径是
-        //   "**NULL 视为草稿**"（common/SurveyStatus.isDraft），而 NULL !== 0，
-        //   否则会出现"列表里明明标着草稿、点'草稿'筛选却找不到它"。
-        //   这里按后端同一口径：选草稿时同时收 NULL。
+        // ★ 不能严格相等：全项目口径是"NULL 视为草稿"（common/SurveyStatus.isDraft），
+        // 否则列表里标着草稿、点「草稿」筛选却找不到它。
         const want = Number(this.statusFilter)
         list = list.filter(s => (want === 0 ? (s.status == null || s.status === 0) : s.status === want))
       }
@@ -805,10 +776,8 @@ export default {
       })
     },
     /**
-     * 共享问卷按「作者」分组。
-     * ★ 一个用户可能被多个作者邀请；平铺列表会让人分不清"哪份是谁的"，
-     *   所以按 owner（s.userId）聚合，组内按共享时间倒序。
-     * ★ 作者昵称为空时退回账号，再退回用户 id，保证组头永远有名字。
+     * 共享问卷按作者（userId）分组：一个用户可能被多个作者邀请，平铺会分不清哪份是谁的。
+     * 组内按共享时间倒序；作者昵称为空时退回账号，再退回用户 id。
      */
     sharedGroups() {
       const groups = new Map()
@@ -885,8 +854,7 @@ export default {
     this.loadSurveys()
     this.loadSharedSurveys()
     this.startAutoRefresh()
-    // 从看板快捷入口跳过来时直接打开对应弹窗：?ai=1 / ?create=1
-    // ★ 打开后把 query 清掉，避免刷新页面又弹一次
+    // 从看板快捷入口跳过来时直接打开对应弹窗；打开后清掉 query，避免刷新又弹一次
     if (this.$route.query.ai) {
       this.openAiDialog()
       this.$router.replace({ path: this.$route.path })
@@ -900,14 +868,8 @@ export default {
   },
   methods: {
     /**
-     * 静默刷新列表（不碰 loading / 分页 / 弹窗）。
-     *
-     * ★ 为什么需要：问卷的「已结束」是后端**定时任务每分钟**扫一次改出来的
-     *   （SurveyService.autoPublishAndClose，cron 每分钟第 0 秒），
-     *   而列表只在 mounted 时取一次 —— 于是"截止时间到了，页面还显示已发布"，
-     *   看起来两边不同步（用户实测报障）。
-     * ★ 频率取 30 秒：后端是每分钟第 0 秒扫一次，取一半周期，
-     *   这样"到点/收满"在页面上最多晚 30 秒出现（再密就是白刷）。
+     * 静默刷新列表（不碰 loading / 分页 / 弹窗）：后端定时任务每分钟才改 status，
+     * 只取一次会出现"截止时间到了、页面还显示已发布"；30 秒刷新一次即可。
      */
     async refreshSilently() {
       try {
@@ -941,7 +903,6 @@ export default {
     },
 
     async loadSurveys() {
-      //   只保留 try/catch 避免非 2xx 抛出的 ApiError 变成未捕获异常。
       try {
         this.surveys = await api.survey.my()
       } catch {
@@ -1080,7 +1041,6 @@ export default {
       savePageNum(PAGE_KEY, 1)
     },
 
-    // ============ 新建相关 ============
     /** 新建弹窗的"空白创建 / 从模板创建"切换（点击、键盘左右键、底部文字链共用） */
     switchCreateTab(tab) {
       if (tab !== 'blank' && tab !== 'template') return
@@ -1130,12 +1090,9 @@ export default {
         ElMessage.warning('请输入问卷标题')
         return
       }
-      // ★ 请求体**不传 userId**（也不需要读本地用户）：归属由服务端按 JWT 里的 X-User-Id 决定，
-      //   客户端传什么都会被覆盖。
+      // ★ 请求体不传 userId：归属由服务端按 JWT 决定，客户端传什么都会被覆盖。
       try {
-        // ★ 请求体只留真正的业务字段：userId 与 status 都被服务端**无条件忽略/覆盖**
-        //   （归属取 JWT 里的 X-User-Id；status/shareCode/isTemplate/deleted 由 createSurvey 强制归零），
-        //   传了会让人误以为"客户端能指定归属或初始状态"。
+        // 其余服务端强制字段（status/shareCode/isTemplate/deleted）也不传，避免误以为客户端能指定。
         const data = await api.survey.add({
           title: this.newForm.title,
           description: this.newForm.description
@@ -1159,7 +1116,6 @@ export default {
       }
     },
 
-    // ============ AI 创建 ============
     openAiDialog() {
       this.aiDialogVisible = true
       this.aiForm = { topic: '', extra: '' }
@@ -1170,12 +1126,10 @@ export default {
         ElMessage.warning('请输入问卷主题')
         return
       }
-      // ★ 慢接口：后端 OkHttp 的 read 超时是 120 秒（配置在 service/QwenClient.java），
-      //   免费额度排队时可能等十几秒 —— 接口层没有设任何超时，页面这里保留 aiLoading 转圈提示，
-      //   绝不能加 AbortController / 短超时。
+      // 慢接口：后端 read 超时 120 秒，免费额度排队可能等十几秒 —— 不能加 AbortController / 短超时。
       this.aiLoading = true
       try {
-        // ★ api.ai.generate(topic, extra) 已经与后端契约对齐（后端读的是 topic / extra 两个字段）。
+        // api.ai.generate(topic, extra) 与后端契约对齐（后端读 topic / extra 两个字段）
         const data = await api.ai.generate(this.aiForm.topic, this.aiForm.extra)
         ElMessage.success('AI 问卷生成成功！')
         this.aiDialogVisible = false
@@ -1187,7 +1141,6 @@ export default {
       }
     },
 
-    // ============ 模板相关 ============
     async loadTemplates() {
       this.templateLoading = true
       try {
@@ -1207,7 +1160,7 @@ export default {
           this.createDialogVisible = false
           this.$router.push(`/my/surveys/${data.id}/edit`)
         } else {
-          // 保留：必须拿到新问卷 id 才能跳编辑页，拿不到就按失败提示（这是业务字段判断，不是中文比对）
+          // 必须拿到新问卷 id 才能跳编辑页；拿不到按失败提示（业务字段判断，不比对中文文案）
           ElMessage.error('创建失败')
         }
       } catch {
@@ -1215,7 +1168,6 @@ export default {
       }
     },
 
-    // ============ 列表操作 ============
     handleCopy(row) {
       ElMessageBox.confirm(`确定复制「${row.title}」吗？`, '提示', {
         confirmButtonText: '确定复制',
@@ -1241,8 +1193,7 @@ export default {
     },
 
     handlePublish(row) {
-      // ★ 已结束的问卷也能走这里，但**必须先延长/清空截止时间**（后端 SurveyService.publish
-      //   会校验 endTime 是否已到未来）。与其让用户点了才吃 400，不如先告诉他该做什么。
+      // 已结束的问卷要先延长/清空截止时间才能重新发布（后端会校验 endTime），先提示该做什么。
       if (row.status === 2 && row.endTime && new Date(String(row.endTime).replace(/-/g, '/')).getTime() <= Date.now()) {
         ElMessageBox.confirm(
           `「${row.title}」已过截止时间（${row.endTime}）。要重新开放，需要先把截止时间改到未来（或清空）。现在去编辑页修改吗？`,
@@ -1263,8 +1214,7 @@ export default {
         { confirmButtonText: isReopen ? '确定重新发布' : '确定发布', cancelButtonText: '取消', type: 'info' }
       ).then(async () => {
         try {
-          //   shareCode 是后端发布后生成的业务字段，
-          //   拿到它才说明发布成功（也可能后端按需生成，所以这个判断保留）。
+          // shareCode 是后端发布后生成的业务字段，拿到它才说明发布成功。
           const data = await api.survey.publish(row.id)
           if (data && data.shareCode) {
             ElMessage.success(isReopen ? '已重新发布' : '发布成功')
@@ -1279,9 +1229,8 @@ export default {
     },
 
     /**
-     * 申请恢复上架（只有 lifecycle=SUSPENDED 的问卷会出现这个按钮）。
-     * ★ 这个动作**不会**恢复问卷：它给全部管理员发一条「恢复上架申请」通知，
-     *   管理员在 /admin/reviews 点「恢复上架」才真正生效（后端会再校验一次 lifecycle）。
+     * 申请恢复上架（仅 SUSPENDED）：只给全部管理员发通知，不会直接恢复；
+     * 管理员在 /admin/reviews 点「恢复上架」才生效（后端会再校验 lifecycle）。
      */
     async handleRequestRestore(row) {
       try {
@@ -1331,7 +1280,6 @@ export default {
       this.$router.push(`/my/surveys/${row.id}/statistics`)
     },
 
-    /** 「更多」菜单的命令分发（低频/危险操作收在这里，主区保留编辑/发布/分享/统计） */
     /** 回收率 = 答卷数 / 浏览量（浏览量 0 时返回 0；超过 100% 按 100 显示，避免看起来像 bug） */
     recoveryRate(row) {
       const views = Number(row.viewCount) || 0
@@ -1354,9 +1302,8 @@ export default {
         type: 'warning'
       }).then(async () => {
         try {
-          // ★ api.survey.recycle(row.id) 是 PUT（不是 POST，见 src/api/survey.js），
-          //   成败只看 HTTP 状态码 —— 不要退回"比对后端中文文案"的写法，
-          //   否则后端措辞改一个字，前端就静默失效。
+          // recycle 是 PUT（见 src/api/survey.js），成败只看 HTTP 状态码，
+          // 不要比对后端中文文案 —— 后端措辞改一个字，前端就静默失效。
           await api.survey.recycle(row.id)
           ElMessage.success('已移入回收站')
           this.loadSurveys()
@@ -1370,7 +1317,6 @@ export default {
 </script>
 
 <style scoped>
-/* ============== AI 按钮 ============== */
 .ai-btn {
   background: linear-gradient(135deg, #8e44ad 0%, #667eea 50%, #3a7bd5 100%);
   background-size: 200% 200%;
@@ -1432,7 +1378,6 @@ export default {
   margin-top: 4px;
 }
 
-/* ============== 顶部 / 工具栏 ============== */
 .page-subtitle {
   margin: 6px 0 0 15px;
   font-size: 13px;
@@ -1481,7 +1426,6 @@ export default {
   padding: 4px;
 }
 
-/* ============== 列表样式 ============== */
 .survey-list {
   background: #fff;
   border: 1px solid var(--stroke);
@@ -1490,7 +1434,6 @@ export default {
   box-shadow: var(--shadow-sm);
 }
 
-/* ==================== 共享给我的问卷（H2 / 按作者分组） ==================== */
 .shared-block {
   padding: 14px 18px;
   border: 1px solid var(--stroke);
@@ -1597,10 +1540,7 @@ export default {
 
 .list-header {
   display: grid;
-  /* ★ 三件事一起才不重叠：
-     ① minmax(0, 3fr)：标题列可以被压缩（默认下限是 min-content，会把整行撑爆）；
-     ② 操作列 minmax(460px, auto)：6 个胶囊按钮实测约 454px，给足下限；
-     ③ .col-actions 允许换行：真放不下时换行，绝不向左溢出压住"创建时间"。 */
+  /* 三件事一起才不重叠：minmax(0,1fr) 让标题列可压缩；操作列给足下限；.col-actions 允许换行 */
   grid-template-columns: minmax(0, 1fr) 96px 170px 172px 296px;
   padding: 14px 24px;
   background: linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%);
@@ -1648,7 +1588,6 @@ export default {
   margin-bottom: 4px;
 }
 
-/* "已共享 N 人"角标：与状态徽标同尺寸，颜色走靛蓝（与协作按钮同一色系） */
 .shared-badge {
   display: inline-flex;
   align-items: center;
@@ -1732,7 +1671,6 @@ export default {
 .badge-draft { background: #fff8e8; color: #d97706; border-color: #ffe7bd; }
 .badge-draft .dot { background: #d97706; }
 
-/* 已下架 = 红（与"已结束"的灰刻意区分：前者是举报审核的结果，需要作者行动） */
 .badge-suspended { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .badge-suspended .dot { background: #dc2626; }
 
@@ -1768,7 +1706,7 @@ export default {
   align-items: center;
   font-size: 13px;
   color: #909399;
-  min-width: 0;          /* ★ 允许被压缩，而不是顶到隔壁列 */
+  min-width: 0;          /* 允许被压缩，而不是顶到隔壁列 */
   white-space: nowrap;
 }
 
@@ -1783,14 +1721,13 @@ export default {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
-  /* ★★ 必须允许换行：.col-actions 的内容比所在网格列宽时，
-     justify-content: flex-end 会把溢出部分**推到左边**，
-     正好压在"创建时间"上（实测截图就是重叠）。换行比溢出安全得多。 */
+  /* 必须允许换行：内容超出网格列宽时，justify-content: flex-end 会把溢出部分推到左边，
+     压在"创建时间"上。 */
   flex-wrap: wrap;
   row-gap: 6px;
 }
 
-/* ============== 行内操作按钮：带文字的胶囊，一种功能一个色 ============== */
+/* 行内操作按钮：带文字的胶囊，一种功能一个色 */
 .row-btn {
   height: 30px;
   padding: 0 12px;
@@ -1820,7 +1757,6 @@ export default {
   transform: scale(0.97);
 }
 
-/* 协作者 = 靛蓝（与编辑的蓝、统计的紫刻意区分） */
 .rb-collab {
   background: #eef2ff;
   color: #4338ca;
@@ -1833,7 +1769,6 @@ export default {
   box-shadow: 0 6px 14px rgba(79, 70, 229, 0.3);
 }
 
-/* 申请恢复 = 红橙（"需要管理员处理"的行动项，与举报下架的红色徽标同一色系） */
 .rb-restore {
   background: #fff1f0;
   color: #c2410c;
@@ -1846,7 +1781,6 @@ export default {
   box-shadow: 0 6px 14px rgba(234, 88, 12, 0.3);
 }
 
-/* 编辑 = 天空蓝（主操作） */
 .rb-edit {
   background: #eaf3ff;
   color: #1d4ed8;
@@ -1859,7 +1793,6 @@ export default {
   box-shadow: 0 6px 14px rgba(47, 128, 237, 0.3);
 }
 
-/* 发布 = 绿 */
 .rb-publish {
   background: #e9f9ef;
   color: #15803d;
@@ -1872,7 +1805,6 @@ export default {
   box-shadow: 0 6px 14px rgba(22, 163, 74, 0.28);
 }
 
-/* 分享 = 橙 */
 .rb-share {
   background: #fff6e8;
   color: #b45309;
@@ -1885,7 +1817,6 @@ export default {
   box-shadow: 0 6px 14px rgba(245, 158, 11, 0.3);
 }
 
-/* 统计 = 紫（与"复制"的青色刻意区分开） */
 .rb-stats {
   background: #f3ecff;
   color: #6d28d9;
@@ -1898,7 +1829,6 @@ export default {
   box-shadow: 0 6px 14px rgba(124, 58, 237, 0.3);
 }
 
-/* 复制 = 青 */
 .rb-copy {
   background: #e6f9fd;
   color: #0e7490;
@@ -1911,7 +1841,6 @@ export default {
   box-shadow: 0 6px 14px rgba(8, 145, 178, 0.3);
 }
 
-/* 删除 = 红 */
 .rb-delete {
   background: #ffefef;
   color: #b91c1c;
@@ -1928,7 +1857,6 @@ export default {
   margin: 0;
 }
 
-/* ============== 「更多」下拉：中性灰，不跟主操作抢颜色 ============== */
 .row-more {
   display: inline-flex;
 }
@@ -1944,7 +1872,6 @@ export default {
   box-shadow: 0 4px 10px rgba(100, 116, 139, 0.16);
 }
 
-/* 「更多」弹层：与行内操作完全同款的胶囊，只是纵向排列 */
 .more-panel {
   display: flex;
   flex-direction: column;
@@ -1964,7 +1891,6 @@ export default {
   transform: translateY(-1px);
 }
 
-/* ============== 模板弹窗：工具栏 + 卡片 ============== */
 .tpl-toolbar {
   display: flex;
   align-items: center;
@@ -2075,7 +2001,7 @@ export default {
   color: #2f80ed;
 }
 
-/* 宽屏收窄一点、操作列按屏幕逐级压缩；窄屏只留图标（但按钮仍是 30px，不再是小圆点） */
+/* 宽屏收窄、操作列逐级压缩；窄屏只留图标（按钮仍是 30px） */
 @media (max-width: 1500px) {
   .list-header, .list-row {
     grid-template-columns: minmax(0, 1fr) 88px 150px 140px 284px;
@@ -2118,7 +2044,7 @@ export default {
   }
 }
 @media (max-width: 900px) {
-  /* 窄屏：列表自己横向滚动（与 .table-card 同一口径），不要把整页撑出横向滚动条 */
+  /* 窄屏：列表自己横向滚动，不要把整页撑出横向滚动条 */
   .survey-list {
     overflow-x: auto;
   }
@@ -2128,7 +2054,6 @@ export default {
   }
 }
 
-/* ==================== 新建问卷：双卡片入口 ==================== */
 .create-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2153,7 +2078,7 @@ export default {
     background-color 0.18s var(--ease),
     box-shadow 0.18s var(--ease);
 }
-/* 选中态左侧 4px 渐变条（用伪元素，不占布局） */
+/* 选中态左侧 4px 渐变条（伪元素，不占布局） */
 .switch-card::before {
   content: '';
   position: absolute;
@@ -2264,7 +2189,6 @@ html[data-theme="dark"] .tpl-desc {
   }
 }
 
-/* ==================== 场景类型选择（新建问卷） ==================== */
 .scene-picker {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -4,8 +4,7 @@
       <h2 class="auth-title"><BrandLogo :size="26" /> 问卷系统</h2>
       <p class="auth-subtitle">注册新账号</p>
 
-      <!-- ★ 接口返回的错误信息在表单区域展示，不使用弹窗 alert。
-           所以服务端失败一律落到这个 alert 里，**不弹 ElMessage.error**。 -->
+      <!-- 服务端失败文案只落在这个 alert 里，不弹 ElMessage.error -->
       <el-alert
         v-if="serverError"
         :title="serverError"
@@ -27,7 +26,6 @@
         </el-form-item>
 
         <el-form-item label="密码" prop="password">
-          <!-- show-password 就是"切换显示/隐藏密码"（Element Plus 自带，无需自己写眼睛图标） -->
           <el-input
             v-model="form.password"
             type="password"
@@ -36,7 +34,6 @@
             maxlength="20"
             show-password
           />
-          <!-- 密码强度提示（弱/中/强） -->
           <div v-if="form.password" class="strength">
             <span class="strength-label">密码强度：</span>
             <div class="strength-bar">
@@ -73,17 +70,10 @@
           />
         </el-form-item>
 
-        <!-- ★ 滑块验证（仅注册页启用） -->
         <el-form-item>
           <div class="slider-wrap">
-            <!--
-              ★★ props 名必须用 w / h：组件源码里的 props 是 w / h / l / r，
-                写成 :width/:height 等于没传，组件会按**默认 310×155** 渲染而后端画布是 320×160，
-                两套尺寸不一致会让 offset 的语义整体偏移。
-              ★ :key="sliderToken"：每次取到新凭证就**整体重建组件**。
-                组件的底图/缺口位置是异步 onload 后画的，重建能彻底规避
-                "新 offset 配旧底图"这类竞态（换图后拖了却判不过，多半就是它）。
-            -->
+            <!-- props 必须用 w/h/l/r（写成 width/height 等于没传，尺寸会与后端画布不一致）；
+                 :key="sliderToken" 换图时整体重建，避免"新 offset 配旧底图" -->
             <slide-verify
               ref="slideRef"
               :key="sliderToken || 'captcha'"
@@ -109,7 +99,7 @@
         </el-form-item>
 
         <el-form-item>
-          <!-- 提交按钮的置灰条件：表单校验不通过 / 滑块未验证通过；提交过程中显示加载状态防重复提交 -->
+          <!-- 置灰条件：表单未过 / 滑块未通过；提交中 loading 防重复提交 -->
           <el-button
             class="w-full"
             type="primary"
@@ -124,7 +114,7 @@
 
         <div class="auth-footer">
           <span class="text-gray">已有账号？</span>
-          <!-- ★ 带上 redirect：从"仅限登录"的问卷跳过来时，登录后还要回那份问卷 -->
+          <!-- 带上 redirect：从"仅限登录"的问卷跳过来时，登录后还要回那份问卷 -->
           <el-button type="primary" link @click="goLogin">去登录</el-button>
         </div>
       </el-form>
@@ -135,10 +125,10 @@
 <script>
 import { ElMessage } from 'element-plus'
 import SlideVerify from 'vue3-slide-verify'
-// ★ 组件样式必须单独引（该库"只提供局部引用的方式，不再采用插件形式，方便按需加载"）
+// 该库只提供局部引用的方式，样式必须单独引
 import 'vue3-slide-verify/dist/style.css'
 import api from '../api'
-// 品牌标识（与登录页、侧栏 logo 同一图形，替换原来的 📝 emoji）
+// 品牌标识（与登录页、侧栏 logo 同一图形）
 import BrandLogo from '../components/BrandLogo.vue'
 
 /** 账号规则：字母+数字，4~20 位（与后端 RegisterRequest 的 @Pattern **必须**一致） */
@@ -157,10 +147,7 @@ export default {
       callback()
     }
     const validatePhone = (rule, raw, callback) => {
-      // 选填：空了就放过
-      // ★ 先 trim 再判：手机号是纯数字框，"粘贴后又删一半"很容易留下空格。
-      //   不 trim 的话，用户只打了个空格就会被判成"请输入 11 位国内手机号"，
-      //   而那个空格其实等于"没填"（选填项）—— 与后端 ContactRequest 的 `^\s*$` 放行口径对齐。
+      // 先 trim 再判：只打一个空格等于"没填"（选填），与后端 ContactRequest 的 ^\s*$ 放行口径一致
       const value = String(raw == null ? '' : raw).trim()
       if (!value) return callback()
       if (!PHONE_RE.test(value)) return callback(new Error('请输入 11 位国内手机号'))
@@ -185,53 +172,30 @@ export default {
       /** 服务端返回的错误文案（页内展示，不弹窗） */
       serverError: '',
 
-      // ===== 滑块验证状态 =====
-      /**
-       * 组件尺寸。★ 必须与后端**同一个口径**：
-       * 组件的 success 回调返回的 left 就是方块位置（成功时 ≈ 后端下发的 offset，比例 1），
-       * 而组件对方块位置有硬校验区间 [L+10, w−(L+10)]，L = l + 2r + 3 ——
-       * 所以后端必须知道前端实际用的 w/l/r，才能生成合法 offset、并判得准。
-       * 因此取图时把这几个值带上去（见 loadCaptcha），其中 r 显式传 10。
-       */
+      // w/h/l/r 必须与后端同一口径：后端按 [L+10, w−(L+10)]（L = l + 2r + 3）生成并校验 offset，
+      //   所以取图时把实际尺寸带上（见 loadCaptcha）。
       sliderW: 320,
       sliderH: 160,
       sliderL: 46,
-      /**
-       * ★ 组件方块圆角半径（与后端 COMPONENT_R 必须一致）：
-       *   组件内部方块真实边长 L = l + 2r + 3，后端生成 offset 的合法区间
-        *   [L+10, w−(L+10)] 就是按同一个 L 算的 —— 两边不一致就会越界。
-       */
+      // 方块圆角 r 必须与后端 COMPONENT_R 一致，否则 offset 合法区间算出来就不对
       sliderR: 10,
-      /** 后端下发的缺口位置：交给组件的 offset 属性（组件据此摆好缺口，用户再拖） */
+      /** 后端下发的缺口位置（组件的 offset 属性） */
       sliderOffset: 0,
       /** 一次性凭证（后端签发，60 秒有效、注册时消费） */
       sliderToken: '',
-      /** ★ 只有**后端**判定通过才置 true（组件只按它自己的缺口判定，不能代表后端认定了"对准"） */
+      /** 只有**后端**判定通过才置 true（组件只按它自己的缺口判定，不能代表后端认定了"对准"） */
       sliderPassed: false,
       sliderLoading: false,
-      /** 正在调后端判定（避免用户在这一瞬间重复点） */
       sliderChecking: false,
       /** 组件自带的"非人为操作"检测精度（默认 5；用 3 更灵敏，触发 again 后自动换图） */
       accuracy: 3,
-      /**
-       * ★★ 背景图数组：必须填入**后端下发的纯底图**（data URL）。
-       *   为什么不能留空：组件源码里 `imgs.length > 0 ? imgs[…] : "https://picsum.photos/…"`
-       *   —— 空数组等于让它去**第三方图床联网取图**：断网时 img.onload 一直不触发，
-       *      组件就会停在"加载中"（据源码分析；本机未做断网实验），
-       *   而且把验证码图托管到外网本身就不该发生。
-       *   loadCaptcha 会把 bgImage 填进来，组件按后端给的 offset 在这张图上切拼图，
-       *   **页面看到的图 = 后端生成的图**，与服务端判定用的是同一张。
-       */
+      // ★ 必须填后端下发的底图（loadCaptcha 里 sliderImgs = [data.bgImage]）：留空组件会去第三方图床取图，
+      //   断网就永远停在"加载中"，而且页面看到的图必须与服务端判定用的是同一张。
       sliderImgs: []
     }
   },
   computed: {
-    /**
-     * 提交按钮是否可用。
-     * ★ 两条叠加：① 表单校验不通过 → 置灰；② 滑块没过 → 置灰。
-     *   表单是否"校验通过"没法直接用 computed 拿到，所以这里用**字段自身的规则**做一次轻量判断
-     *   （与 rules 里的规则同源，改规则时两处一起改会有遗漏风险 —— 所以下面刻意写成同一个正则）。
-     */
+    /** 表单规则不通过或滑块未通过都置灰；这里用与 rules 同源的正则做轻量判断 */
     canSubmit() {
       if (this.submitting) return false
       if (!this.sliderPassed) return false
@@ -242,11 +206,7 @@ export default {
       if (f.phone && !PHONE_RE.test(f.phone)) return false
       return true
     },
-    /**
-     * 密码强度（弱/中/强）。
-     * 判定：先按"字符种类数"（小写/大写/数字/符号）与长度打分，再归到三档。
-     * ★ 这只是**给用户的提示**，不是安全门槛 —— 真正的门槛是后端的 6~20 位长度校验。
-     */
+    /** 密码强度（弱/中/强）：按字符种类与长度分档，仅作提示，真正的门槛是后端的 6~20 位 */
     strength() {
       const p = this.form.password || ''
       if (!p) return { level: 0, text: '', color: '#909399' }
@@ -283,40 +243,26 @@ export default {
       })
     },
     /**
-     * 取一张新的滑块验证码。
-     *
-     * ★ 调用时机（四条都有理由，不要随意增减）：
-     *   ① mounted（页面加载/刷新）；
-     *   ② 拖动失败（onSliderFail）/ 判定未通过 / left 非法；
-     *   ③ 判定接口报错（网络/429 除外：429 时不换图，否则换图又消耗取图额度）；
-     *   ④ 提交返回业务报错后（滑块验证状态失效，必须重新验证）。
-     *   ★ 不做"连续失败 N 次才刷新"的计数：界面上不出现失败次数，而且每次失败都已换图，
-     *     计数规则等价于把 N 次并成 1 次。
-     *   ★ 组件自带的刷新图标（@refresh）**没接**：组件源码里 refresh() 只做
-     *     `{ reset(); emit("refresh") }` —— 它**只把滑块复位，并不重新取图**。
-     *     所以"点组件的刷新图标 → 换一张图"实际是靠本方法（:key 重建 + 新 bgImage）实现的；
-     *     若同时监听 @refresh 再调本方法，会白多打一次 /slider（多消耗一次限流额度）。
+     * 取一张新的滑块验证码：mounted、拖动失败、判定失败、提交报错后都要换图。
+     * 不监听组件的 @refresh：它只复位滑块、不换图，换图靠 :key 重建 + 新 bgImage。
      */
     async loadCaptcha() {
       this.sliderLoading = true
       this.sliderPassed = false
       this.sliderToken = ''
       try {
-        // ★ 把组件实际用的 w / l 带上：后端要用同一套坐标算"拖到缺口时 left 应该是多少"。
-        //   不带也能跑（后端有默认值），但那样两套渲染尺寸不一致时判定会偏。
+        // 带上组件实际用的 w/l，后端用同一套坐标判定（不带会退到后端默认值）
         const data = await api.captcha.slider({ w: this.sliderW, l: this.sliderL })
-        // ★ 顺序有讲究：先把底图与 offset 都准备好，最后再改 sliderToken ——
-        //   因为 :key="sliderToken" 会**重建组件**，重建时它读到的必须已经是新图 + 新 offset。
+        // 先填底图与 offset，最后再改 sliderToken：:key 重建时组件读到的必须已是新图、新缺口
         this.sliderImgs = [data.bgImage]
         this.sliderOffset = data.offset
         this.sliderToken = data.token
-        // 让组件按新的 offset 重新摆位（refresh() 会重置滑块与卡片位置）
+        // refresh() 让组件按新 offset 重新摆位
         this.$nextTick(() => {
           if (this.$refs.slideRef) this.$refs.slideRef.refresh()
         })
       } catch {
-        // 取图失败：http.js 已弹过红字（该接口没传 silent）。
-        // 这里只把状态摆在"验证未通过"，于是提交按钮保持置灰 —— 不会让用户提交一个必然被拒的表单。
+        // 取图失败保持"未通过"，按钮继续置灰，免得提交一个必然被拒的表单
         this.serverError = '验证码加载失败，请点击刷新或稍后重试'
       } finally {
         this.sliderLoading = false
@@ -324,29 +270,17 @@ export default {
     },
 
     /**
-     * 拖动结束（组件回调）—— ★ 但"是否真的对齐"由**后端**说了算。
-     *
-     * @param {{timestamp:number, left:number}} detail left 就是方块位置（成功时 ≈ 后端下发的 offset）
-     *
-     * ★★ 为什么"过没过"必须由后端说了算：组件只比较**它自己的**缺口与拖动位置，
-     *   完全不知道后端下发的是哪个 offset。否则会出现两种坏情况：
-     *     ① offset 越界时组件连缺口都不画（它在 img.onload 里直接 throw），用户怎么拖都过不了；
-     *     ② 前端点亮了按钮、后端却判"没对准" → 报「验证未通过 / 参数格式不正确」。
-     *   所以：前端只上报 left，**判定在后端**（与下发 offset 同一口径），前端按结果点亮按钮。
+     * 拖动结束（组件回调）：是否对齐由后端判定，前端只上报 left。
+     * 组件只按它自己画的缺口判定，与后端下发的 offset 无关，不能拿它当"通过"。
+     * @param {{timestamp:number, left:number}} detail left 即方块位置
      */
     async onSliderSuccess(detail) {
-      // ★★ 必须用 Number.isFinite，不能用 typeof === 'number'：
-      //   vue3-slide-verify 的回调给的是 parseFloat(block.style.left)，
-      //   在渲染时序不巧时 style.left 为空 → parseFloat("") = **NaN**，
-      //   而 `typeof NaN === 'number'` **为真** → 会把 NaN 原样放行 →
-      //   被 http.js 序列化成字符串 "NaN" → 后端报「参数「left」格式不正确」。
-      //   所以 NaN 必须挡在这里，走"重新加载验证码"的正常路径。
+      // ★ 必须用 Number.isFinite：组件给的是 parseFloat(style.left)，时序不巧时为空串 → NaN，
+      //   而 typeof NaN === 'number' 为真，会把它序列化成 "NaN" 让后端报参数错误。
       const rawLeft = detail && detail.left
       const left = Number.isFinite(rawLeft) ? rawLeft : null
       if (left === null) {
-        // ★ 这一支不是"理论上不会发生"：组件读 block.style.left，
-        //   该值只在拖动回调里被赋值，拿不到时 parseFloat("") 就是 NaN（据源码定位）。
-        //   必须重新加载验证码，否则用户会卡在"拖了但按钮一直是灰的"且毫无提示。
+        // 拿不到有效 left 就换图，否则用户会卡在"拖了但按钮一直灰"且毫无提示
         console.warn('[滑块] 组件回调未给出有效 left，已重新加载验证码。detail =', detail)
         this.serverError = '这次拖动没被正确识别，已刷新验证码，请重新拖动'
         this.sliderPassed = false
@@ -372,13 +306,8 @@ export default {
           await this.loadCaptcha()
         }
       } catch (e) {
-        // 判定接口失败：保持"未通过"并换图。
-        // ★★ 必须把**真实原因**说出来：把 429（拖太快/限流）与其它失败吞成同一句话，
-        //   用户与排查者都无从下手。按状态码分流：
-        //     · 429 → 明确告诉用户"太频繁"，等一会儿再试（且**不要**立刻自动换图，
-        //             否则换图本身又是一次请求，只会把窗口继续撑满）；
-        //     · 其它 → 保留后端 message（如"滑块验证已失效，请重新拖动"）。
-        //   （api.captcha.verify 传了 silent，http.js 不会弹红字，文案只能由这里给。）
+        // 按状态码分流：429（限流）明确提示且不自动换图（换图本身又是一次请求），
+        //   其余保留后端 message 并换图重来；verify 传了 silent，文案只能由这里给。
         const status = e && e.status
         if (status === 429) {
           this.serverError = '操作过于频繁，请稍等几秒再拖动滑块'
@@ -392,11 +321,7 @@ export default {
       }
     },
 
-    /**
-     * 拖动失败（组件自己判定没对上）。
-     * ★ 不做"连续拖拽失败 3 次才刷新"的计数：界面上不显示失败次数，
-     *   而且**每次失败都会换图**（见下），计数规则等价于把 3 次并成 1 次。
-     */
+    /** 组件自己判定没对上 → 换图重来（不计数：每次失败都已换图） */
     onSliderFail() {
       this.sliderPassed = false
       this.loadCaptcha()
@@ -416,7 +341,6 @@ export default {
       } catch {
         return
       }
-      // 2) 滑块：这里只判断"后端是否已判定通过"（sliderPassed **只由后端结果**设置）
       if (!this.sliderPassed || !this.sliderToken) {
         this.serverError = '请先完成滑块验证'
         return
@@ -424,26 +348,22 @@ export default {
 
       this.submitting = true
       try {
-        // ★ 只带凭证 token：判定已在 /api/captcha/verify 做完，
-        //   注册接口只认"这个凭证已被标记为通过"，然后消费它。
+        // 只带凭证 token：判定已在 /api/captcha/verify 做完，注册接口只认"已通过"并消费它
         await api.user.register(
           {
             username: this.form.username,
             password: this.form.password,
             nickname: this.form.username, // 昵称留空时后端会用账号兜底；这里显式传显得更明确
-            // ★ trim 后再发：与上面的 validatePhone 同一口径，也与后端 UserService.register
-            //   的 `phone.trim()` 一致；只打空格 = 不填（后端会把空串归一成 null）
+            // trim 后再发，与 validatePhone 及后端 phone.trim() 同一口径
             phone: this.form.phone.trim()
           },
           { token: this.sliderToken }
         )
         ElMessage.success('注册成功，即将跳转到登录页')
-        // ★ 透传 redirect：注册完 → 登录 → 回到原问卷（"仅限登录"的问卷靠这条闭环）
+        // 透传 redirect：注册完 → 登录 → 回原问卷
         setTimeout(() => this.goLogin(), 900)
       } catch (e) {
-        // ★ 错误信息在表单区域展示：api.user.register 传了 silent:true → http.js 不弹 ElMessage，
-        //   但**错误信息照常挂在 ApiError.message 上**（silent 只抑制弹窗，不吞信息），
-        //   所以下面直接用 e.message 渲染到页内 el-alert。
+        // silent:true → http.js 不弹窗，但错误信息仍在 e.message 上，直接渲染到页内 alert
         this.serverError = (e && e.message) || '注册失败，请稍后重试'
         // 提交返回业务报错后，滑块验证状态失效，需要重新完成验证
         await this.loadCaptcha()

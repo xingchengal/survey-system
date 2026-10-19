@@ -25,8 +25,7 @@
 
           <el-divider />
 
-          <!-- ★ 账号是唯一标识、不可修改，用**小字**单独展示；
-               ★ 它与"昵称"若不分开呈现，就会被读成同一个东西。 -->
+          <!-- 账号是唯一标识、不可修改，用**小字**单独展示；与昵称不分开就会被读成同一个东西 -->
           <div class="info-row">
             <span class="info-label">账号<el-tag size="small" type="info" effect="plain" class="ml-8">不可修改</el-tag></span>
             <span class="info-value info-account">{{ user.username }}</span>
@@ -48,8 +47,8 @@
             <span class="info-value">{{ user.createdTime }}</span>
           </div>
 
-          <!-- 最近登录时间 / 登录 IP（数据取自 t_login_log）。
-               ★ IP 可被 X-Forwarded-For 伪造（后端注释里写明"仅供参考"），界面不宣称它是可信证据。 -->
+          <!-- 账号安全信息（取自 t_login_log）：只展示最近 10 条；IP 可被 X-Forwarded-For 伪造，
+               界面不宣称它是可信证据。 -->
           <el-divider />
           <div class="login-log-head">
             <span class="text-bold">🔐 最近登录</span>
@@ -188,11 +187,10 @@
           <el-empty v-else description="暂无操作记录" :image-size="70" />
         </el-card>
 
-        <!-- 账号设置 -->
         <el-card>
           <el-tabs v-model="activeTab">
             <el-tab-pane label="基本资料" name="profile">
-              <!-- ★ 错误信息**页内展示**，不用 alert 弹窗。
+              <!-- 错误信息**页内展示**，不用 alert 弹窗。
                    ★ 与 UserProfile.vue 是一份复制品，改一边必须同步另一边。 -->
               <el-form ref="profileFormRef" class="form-panel" :model="profileForm" :rules="profileRules" label-width="100px">
                 <el-form-item label="账号">
@@ -231,7 +229,7 @@
                   <el-input v-model="pwdForm.oldPassword" type="password" show-password maxlength="64" />
                 </el-form-item>
                 <el-form-item label="新密码" prop="newPassword">
-                  <!-- ★ 6~64（改密码接口的上限），**不是**注册页的 6~20 —— 两个数本来就不同 -->
+                  <!-- 6~64（改密码接口的上限），**不是**注册页的 6~20 -->
                   <el-input v-model="pwdForm.newPassword" type="password" show-password placeholder="至少6位（最多64位）" maxlength="64" />
                 </el-form-item>
                 <el-form-item label="确认新密码" prop="confirmPassword">
@@ -246,7 +244,7 @@
               </el-form>
             </el-tab-pane>
 
-            <!-- ★ 超级管理员不显示注销（需求 4：不能删超管）；次级管理员可正常注销。 -->
+            <!-- ★ 超级管理员不显示注销（超管不能删）；次级管理员可正常注销。 -->
             <el-tab-pane v-if="!isSuper" label="账号注销" name="privacy">
               <div class="form-panel">
                 <div class="danger-zone">
@@ -268,10 +266,9 @@
       </el-col>
     </el-row>
 
-    <!-- ★ 头像裁剪，与 UserProfile.vue 用的是同一个组件 -->
     <avatar-cropper v-model="cropVisible" :src="rawImage" @confirm="onAvatarCropped" />
 
-    <!-- ★ 注销的二次确认弹窗（与 UserProfile.vue 同一份实现，改一边必须同步另一边） -->
+    <!-- 注销的二次确认弹窗（与 UserProfile.vue 同一份实现，改一边必须同步另一边） -->
     <el-dialog v-model="deleteDialogVisible" title="确认注销账号" width="440px" :close-on-click-modal="false">
       <el-alert type="error" :closable="false" style="margin-bottom: 14px;">
         注销后账号立即失效、且**无法自行恢复**（管理员可帮你恢复）。
@@ -302,14 +299,8 @@
 
 <script>
 import { ElMessage } from 'element-plus'
-// ★ 统一接口层：本页 6 个请求（个人资料 / 系统总览 / 头像 / 昵称 / 联系方式 / 密码）全部走 src/api/，
-//   页面不再自己取 token、拼请求头。
-//
-// ★★ 当前约定（本文件与 UserProfile.vue 一致，照这个写）：
-//   本页 /nickname、/avatar、/contact、/password 四个端点的业务失败**都是 400 + {message}**
-//   （后端 UserService 各自 throw BizException），http.js 对非 2xx 会用后端 message 弹一次红字并抛 ApiError。
-//   → 所以：页面「await 成功即成功」，**catch 里只做流程控制，绝对不要再补 ElMessage.error**（补了就是每次失败弹两条）。
-//
+// 本页请求全部走 src/api/；/nickname、/avatar、/contact、/password 的业务失败都是 400 + message，
+//   由 http.js 弹一次红字并抛 ApiError —— 页面 catch 只做流程控制，不要再补 ElMessage.error。
 import api from '../api'
 // 登录态的读/改/清统一走 utils/auth
 import { getUser, setUser, clearAuth, hasPermission } from '../utils/auth'
@@ -318,17 +309,12 @@ import AvatarCropper from '../components/AvatarCropper.vue'
 // 本页图标全部是模板标签形式（如 <Camera />），已由 main.js 全局注册，无需再 import
 
 /**
- * 联系方式校验规则 —— 与 UserProfile.vue、与后端 dto/ContactRequest 三处**逐字一致**。
- * ★ 刻意重复写出正则，而不是"引用另一个页面的"（页面之间不该互相 import 规则）；
- *   否则会出现前端提示一套、后端拒绝另一套。
- *   改任意一处时，请同批核：本文件、UserProfile.vue、ContactRequest.java。
+ * 联系方式校验：与 UserProfile.vue、后端 dto/ContactRequest 三处逐字一致。
+ * 刻意各写一份而不跨页面 import；改任意一处时同批核本文件、UserProfile.vue、ContactRequest.java。
  */
 const PHONE_RE = /^1[3-9]\d{9}$/
 const EMAIL_RE = /^[\w.-]+@[\w.-]+\.[A-Za-z]{2,}$/
 
-// 图标已在 main.js 里全局注册，这里不再重复注册。
-// （重复注册会同时触发 vue/no-unused-components 和 vue/no-reserved-component-names 两类报错，
-//   而且 View / Camera 这类名字还是 HTML 保留标签名）
 export default {
   components: { AvatarCropper },
   data() {
@@ -379,14 +365,11 @@ export default {
       avatarHover: false,
       cropVisible: false,
       rawImage: '',
-      // 各按钮的防重复提交状态
       savingNickname: false,
       savingContact: false,
       savingPassword: false,
-      // 最近登录记录
       loginLogs: [],
       loginLogLoading: false,
-      // ★ 账号注销：二次确认弹窗 + 密码确认
       deleteDialogVisible: false,
       deleteForm: { password: '' },
       deleteFormRef: null,
@@ -395,12 +378,11 @@ export default {
       },
       deletingAccount: false,
       sysStats: { users: 0, total: 0, responses: 0, views: 0 },
-      /** 最近操作（管理员向） */
       recentLogs: []
     }
   },
   computed: {
-    /** 超级管理员：不显示「账号注销」（需求 4：超管不能删） */
+    /** 超级管理员：不显示「账号注销」（超管不能删） */
     isSuper() {
       return this.user.role === 'admin'
     },
@@ -413,9 +395,7 @@ export default {
     this.loadProfile()
   },
   methods: {
-    // ===== 加载当前管理员资料 =====
-    // 关联：user 喂给左侧信息卡与头像；profileForm / contactForm 由 user 回填；成功后接着拉系统总览。
-    // 权限：非 admin 会被请回普通用户个人中心（业务逻辑，原样保留）。
+    // 非 admin/subadmin 请回普通用户个人中心；次级管理员没有对应权限就不请求（否则弹 403）
     async loadProfile() {
       try {
         this.user = await api.user.profile()
@@ -427,7 +407,6 @@ export default {
         this.profileForm.nickname = this.user.nickname || ''
         this.contactForm.phone = this.user.phone || ''
         this.contactForm.email = this.user.email || ''
-        // 次级管理员没有对应模块权限时不要请求，否则会弹 403 红字
         if (hasPermission('system:view')) this.loadSysStats()
         this.loadLoginLogs()
         if (hasPermission('log:view')) this.loadRecentLogs()
@@ -448,7 +427,6 @@ export default {
       }
     },
 
-    // ===== 系统总览（右侧「系统管理视图」4 个迷你卡片）=====
     /** 最近操作日志（管理员）：失败静默，它只是辅助信息 */
     async loadRecentLogs() {
       try {
@@ -459,7 +437,7 @@ export default {
       }
     },
 
-    // 关联：与 Dashboard.vue 用的是同一个接口（api.survey.systemOverview）。
+    // 系统总览与 Dashboard.vue 用的是同一个接口（api.survey.systemOverview）
     async loadSysStats() {
       try {
         this.sysStats = await api.survey.systemOverview()
@@ -471,19 +449,18 @@ export default {
 
     triggerUpload() { this.$refs.fileInput.click() },
 
-    // ===== 头像上传前的本地处理（交给裁剪组件）=====
-    // ★ 与 UserProfile.vue 同一份逻辑，改动必须同步两边；三处口径（2MB / 先清 input / 格式白名单）
+    // 与 UserProfile.vue 同一份逻辑，改动必须同步两边；三处口径（2MB / 先清 input / 格式白名单）
     //   的完整理由写在 UserProfile.vue 的 handleFileChange 上方，这里不重复。
     handleFileChange(e) {
       const file = e.target.files[0]
-      // ★ 先清空再判断：否则校验失败时 input.value 留在原地，再选同一个文件不触发 change
+      // 先清空再判断：否则校验失败时 input.value 留在原地，再选同一个文件不触发 change
       e.target.value = ''
       if (!file) return
       const allowed = ['image/png', 'image/jpeg', 'image/gif']
       if (!allowed.includes(file.type)) {
         return ElMessage.warning('仅支持 PNG / JPG / GIF 格式的图片')
       }
-      // ★ 与后端同值的 2MB（AVATAR_MAX_BYTES），这里按**原始文件大小**拦（裁剪前的字节数）
+      // 与后端同值的 2MB（AVATAR_MAX_BYTES），这里按**原始文件大小**拦（裁剪前的字节数）
       if (file.size > 2 * 1024 * 1024) {
         return ElMessage.warning('图片不能超过 2MB')
       }
@@ -495,26 +472,23 @@ export default {
       reader.readAsDataURL(file)
     },
 
-    // ===== 裁剪完成 → 上传（裁剪组件给的是 320×320 的 PNG data URL）=====
+    // 裁剪完成 → 上传（组件给的是 320×320 的 PNG data URL）
     async onAvatarCropped(dataUrl) {
       try {
-        // ★ 失败由 HTTP 状态码判定（api/user.js 不做字符串比对），提示由 http.js 弹出，
-        //   所以页面是「await 成功即成功」。
+        // await 成功即成功：失败由 HTTP 状态码判定，提示由 http.js 弹出
         await api.user.updateAvatar(dataUrl)
         ElMessage.success('头像修改成功')
         // 同步更新 localStorage 里的登录态，避免刷新前导航栏头像仍是旧图
         this.user.avatar = dataUrl
         this.rawImage = ''
-        // 读-改-写本地缓存统一走 utils/auth（getUser 自带脏值兜底、setUser 统一 key）
         const localUser = getUser() || {}
         localUser.avatar = dataUrl
         setUser(localUser)
       } catch {
-        // 失败提示由 http.js 统一弹出（本页四个端点的业务失败都是 400 + message）
+        // 失败提示由接口层弹出，用户重新点头像即可
       }
     },
 
-    // ===== 保存昵称 =====
     async saveNickname() {
       if (!(await this.validateForm(this.$refs.profileFormRef))) return
       this.savingNickname = true
@@ -522,18 +496,16 @@ export default {
         await api.user.updateNickname(this.profileForm.nickname.trim())
         ElMessage.success('昵称修改成功')
         this.user.nickname = this.profileForm.nickname.trim()
-        // 读-改-写本地缓存统一走 utils/auth（getUser 自带脏值兜底、setUser 统一 key）
         const localUser = getUser() || {}
         localUser.nickname = this.user.nickname
         setUser(localUser)
       } catch {
-        // 失败提示由接口层负责（昵称非空/长度已由 el-form rules 在前端拦一次，后端仍会再验一遍）
+        // 失败提示由接口层弹出，昵称规则前端已拦一次
       } finally {
         this.savingNickname = false
       }
     },
 
-    // ===== 保存联系方式 =====
     async saveContact() {
       if (!(await this.validateForm(this.$refs.contactFormRef))) return
       this.savingContact = true
@@ -547,25 +519,20 @@ export default {
         this.contactForm.phone = phone
         this.contactForm.email = email
       } catch {
-        // 失败提示由 http.js 统一弹出（手机号/邮箱格式**前后端各验一次**：
-        //   前端 el-form rules 给页内红字，后端 dto/ContactRequest 的注解兜底，
-        //   后端失败是 400 + message，如"手机号格式不正确"）
+        // 失败提示由 http.js 弹出（格式前后端各验一次：前端 rules 红字，后端 ContactRequest 注解兜底）
       } finally {
         this.savingContact = false
       }
     },
 
-    // ===== 修改密码 =====
-    // 成功后清掉本地登录态并回登录页：密码变了，旧 token 语义上已失效，让用户重新登录更安全。
+    // 成功后清本地登录态回登录页：密码变了，让用户重新登录更安全
     async savePassword() {
       if (!(await this.validateForm(this.$refs.pwdFormRef))) return
       this.savingPassword = true
       try {
-        // 后端「原密码错误」抛 BizException → **400 + message「原密码错误」**，
-        // http.js 会弹红字并抛 ApiError，所以失败不会走到下面的成功分支。
+        // 原密码错误是 400 + message，http.js 会弹红字并抛错，走不到成功分支
         await api.user.updatePassword(this.pwdForm.oldPassword, this.pwdForm.newPassword)
-        // ★ 文案必须如实：改密码**不会**在服务端吊销 refresh token，
-        //   所以不能说"所有设备已退出"之类的话。
+        // 文案必须如实：改密码不会吊销 refresh token，不能说"所有设备已退出"
         ElMessage.success('密码修改成功，请重新登录')
         this.pwdForm = { oldPassword: '', newPassword: '', confirmPassword: '' }
         if (this.$refs.pwdFormRef) this.$refs.pwdFormRef.clearValidate()
@@ -575,8 +542,7 @@ export default {
           this.$router.push('/login')
         }, 1500)
       } catch {
-        // 失败提示由 http.js 统一弹出（后端 UserService.updatePassword 抛 BizException →
-        // **400 + message「原密码错误」**）
+        // 失败提示由接口层弹出（原密码错误 → 400 + message）
       } finally {
         this.savingPassword = false
       }
@@ -590,7 +556,6 @@ export default {
       })
     },
 
-    // ==================== 账号注销（与 UserProfile.vue 同步） ====================
 
     openDeleteDialog() {
       this.deleteForm.password = ''
@@ -618,7 +583,7 @@ export default {
           this.$router.push('/login')
         }, 1200)
       } catch {
-        // 失败提示由接口层统一弹出（密码错误 / 账号不存在或已注销）
+        // 失败提示由接口层弹出（密码错误 / 账号不存在或已注销）
       } finally {
         this.deletingAccount = false
       }
@@ -700,7 +665,6 @@ export default {
 .qa-title { font-size: 13px; font-weight: 500; color: #303133; margin-top: 8px; }
 .qa-desc { font-size: 11px; color: #909399; margin-top: 2px; }
 
-/* ==================== 与用户个人中心统一的视觉 ==================== */
 .profile-page {
   max-width: 1200px;
   margin: 0 auto;

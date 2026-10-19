@@ -8,7 +8,6 @@
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-      <!-- ==================== 操作日志 ==================== -->
       <el-tab-pane name="operation">
         <template #label>
           <span class="flex-center">
@@ -20,17 +19,14 @@
         <div class="toolbar-card">
           <el-input v-model="opUsername" placeholder="按操作人筛选..." clearable :prefix-icon="User" @keyup.enter="loadOperations" @clear="loadOperations" />
           <el-input v-model="opOperation" placeholder="按操作类型筛选..." clearable :prefix-icon="Search" @keyup.enter="loadOperations" @clear="loadOperations" />
-          <!-- 级别筛选（G3）：t_operation_log **没有"级别"列**，这里的"级别"= 操作人角色。
-               管理员操作与普通用户操作混在一张表里，筛出"管理员做了什么"才是审计的真需求。
-               ★ 不新增 level 列：那要改表 + 回填历史 + 改 LogAspect 的写入契约；
-                 "高危操作"（删除类）用左边的"操作类型"搜"删除"就能筛出来。 -->
+          <!-- ★ “级别”= 操作人角色：t_operation_log 没有 level 列，筛管理员操作才是审计真需求；
+               不新增 level 列（要改表 + 回填历史 + 改 LogAspect 写入契约），删除类操作可用「操作类型」搜 -->
           <el-select v-model="opRole" placeholder="全部级别" clearable class="log-role-select" @change="handleOpSearch">
             <el-option label="全部级别" value="" />
             <el-option label="管理员操作" value="admin" />
             <el-option label="普通用户操作" value="user" />
           </el-select>
-          <!-- 时间范围（G3）：闭区间、只到"天"。后端把结束日补到 23:59:59，
-               所以"选 10-01 到 10-01"能查到当天的全部日志。 -->
+          <!-- 闭区间、只到天；后端把结束日补到 23:59:59，选同一天能查到当天全部日志 -->
           <el-date-picker
             v-model="opDateRange"
             type="daterange"
@@ -44,7 +40,7 @@
           <el-button type="primary" @click="handleOpSearch">搜索</el-button>
           <el-button @click="handleOpReset">重置</el-button>
           <el-button :icon="Refresh" @click="loadOperations">刷新</el-button>
-          <!-- 导出（G3）：导的是**当前筛选结果**（不是当前页），后端上限 10000 行 -->
+          <!-- 导出当前筛选结果（不是当前页），后端上限 10000 行 -->
           <el-button type="success" plain :icon="Download" :loading="opExporting" @click="handleOpExport">
             导出 Excel
           </el-button>
@@ -101,7 +97,6 @@
 
       </el-tab-pane>
 
-      <!-- ==================== 异常日志 ==================== -->
       <el-tab-pane name="error">
         <template #label>
           <span class="flex-center">
@@ -182,7 +177,6 @@
       </el-tab-pane>
     </el-tabs>
 
-    <!-- 异常详情对话框 -->
     <el-dialog v-model="detailVisible" title="异常详情" width="900px" top="5vh">
       <div v-if="currentError">
         <el-descriptions class="mb-16" :column="2" border size="small">
@@ -213,15 +207,12 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-// Search / User 用于 :prefix-icon，Refresh / Delete 用于 :icon，都是「属性变量」形式，必须 import；
-// 注意区别：模板标签形式（<WarningFilled />）由 main.js 全局注册提供，不需要 import
+// Search / User 用于 :prefix-icon，Refresh / Delete / Download 用于 :icon，属性变量必须 import；
+// 标签形式（<WarningFilled />）由 main.js 全局注册提供
 import { Refresh, Search, User, Delete, Download } from '@element-plus/icons-vue'
-// ★ 统一接口层（src/api）：日志类接口按「操作日志 / 异常日志」两个子对象导出，
-//   页面只关心「调哪个接口、拿到什么数据」
+// 日志接口统一走 src/api：operationLog / errorLog 两个子对象
 import api from '../api'
-// 三态容器：骨架 / 空 / 错误（带重试）
 import PageState from '../components/PageState.vue'
-// 行密度切换（默认 / 紧凑）
 import TableDensity from '../components/TableDensity.vue'
 // 页码记忆（sessionStorage）：两个 tab 各存各的
 import { readPageNum, savePageNum } from '../utils/pageMemory'
@@ -230,33 +221,29 @@ import { readPageNum, savePageNum } from '../utils/pageMemory'
 const OP_PAGE_KEY = 'OperationLog:op'
 const ERROR_PAGE_KEY = 'OperationLog:error'
 
-// 图标已在 main.js 里全局注册，这里不再重复注册
-// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
   components: { PageState, TableDensity },
   data() {
     return {
       activeTab: 'operation',
 
-      // 操作日志
       operations: [],
       opLoading: false,
       // 接口失败标记：由 PageState 渲染「加载失败 + 重试」
       opError: false,
       opUsername: '',
       opOperation: '',
-      // 级别筛选（G3）：'' = 全部、'admin' / 'user' = 按操作人角色筛
+      // 级别筛选：提交为 role；'' = 全部，'admin' / 'user' = 按操作人角色筛
       opRole: '',
-      // 时间范围（G3）：['2026-10-01', '2026-10-02'] 或 null
+      // 时间范围：['2026-10-01', '2026-10-02'] 或 null，提交为 startDate / endDate
       opDateRange: null,
       opExporting: false,
-      // 并发保护：只认最后一次请求的响应（见 loadOperations 的注释）
+      // 并发保护：只认最后一次请求的响应（见 loadOperations）
       opSeq: 0,
       opPageNum: 1,
       opPageSize: 10,
       opTotal: 0,
 
-      // 异常日志
       errors: [],
       errorLoading: false,
       errorError: false,
@@ -265,11 +252,9 @@ export default {
       errorPageSize: 10,
       errorTotal: 0,
 
-      // 详情
       detailVisible: false,
       currentError: null,
 
-      // 图标
       User: markRaw(User),
       Search: markRaw(Search),
       Refresh: markRaw(Refresh),
@@ -304,12 +289,7 @@ export default {
       this.loadErrors()
     },
 
-    /**
-     * ★ 改"每页条数"时要把**页码复位到 1**，否则会落到空页上：
-     *   页码仍是旧值时，例如在第 5 页把每页改成 100 条，总页数变成 1 页，
-     *   用户会看到"暂无异常"，以为数据没了。
-     *   （对照写法：Recycle.vue / AdminSurveyList.vue / UserManage.vue 的 size-change 都复位了。）
-     */
+    /** 改每页条数时页码必须复位到 1：否则在第 5 页改成 100 条会落到空页，显示“暂无异常” */
     handleErrorSizeChange() {
       this.errorPageNum = 1
       savePageNum(ERROR_PAGE_KEY, 1)
@@ -324,17 +304,14 @@ export default {
       }
     },
 
-    // ==================== 操作日志 ====================
-    // ★ 并发保护：点「重置」会连发两次（时间控件的 @change + 自己调用），
-    //   两个响应的返回顺序不保证 —— 慢的那个后到会把新结果覆盖成旧数据，
-    //   界面上就是"点了重置，日志还是筛选前那批"。只认最后一次请求。
+    // ★ 并发保护：点「重置」会连发两次（时间控件的 @change + 自己调用），响应顺序不保证，
+    //   只认最后一次请求，否则慢的那个后到会把新结果覆盖成筛选前的数据。
     async loadOperations() {
       const seq = ++this.opSeq
       this.opLoading = true
       this.opError = false
       try {
-        // 参数对象交给接口层，toQuery 会自动拼串并跳过 null/undefined/空串
-        // ★ 空的时间范围会变成 undefined（被 toQuery 跳过），所以不必自己拼条件
+        // 参数对象交给接口层：toQuery 自动拼串并跳过 null/undefined/空串；空时间范围不必自己判断
         const data = await api.operationLog.page({
           pageNum: this.opPageNum,
           pageSize: this.opPageSize,
@@ -348,7 +325,7 @@ export default {
         this.operations = data.list || []
         this.opTotal = data.total || 0
       } catch {
-        // ★ 接口层已按 HTTP 状态码统一提示，这里只留 catch 做流程控制，loading 由 finally 复位
+        // 接口层已按 HTTP 状态码统一提示；这里只做流程控制，loading 由 finally 复位
         if (seq === this.opSeq) this.opError = true
       } finally {
         if (seq === this.opSeq) this.opLoading = false
@@ -362,7 +339,7 @@ export default {
       this.loadOperations()
     },
 
-    /** 重置操作日志的全部筛选条件（G3）：操作人 / 操作类型 / 级别 / 时间范围 */
+    /** 重置操作日志的全部筛选条件：操作人 / 操作类型 / 级别 / 时间范围 */
     handleOpReset() {
       this.opUsername = ''
       this.opOperation = ''
@@ -371,12 +348,12 @@ export default {
       this.handleOpSearch()
     },
 
-    /** 导出操作日志（G3）：导当前筛选结果，不是当前页 */
+    /** 导出操作日志：导当前筛选结果，不是当前页 */
     async handleOpExport() {
       this.opExporting = true
       try {
-        // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
-        //   失败（如超过 10000 行）由 http.js 统一弹红字并 throw，这里不用再提示。
+        // 走 http.download()：解析 Content-Disposition 文件名并触发下载；
+        //   失败（如超过 10000 行）由 http.js 统一弹错
         await api.operationLog.exportExcel({
           username: this.opUsername.trim(),
           operation: this.opOperation.trim(),
@@ -392,7 +369,6 @@ export default {
       }
     },
 
-    // ==================== 异常日志 ====================
     async loadErrors() {
       this.errorLoading = true
       this.errorError = false
@@ -406,7 +382,7 @@ export default {
         this.errors = data.list || []
         this.errorTotal = data.total || 0
       } catch {
-        // ★ 不再自己弹「加载异常日志失败」（接口层已统一提示），只保留流程控制
+        // 接口层已统一提示；这里只置错误标记让 PageState 显示重试入口
         this.errorError = true
       } finally {
         this.errorLoading = false
@@ -415,13 +391,10 @@ export default {
 
     async loadErrorCount() {
       try {
-        // api.errorLog.count() 内部已带 { silent: true }
         const data = await api.errorLog.count()
         this.errorTotal = data.count || 0
       } catch {
-        // 接口异常（未登录 / 网络问题）时忽略即可，计数保持 0；
-        // 这里显式保留 catch 块并写注释，是为了同时满足 ESLint 的 no-empty 规则
-        // ★ count() 内部传了 silent，所以失败既不弹提示也不跳登录
+        // 计数失败保持 0；count() 内部 silent，不弹提示也不跳登录（保留注释同时避开 no-empty）
       }
     },
 

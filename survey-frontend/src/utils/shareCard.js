@@ -1,21 +1,14 @@
 /**
  * 答卷统计「分享图」渲染器（纯 Canvas 2D，不引第三方截图库）。
+ * 手绘而不是 html2canvas：少打 100KB+，配色与中文字体也完全可控。
  *
- * 为什么手绘而不是 html2canvas：截图库要多打 100KB+ 且对 ECharts canvas 支持不稳；
- * 这里只画"标题 + 四个数字 + 一个环 + 图例"，手绘反而更可控、配色也能严格跟随主题。
- *
- * 用法：
- *   const dataUrl = renderStatsCard({
- *     title: '员工满意度调查',
- *     tiles: [{ label: '回收答卷', value: 42, color: '#2f80ed' }, ...],
- *     segments: [{ name: '计入统计', value: 40, color: '#22c55e' }, ...],
- *     generatedAt: '2026-10-18 01:30'
- *   })
- *   // dataUrl 可直接塞进 <img src>，也可用 <a download> 下载
+ * 用法：renderStatsCard({ title, tiles, segments, generatedAt }) → PNG dataURL，
+ * 可直接塞进 <img src>，也可用 <a download> 下载。
  */
 
 const W = 1080
 const H = 1320
+// ★ 中文字体优先 PingFang / 微软雅黑：缺字体会让标题和数字回退成方框
 const FONT = '"PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif'
 const INK = '#0f172a'
 const INK_2 = '#475569'
@@ -34,7 +27,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath()
 }
 
-/** 按可用宽度折行（中英混排都按字符折，够用且不会把单词切得难看） */
+/** 按可用宽度折行：逐字符测量，中文没有空格也能断行 */
 function wrapText(ctx, text, maxWidth) {
   const chars = String(text || '').split('')
   const lines = []
@@ -87,7 +80,7 @@ function drawHeader(ctx, title, generatedAt) {
 }
 
 function drawTiles(ctx, tiles) {
-  // 左右各留 72、中间 32 间距：(1080 - 72*2 - 32) / 2 = 452，保证两边留白对称
+  // 两列卡片：左右各留 72、中间 32 间距 → 452 =（1080 - 72*2 - 32）/ 2
   const cardW = 452
   const cardH = 166
   const gap = 32
@@ -126,7 +119,7 @@ function drawTiles(ctx, tiles) {
 }
 
 function drawDonut(ctx, segments, total) {
-  // 环 + 图例作为一组居中：环左 232、图例右约 840，左右留白接近
+  // 环与图例作为一组居中：环在左（cx=400），图例在右（x=640）
   const cx = 400
   const cy = 972
   const radius = 148
@@ -218,10 +211,9 @@ function drawFooter(ctx, generatedAt) {
 }
 
 /**
- * 生成分享图。
- * @param {{ title: string, tiles: Array<{label:string,value:number,color:string}>,
- *           segments: Array<{name:string,value:number,color:string}>,
- *           generatedAt: string }} data
+ * 生成分享图（PNG dataURL）。
+ * @param {{title:string, tiles:Array<{label:string,value:number,color:string}>,
+ *          segments:Array<{name:string,value:number,color:string}>, generatedAt:string}} data
  * @returns {string} PNG 的 dataURL
  */
 export function renderStatsCard({ title, tiles = [], segments = [], generatedAt = '' }) {

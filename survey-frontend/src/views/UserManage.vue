@@ -8,20 +8,15 @@
     </div>
 
     <div class="toolbar-card">
-      <!-- ★ 三个分类视图（G3）：在用 / **已禁用** / 已注销。
-           "在用"= 既没禁用也没注销；"已禁用"= 被管理员处置过、数据都在、可解禁；
-           "已注销"= 用户自己注销的软删除，可恢复。
-           ★ 为什么要独立的「已禁用」入口：禁用是"账号还在但不许登录"，
-             必须有一个地方能一眼看到全部被处置的账号并批量解禁 ——
-             只靠一个状态下拉时，管理员得先想起来"去筛一下已禁用"，很容易漏人。
-           ★ 三个视图的行集合、可执行的动作都不同，切换时必须清空选中。 -->
+      <!-- 三个视图：在用 / 已禁用 / 已注销。禁用是"账号还在但不许登录"，必须独立入口，
+           否则管理员得先想起来去筛「已禁用」，很容易漏人；三视图行集合与可执行动作不同，
+           切换时必须清空选中 -->
       <el-radio-group v-model="view" @change="handleViewChange">
         <el-radio-button value="active">在用用户</el-radio-button>
         <el-radio-button value="disabled">已禁用</el-radio-button>
         <el-radio-button value="deleted">已注销</el-radio-button>
       </el-radio-group>
-      <!-- 角色筛选（G3）：后端 /user/page 已改为**含管理员**（原来写死 role='user'），
-           所以这一项才真的能筛出东西；不选 = 全部角色。 -->
+      <!-- 角色筛选：后端 /user/page 已含管理员，不选 = 全部角色 -->
       <el-select v-model="roleFilter" placeholder="全部角色" clearable class="role-select" @change="handleSearch">
         <el-option label="全部角色" value="" />
         <el-option label="超级管理员" value="admin" />
@@ -43,11 +38,8 @@
       <TableDensity />
     </div>
 
-    <!-- 批量操作条：选中 ≥1 项才出现。
-         ★ 所有批量动作都是**逐条调单条端点**（Promise.allSettled），后端没有批量端点 ——
-           逐条调用能精确报告"哪几个成功、哪几个为什么失败"。
-         ★ 批量删除是**物理删除 + 级联**（该用户名下问卷与答卷一起删），所以文案比单个删除更重。
-         ★ 动作按当前分类给：在用 → 禁用；已禁用 → 解禁；已注销 → 恢复；删除只在前两档出现。 -->
+    <!-- 批量操作条：选中 ≥1 项才出现。★ 全部逐条调单条端点（Promise.allSettled），
+         才能精确报告哪几个成功、哪几个为什么失败；动作按当前分类给，删除只在前两档出现 -->
     <div v-if="selectedRows.length > 0" class="batch-bar">
       <span class="batch-count">已选 <strong>{{ selectedRows.length }}</strong> 项</span>
       <template v-if="view === 'deleted'">
@@ -95,10 +87,8 @@
           </el-tag>
         </template>
       </el-table-column>
-      <!-- 在用 / 已禁用两个视图：显示禁用状态（G3）。
-           ★ 不在"已禁用"视图里把状态列写死 —— 那一列的真实来源永远是行上的 disabled 字段，
-             这样即便数据与视图不一致（例如刚解禁还没刷新），标签也不会说谎。
-           已注销视图：换注销时间（管理员要找的通常是刚注销的那个）。 -->
+      <!-- 状态列永远读行上的 disabled，不按视图写死，这样刚解禁还没刷新时标签也不会说谎；
+           已注销视图改显示注销时间（管理员通常找刚注销的那个） -->
       <el-table-column v-if="view !== 'deleted'" label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.disabled === 1" type="danger" size="small" effect="dark">已禁用</el-tag>
@@ -166,23 +156,17 @@ import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 // Refresh / Search / Download 用于属性变量形式（:icon="Refresh"、:prefix-icon="Search"），必须 import
 import { Refresh, Search, Download, Delete, Lock, Unlock, RefreshLeft } from '@element-plus/icons-vue'
-// ★ 统一接口层（src/api）：用户分页 / 删除 / 恢复 / 禁用 / 导出都走它，
-//   分页参数对象直接传，query 拼接与错误提示都由接口层负责
+// 统一接口层（src/api）：分页参数对象直接传，query 拼接与错误提示都由它负责
 import api from '../api'
-// 三态容器：骨架 / 空 / 错误（带重试）。列表页统一用它，别再各写各的
 import PageState from '../components/PageState.vue'
-// 行密度切换（默认 / 紧凑）
 import TableDensity from '../components/TableDensity.vue'
-// 页码记忆：翻到第 N 页 → 进详情 → 返回，仍停在第 N 页（sessionStorage）
+// 页码记忆（sessionStorage）
 import { readPageNum, savePageNum } from '../utils/pageMemory'
-// 当前登录用户：用它判断"这一行是不是自己"（自己不可禁用/删除，后端也会拒绝）
+// 当前登录用户：判断"这一行是不是自己"（自己不可禁用/删除，后端也会拒绝）
 import { getUser } from '../utils/auth'
 
-/** 本页在 sessionStorage 里的页码键（每个列表页唯一） */
 const PAGE_KEY = 'UserManage'
 
-// 图标已在 main.js 里全局注册，这里不再重复注册
-// （模板标签走全局注册；:prefix-icon="Search" 这种属性变量走本文件顶部的 import，两者都不受影响）
 export default {
   components: { PageState, TableDensity },
   data() {
@@ -192,19 +176,17 @@ export default {
       // 接口失败标记：由 PageState 渲染「加载失败 + 重试」，不再只弹一条 toast
       error: false,
       keyword: '',
-      // 角色筛选（G3）：'' = 全部；后端只认 admin/user
+      // 角色筛选：'' = 全部；后端认 admin / subadmin / user
       roleFilter: '',
-      // 列表视图：在用用户 / 已禁用 / 已注销。★ 必须声明在 data 里才是响应式
-      // （漏声明时 v-model 只写到实例 ctx 上，切视图后模板不会重渲染）
+      // 列表视图：在用 / 已禁用 / 已注销（必须声明在 data 里才是响应式）
       view: 'active',
       pageNum: 1,
       pageSize: 10,
       total: 0,
-      // ===== G3：多选 / 批量 / 导出 =====
       selectedRows: [],
       batchWorking: false,
       exporting: false,
-      // 并发保护：只认最后一次请求的响应（见 loadUsers 的注释）
+      // 并发保护：只认最后一次请求的响应（见 loadUsers）
       loadSeq: 0,
       // 自己的 id：禁用/删除自己会被后端拒绝，前端先把按钮置灰
       currentUserId: (getUser() && getUser().id) || null,
@@ -240,8 +222,7 @@ export default {
     }
   },
   mounted() {
-    // ★ 顶栏全局搜索跳过来时带 ?keyword=用户名、或 ?view=disabled（"已禁用"快捷入口）：
-    //   直接按它搜一次（页码回 1，避免落在第 3 页看不到人）
+    // 顶栏全局搜索带 ?keyword= 或 ?view=disabled 时直接按它查（页码回 1，避免停在第 3 页看不到人）
     const query = (this.$route && this.$route.query) || {}
     const kw = query.keyword
     const view = query.view
@@ -258,26 +239,22 @@ export default {
     this.loadUsers()
   },
   methods: {
-    // ★ 并发保护：切换分类/点重置会连发多次请求，返回顺序不保证 ——
-    //   慢的那个后到会把新结果覆盖成旧数据（表现为"切了 tab，列表还是上一个分类的人"）。
-    //   只认最后一次请求的响应。
+    // 并发保护：切分类/点重置会连发多次请求，返回顺序不保证；
+    //   只认最后一次请求的响应，否则慢请求后到会把新结果覆盖成旧数据。
     async loadUsers() {
       const seq = ++this.loadSeq
       this.loading = true
       this.error = false
       try {
-        // 参数对象直接给接口层（空关键字由 toQuery 自动跳过）
         const params = {
           pageNum: this.pageNum,
           pageSize: this.pageSize,
           keyword: this.keyword.trim(),
           role: this.roleFilter
         }
-        // ★ 三个视图对应三个查询：
-        //   已注销 → /page-deleted（/page 按设计过滤 deleted_at，永远看不到他们）
-        //   已禁用 → /page?disabled=1
-        //   在用   → /page?disabled=0（**明确排除**已禁用的人，否则"在用"里混着被处置的账号，
-        //            三个分类就名不副实了）
+        // 三个视图三个查询：已注销 → /page-deleted（/page 会过滤 deleted_at）、
+        //   已禁用 → /page?disabled=1、在用 → /page?disabled=0
+        //   （在用必须明确排除已禁用，否则三个分类名不副实）
         if (this.view === 'deleted') {
           const data = await api.user.pageDeleted(params)
           if (seq !== this.loadSeq) return
@@ -290,7 +267,7 @@ export default {
           this.total = data.total || 0
         }
       } catch {
-        // ★ 接口层已统一提示，这里只保留流程控制；error 交给 PageState 显示重试入口
+        // 接口层已统一提示，这里只保留流程控制；error 交给 PageState 显示重试入口
         if (seq === this.loadSeq) this.error = true
       } finally {
         if (seq === this.loadSeq) this.loading = false
@@ -298,10 +275,8 @@ export default {
     },
 
     /**
-     * 切换分类视图（在用 / 已禁用 / 已注销）。
-     * ★ 先清空列表再拉：否则切换瞬间会看到上一个视图的数据（像是新数据），
-     *   而三个视图的"ID/角色"长得很像，很容易让人误判。
-     * ★ 同时清空选中：三个视图可执行的动作不同，留着上一批选中会误操作。
+     * 先清空列表再拉：否则切换瞬间会看到上一个视图的数据，三个视图的 ID/角色又长得很像。
+     * 同时清空选中：三个视图可执行的动作不同，留着上一批选中会误操作。
      */
     handleViewChange() {
       this.users = []
@@ -318,7 +293,7 @@ export default {
       this.loadUsers()
     },
 
-    /** 重置筛选条件（G3）：关键词 / 角色一起清（分类视图保持不变 —— 那是导航，不是筛选） */
+    /** 重置筛选条件：关键词 / 角色一起清（分类视图保持不变，那是导航不是筛选） */
     handleReset() {
       this.keyword = ''
       this.roleFilter = ''
@@ -338,17 +313,13 @@ export default {
       this.loadUsers()
     },
 
-    // ===== G3：多选与批量 =====
     handleSelectionChange(rows) {
       this.selectedRows = rows || []
     },
 
     /**
-     * 这一行能不能被当前操作人处理。
-     * ★ 后端还有一道硬校验；前端只是避免点出一个必然 400 的按钮：
-     *   · 自己不能操作自己；
-     *   · 超管永远不能被操作；
-     *   · 次级管理员只有超管能操作。
+     * 这一行能不能被当前操作人处理（后端还有硬校验，前端只是避免点出必然 400 的按钮）：
+     * 自己不能操作自己；超管永远不能被操作；次级管理员只有超管能操作。
      */
     canOperate(row) {
       if (!row || row.id === this.currentUserId) return false
@@ -370,14 +341,9 @@ export default {
     },
 
     /**
-     * 批量动作的统一执行器。
-     * ★ 逐条调用 + allSettled：一条失败不影响其它条（后端每条本来就是独立事务），
-     *   最后用一句汇总告诉管理员"成功几个、失败几个、失败的前三条为什么"。
-     * ★ 每个请求都传 `{ silent: true }`：否则 10 条里 3 条失败会弹 3 次红字，比汇总更难读。
-     *
-     * @param rows      选中的行
-     * @param requestFn (row) => Promise
-     * @param verb      成功文案里的动词，如"禁用"
+     * 批量动作统一执行器：逐条 allSettled，一条失败不影响其它条（后端每条本来就是独立事务）。
+     * 每个请求都传 { silent: true }，否则 10 条里 3 条失败会弹 3 次红字，比汇总更难读。
+     * @param rows 选中行 / requestFn (row) => Promise / verb 成功文案里的动词
      */
     async applyBatch(rows, requestFn, verb) {
       if (rows.length === 0) return
@@ -428,9 +394,8 @@ export default {
     },
 
     /**
-     * 批量**物理删除**（不可恢复）。
-     * ★ 文案必须比单个删除更重：后端会级联删掉该用户名下的全部问卷、答卷与通知。
-     * ★ 用 type: 'error' 的确认框，让"这一个按钮很危险"在视觉上就成立。
+     * 批量**物理删除**（不可恢复）：后端会级联删掉该用户名下的全部问卷、答卷与通知。
+     * 用 type: 'error' 的确认框，让"这一个按钮很危险"在视觉上先成立。
      */
     handleBatchDelete() {
       const rows = [...this.selectedRows]
@@ -454,11 +419,10 @@ export default {
         .catch(() => {})
     },
 
-    // ===== G3：导出（当前分类 + 当前筛选）=====
     async handleExport() {
       this.exporting = true
       try {
-        // ★ deleted=true 时后端走「已注销」口径；已禁用 / 在用 用 disabled 区分
+        // deleted=true 时后端走「已注销」口径；已禁用 / 在用 用 disabled 区分
         const params = {
           keyword: this.keyword.trim(),
           role: this.roleFilter,
@@ -469,21 +433,19 @@ export default {
         } else if (this.view === 'active') {
           params.disabled = 0
         }
-        // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
-        //   失败（如超过 10000 行）由 http.js 统一弹红字并 throw，这里不用再提示。
+        // 走 http.download()：解析文件名并触发下载；失败（如超过 10000 行）由 http.js 统一弹错
         await api.user.exportExcel(params)
         ElMessage.success('导出已开始，请查看浏览器下载')
       } catch {
-        // 失败提示已由 http.js 统一弹出
+        // 失败提示已由 http.js 统一弹出（如超过 10000 行）
       } finally {
         this.exporting = false
       }
     },
 
-    // ===== 单行操作 =====
     /**
-     * 禁用 / 解禁（G3）。按钮文案由行的 disabled 决定，动作就是它取反。
-     * ★ 后端会立刻作废该账号的 token（本人被踢下线），所以解禁后对方也要重新登录。
+     * 禁用 / 解禁：动作由行上的 disabled 取反。
+     * 后端会立刻作废该账号的 token（本人被踢下线），所以解禁后对方也要重新登录。
      */
     handleToggleDisabled(row) {
       const disabling = row.disabled !== 1
@@ -523,18 +485,15 @@ export default {
           ElMessage.success('删除成功')
           this.loadUsers()
         } catch {
-          // 失败提示由接口层统一弹出，这里不再重复提示
+          // 失败提示由接口层统一弹出
         }
       }).catch(() => {})
     },
 
     /**
-     * 恢复一个已注销的账号。
-     * ★ 提示里的措辞与后端行为一致：恢复时后端会把"令牌生效起点"推到此刻，
-     *   **注销前签发的 access token 一律作废**，加上注销时已吊销的 refresh token 不会复活
-     *   ⇒ **恢复后必须重新登录**。
-     * ★ 也要说明**数据一直都在**（软删除只标记了 deleted_at，没删任何东西），
-     *   否则管理员会以为"恢复"要重建账号。
+     * ★ 恢复时后端把"令牌生效起点"推到此刻：注销前签发的 access token 一律作废，
+     *   已吊销的 refresh token 不会复活 ⇒ 恢复后必须重新登录。
+     * 数据一直都在（软删除只标记 deleted_at），不必以为"恢复"要重建账号。
      */
     handleRestore(row) {
       ElMessageBox.confirm(
@@ -562,7 +521,7 @@ export default {
   flex: 0 0 auto;
 }
 
-/* 批量操作条（G3）：选中才出现，粘在工具栏与表格之间 */
+/* 批量操作条：选中才出现，粘在工具栏与表格之间 */
 .batch-bar {
   display: flex;
   align-items: center;

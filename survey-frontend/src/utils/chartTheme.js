@@ -1,11 +1,8 @@
 /**
  * 图表配色与空态工具。
- *
- * ★ 为什么需要它：ECharts 画在 canvas 上，**读不到 CSS 变量**。
- *   主题切换后如果不换配色，坐标轴/图例会保持深灰（#475569 / #333），
- *   在深色卡片上几乎看不清。
- * ★ 用法：在 `initChart` 里现取（`chartText()` 等），init 时点即当前主题的颜色；
- *   切换主题后图表需要重新 init（页面里有 `theme-change` 监听）。
+ * ECharts 画在 canvas 上读不到 CSS 变量，所以颜色必须按当前主题现取（chartText() 等）。
+ * ★ 色值必须与 styles/theme.css 的令牌一致，不要在这里另起一套颜色。
+ * 切换主题后图表要重新 init（页面监听 theme-change）。
  */
 export function isDarkTheme() {
   return document.documentElement.dataset.theme === 'dark'
@@ -26,7 +23,7 @@ export function chartSplit() {
   return isDarkTheme() ? '#1e293b' : '#eef3fb'
 }
 
-/** 卡片底色：环形图扇区之间的分隔线用它与卡片同色（深色下不能再用纯白，否则一圈白缝） */
+/** 卡片底色：环形图扇区的分隔线要与卡片同色（深色下不能再用纯白，否则一圈白缝） */
 export function chartSurface() {
   return isDarkTheme() ? '#101d31' : '#ffffff'
 }
@@ -47,12 +44,9 @@ export function chartTooltip() {
 }
 
 /**
- * 全站图表统一调色板（按序取色，与语义色一致）：
- *   蓝 = 问卷 / 管理 · 绿 = 已发布 / 成功 · 橙 = 草稿 / 待办
- *   紫 = 答卷 / AI · 青 = 复制 / 分享 · 红 = 删除 / 危险
- *
- * ★ 页面里不要再各写一份色值数组：直接 `chartPalette()` 或 `chartColor(索引)`。
- *   深色模式下自动换成略亮的同色系，保证在深底上仍然清晰。
+ * 全站图表统一调色板（按序取色）：蓝=问卷/管理，绿=已发布/成功，橙=草稿/待办，
+ * 紫=答卷/AI，青=复制/分享，红=删除/危险；深色模式自动换成同色系提亮版。
+ * ★ 页面里不要再各写一份色值数组，直接用 chartPalette() / chartColor()。
  */
 export const CHART_PALETTE = ['#2f80ed', '#22c55e', '#f59e0b', '#8b5cf6', '#06b6d4', '#ef4444']
 
@@ -87,9 +81,8 @@ export function chartColorOf(name) {
 }
 
 /**
- * 图表内空数据态：居中一行文案。
- * 用法：`graphic: isEmpty ? chartEmptyGraphic('暂无数据') : []`
- * （与页面里的 el-empty 二选一即可：有独立图表的卡片用 graphic 更省事）
+ * 图表内空数据态：居中一行文案，如 `graphic: isEmpty ? chartEmptyGraphic('暂无数据') : []`。
+ * 与页面里的 el-empty 二选一即可（有独立图表的卡片用 graphic 更省事）。
  */
 export function chartEmptyGraphic(text = '暂无数据') {
   return [

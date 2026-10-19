@@ -8,13 +8,8 @@
     @opened="onOpened"
     @closed="onClosed"
   >
-    <!-- ★ 裁剪交互完全自研，只用 DOM + CSS + Canvas 这些浏览器原生能力：
-         **不要换成裁剪库** —— 本机离线仓库里没有 cropperjs / vue-cropper。
-
-         ★ 为什么用 DOM/CSS 而不是把画布画在 <canvas> 里：
-           拖动只需要改 CSS 的 left/top/scale，浏览器自己合成，不重绘位图；
-           而"导出"那一步才用 canvas（见 crop()）—— 一次性的、离屏的。
-           两件事分开做，代码量与性能都更好。 -->
+    <!-- ★ 不要换成裁剪库：本机离线仓库里没有 cropperjs / vue-cropper。
+         拖动只改 CSS 的 left/top/width，导出时才用离屏 canvas（见 crop()）。 -->
     <div
       ref="stage"
       class="crop-stage"
@@ -34,8 +29,7 @@
         draggable="false"
         @load="onImageLoad"
       />
-      <!-- 圆形遮罩 + 四角变暗：用"超大 spread 的 box-shadow"实现，
-           比四个方向的半透明 div 更简单，也不会在圆外留缝 -->
+      <!-- 圆形遮罩 + 四角变暗：用一个超大 spread 的 box-shadow 画，圆外不留缝 -->
       <div class="crop-mask"></div>
     </div>
 
@@ -54,31 +48,18 @@
 import { ElMessage } from 'element-plus'
 
 /**
- * 头像裁剪组件（自研，零新增依赖）—— 需求 二.2「图片选择后前端预览，支持图片裁剪」。
- *
- * ── 用法（两个个人中心页面都是同一份调用）──────────────
- *   <avatar-cropper v-model="cropVisible" :src="rawImage" @confirm="onAvatarCropped" />
- *
- * ── 契约 ──────────────────────────────────────────────
- *   props.src       : 原始图片的 data URL（页面用 FileReader.readAsDataURL 得到）
- *   props.modelValue: 是否显示（v-model）
- *   emits.confirm   : 裁剪结果 data URL（**PNG**，见 crop()）
- *   emits.update:modelValue
- *
- * ── 为什么输出固定尺寸的正方形 PNG ────────────────────
- *   · 头像在所有地方都是圆形小图（顶栏 32px、卡片 110px），方形可裁即可；
- *   · 输出固定 320×320 会**顺带压缩**：一张 1MB 的原图裁完通常只有几十 KB，
- *     够不着后端的上限（base64 字符串 3MB / **解码后 2MB** 才是真正生效的那道闸），
- *     也不会让 /api/user/profile 每次返回一大坨 base64
- *     （那个接口会连 avatar 一起返回，见 UserMapper 的说明）。
- *   · 用 PNG 而不是沿用原图类型：PNG 无损、且后端白名单里有它，
- *     省掉"jpeg 质量参数该给多少"这种又要对齐一处口径的决定。
+ * 头像裁剪组件（自研，零依赖）：圆形取景框内所见即最终头像。
+ * 用法：<avatar-cropper v-model="cropVisible" :src="rawImage" @confirm="onAvatarCropped" />
+ * 契约：props.src 原始图 data URL（FileReader 读取）/ props.modelValue 显隐（v-model）；
+ *       emits.confirm 返回 PNG data URL / emits.update:modelValue。
+ * 输出固定 320×320 方形 PNG（展示时裁圆）；原图需 ≤2MB（后端按 base64 解码后大小校验）。
+ * ★ crop() 必须把预览坐标逆变换回原图，与预览共用同一套 scale/offset，否则画面错位。
  */
 
-/** 输出边长（px）。改这个数要连同下方 crop() 的 canvas 尺寸一起改。 */
+/** 输出边长（px） */
 const OUTPUT_SIZE = 320
 
-/** 缩放下限：图片的最小显示比例（再小就会在圆外露白）。上限固定为 1（原图尺寸）。 */
+/** 缩放下限（再小圆外会露白）；上限固定为 1，即原图尺寸 */
 const MIN_SCALE = 0.3
 
 export default {
@@ -92,28 +73,24 @@ export default {
     return {
       /** 舞台（裁剪框）的边长，与下方 CSS 里的 .crop-stage 宽高必须一致 */
       stageSize: 320,
-      /** 图片的显示比例（相对原图） */
       scale: 0.5,
-      /** 图片左上角相对舞台左上角的偏移（px） */
       offsetX: 0,
       offsetY: 0,
-      /** 原图尺寸（onImageLoad 里读到） */
       naturalWidth: 0,
       naturalHeight: 0,
-      /** 拖动起点，仅在按下到抬起之间有效 */
       dragStart: null,
       busy: false
     }
   },
   computed: {
-    /** 滑块绑的是"百分比"，与 scale 分开，避免浮点数在滑块上跳来跳去 */
+    /** 滑块用百分比，避免 scale 浮点在滑块上抖动 */
     scalePercent: {
       get() {
         return Math.round(this.scale * 100)
       },
       set(v) {
         const next = Math.max(MIN_SCALE, Math.min(1, v / 100))
-        // ★ 缩放后必须重新夹住位置：缩小时原来贴边的那一侧会露出白边
+        // 缩放后必须重新夹位置：缩小时贴边的一侧会露出白边
         const centerX = this.offsetX + (this.naturalWidth * this.scale) / 2
         const centerY = this.offsetY + (this.naturalHeight * this.scale) / 2
         this.scale = next
@@ -163,19 +140,14 @@ export default {
       if (!el || !el.naturalWidth || !el.naturalHeight) return
       this.naturalWidth = el.naturalWidth
       this.naturalHeight = el.naturalHeight
-      // 初始比例 = "较短边正好盖住裁剪框"，这样两个方向都不会露白；
-      // 若原图比框还小（极小图），则直接按 1:1 显示并居中（放大到糊不如保持原样）
+      // 初始按 cover 铺满裁剪框（两个方向都不露白）；极小图按 1:1 居中，放大糊不如保持原样
       const coverScale = this.stageSize / Math.min(this.naturalWidth, this.naturalHeight)
       this.scale = Math.min(1, coverScale)
       this.offsetX = (this.stageSize - this.naturalWidth * this.scale) / 2
       this.offsetY = (this.stageSize - this.naturalHeight * this.scale) / 2
       this.clampOffset()
     },
-    /**
-     * 夹住偏移：图片必须始终**完全盖住**裁剪框（任一边不能露白）。
-     * ★ 这是本组件唯一的"硬校验"：边界条件必须显式算出来，
-     *   不能靠"用户一般不会拖那么远"。
-     */
+    /** 图片必须始终完全盖住裁剪框：边界要显式夹住，不能指望用户不会拖远 */
     clampOffset() {
       const w = this.naturalWidth * this.scale
       const h = this.naturalHeight * this.scale
@@ -190,8 +162,7 @@ export default {
     onPointerDown(e) {
       if (!this.naturalWidth) return
       this.dragStart = { x: e.clientX, y: e.clientY, offsetX: this.offsetX, offsetY: this.offsetY }
-      // ★ setPointerCapture：鼠标拖出组件范围（甚至拖出窗口）时事件仍然回到这里，
-      //   否则"拖太快松手在外面"会让图片卡住不跟手。
+      // setPointerCapture：拖出组件或窗口后再松手，事件仍回到这里，图片不会卡住不跟手
       if (e.target.setPointerCapture) {
         try { e.target.setPointerCapture(e.pointerId) } catch { /* 某些浏览器/元素不支持，忽略 */ }
       }
@@ -206,13 +177,9 @@ export default {
       this.dragStart = null
     },
     /**
-     * 导出：把"裁剪框对应的那块原图"画到离屏 canvas 上，再 toDataURL。
-     * ★ 逆变换（显示坐标 → 原图坐标）：
-     *     原图坐标 = (显示坐标 - offset) / scale
-     *   裁剪框在显示坐标里就是 [0,0,stageSize,stageSize]，所以
-     *     sx = -offsetX / scale,  sy = -offsetY / scale,  sSize = stageSize / scale
-     *   —— 这里**必须**用同一套 scale/offset，否则导出的画面与用户看到的错位
-     *   （显示坐标与导出坐标必须同源，不能当成两套）。
+     * 导出：把裁剪框对应的原图画到 320×320 离屏 canvas。
+     * 逆变换：sx = -offsetX / scale，sy = -offsetY / scale，sSize = stageSize / scale。
+     * 必须与预览共用同一套 scale/offset，否则导出画面与用户看到的错位。
      */
     crop() {
       const img = this.$refs.imgEl
@@ -236,8 +203,7 @@ export default {
         this.$emit('confirm', result)
         this.close()
       } catch (e) {
-        // 理论上到不了这里（同源 data URL 不会污染画布），但真出问题时
-        // 让用户看到一句人话，而不是控制台里一个 SecurityError
+        // 同源 data URL 本不会污染画布；真出错也给用户一句人话，而不是只留 SecurityError
         console.error(e)
         ElMessage.error('裁剪失败，请重新选择图片')
       } finally {
@@ -252,7 +218,7 @@ export default {
 </script>
 
 <style scoped>
-/* 裁剪舞台：正方形 + 超出部分隐藏。★ 尺寸与 data 里的 stageSize 必须一致（320） */
+/* 裁剪舞台：正方形 + 超出隐藏；尺寸必须与 data.stageSize 一致（320） */
 .crop-stage {
   position: relative;
   width: 320px;
@@ -269,9 +235,7 @@ export default {
 
 .crop-img {
   position: absolute;
-  /* 只用 left/top/width/height 定位，不用 transform:
-     一是导出时要按同一套数值做逆变换，二者必须完全一致；
-     二是 transform 的百分比基准会引入额外的心算负担 */
+  /* 只用 left/top/width/height，不用 transform：导出时要按同一套数值逆变换 */
   image-rendering: auto;
   pointer-events: none;   /* 拖动统一由 stage 接管，图片不单独收事件 */
 }
@@ -287,7 +251,7 @@ export default {
   border-radius: 50%;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.85);
-  pointer-events: none;   /* ★ 必须：否则遮罩会吃掉 pointerdown，图片拖不动 */
+  pointer-events: none;   /* 必须：否则遮罩会吃掉 pointerdown，图片拖不动 */
 }
 
 .crop-tip {

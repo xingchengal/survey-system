@@ -1,6 +1,6 @@
 <template>
   <div class="stats-page">
-    <!-- ==================== 头部 ==================== -->
+    <!-- 头部 -->
     <div class="page-header">
       <div>
         <h2 class="page-title">答卷统计</h2>
@@ -22,7 +22,7 @@
       </div>
     </div>
 
-    <!-- ==================== 骨架屏 ==================== -->
+    <!-- 骨架屏 -->
     <div v-if="loading" class="stats-skeleton">
       <el-row :gutter="20" class="mb-20">
         <el-col v-for="i in 4" :key="i" :span="6"><div class="sk-block" style="height: 96px;"></div></el-col>
@@ -32,7 +32,7 @@
     </div>
 
     <template v-else>
-      <!-- ==================== 四个概览 ==================== -->
+      <!-- 概览卡 -->
       <el-row :gutter="20" class="mb-20">
         <el-col v-for="tile in tiles" :key="tile.key" :span="scoreSummary ? 4 : 6">
           <div class="stat-tile">
@@ -47,7 +47,7 @@
         </el-col>
       </el-row>
 
-      <!-- ==================== 质控条 ==================== -->
+      <!-- 质控条 -->
       <div v-if="quality && quality.suspicious > 0" class="quality-bar">
         <div class="quality-main">
           <div class="quality-icon"><el-icon :size="20"><Warning /></el-icon></div>
@@ -76,7 +76,7 @@
         </div>
       </div>
 
-      <!-- ==================== 题目列表 ==================== -->
+      <!-- 题目列表 -->
       <el-empty v-if="questions.length === 0" description="该问卷还没有题目" />
 
       <div v-else class="question-list">
@@ -193,7 +193,7 @@
       </div>
     </template>
 
-    <!-- ==================== 答卷列表对话框 ==================== -->
+    <!-- 答卷列表 -->
     <el-dialog v-model="listVisible" width="760px" class="answer-dialog">
       <template #header>
         <div class="dialog-head">
@@ -235,7 +235,7 @@
         </el-table-column>
       </el-table>
 
-      <!-- ★ 分页器：没有它时后端一次返回整份问卷的全部答卷（两万份 = 两万个对象） -->
+      <!-- 分页器：没有它后端会一次返回全部答卷（两万份 = 两万个对象） -->
       <el-pagination
         v-if="answerPage.total > 0"
         class="answer-pager"
@@ -249,15 +249,14 @@
       <el-empty v-if="answers.length === 0" description="暂无答卷" :image-size="70" />
     </el-dialog>
 
-    <!-- ==================== 答卷详情对话框 ==================== -->
+    <!-- 答卷详情 -->
     <el-dialog v-model="detailVisible" :title="`答卷 #${currentAnswerId} 详情`" width="720px">
       <div v-for="(item, idx) in answerDetails" :key="item.id" class="detail-row">
         <div class="detail-index">{{ idx + 1 }}</div>
         <div class="detail-body">
           <div class="detail-title">
             {{ getQuestionTitle(item.questionId) }}
-            <!-- ★ 判分题的逐题对错（t_answer_detail.is_correct）：多选一选项一行，
-                 只在该题的第一行显示一次，避免同一道题重复挂三个"答对"。 -->
+            <!-- 判分题的逐题对错：多选一选项一行，只在该题第一行显示一次，避免重复挂"答对" -->
             <template v-if="item.isCorrect != null && idx === firstDetailIndex(item.questionId)">
               <el-tag v-if="item.isCorrect === 1" type="success" size="small" style="margin-left:6px;">答对</el-tag>
               <el-tag v-else type="danger" size="small" style="margin-left:6px;">答错</el-tag>
@@ -269,7 +268,7 @@
       <el-empty v-if="answerDetails.length === 0" description="暂无回答内容" :image-size="70" />
     </el-dialog>
 
-    <!-- ==================== 分享报告（生成图片） ==================== -->
+    <!-- 分享报告 -->
     <el-dialog v-model="shareVisible" title="分享报告" width="560px" top="4vh">
       <div class="share-preview">
         <img v-if="shareImage" :src="shareImage" alt="答卷统计分享图" />
@@ -288,13 +287,12 @@
 </template>
 
 <script>
-// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
+// 按需引入 ECharts，不要全量 import * as echarts（见 utils/echarts.js）
 import echarts from '../utils/echarts'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Memo, Warning, CircleCheck, Share, TrendCharts } from '@element-plus/icons-vue'
-// ★ 统一接口层：本页请求一律走 src/api/（改法与 AdminLayout.vue 一致）。
-//   http.js 统一带 Authorization、统一按 HTTP 状态码判成败、统一弹后端 message。
-//   路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
+// 请求统一走 src/api/http.js：鉴权、成败判断、错误提示都收口在那里。
+// 路径说明：本文件在 src/views/ 下，api 在 src/api/，所以是 '../api'。
 import api from '../api'
 import {
   chartText, chartStrong, chartSplit, chartTooltip, THEME_EVENT,
@@ -328,29 +326,24 @@ export default {
       chartInstances: {},
       /** 首屏 / 切换口径时的骨架屏 */
       loading: true,
-      // 答卷列表
       listVisible: false,
       answerLoading: false,
       answers: [],
       /**
-       * 答卷列表分页状态（与后端 PageResult 字段同名，便于直接回填）。
-       * ★ total 由后端给（直查 count，不走 60 秒缓存），否则"共 N 份"会和最后一页对不上。
+       * 答卷列表分页状态（字段同后端 PageResult）。total 由后端直查 count、不走缓存，
+       * 否则"共 N 份"会和最后一页对不上。
        */
       answerPage: { pageNum: 1, pageSize: 10, total: 0 },
-      // 答卷详情
       detailVisible: false,
       currentAnswerId: null,
       answerDetails: [],
-      // ===== 质控（答卷无效样本质控）=====
       /** 质控摘要：{ total, suspicious, suspiciousRate, reasons:[{code,label,count}] } */
       quality: null,
-      /** 是否剔除可疑样本（true = 图表只用有效答卷） */
+      /** ★ 是否剔除可疑样本：true = 图表只用有效答卷；后端按 excludeInvalid 走两套缓存（双口径） */
       excludeInvalid: false,
-      // ===== 分享报告（图片） =====
       shareVisible: false,
       /** 生成好的 PNG dataURL；空串 = 还在生成 */
       shareImage: '',
-      // ===== 填空题折叠 =====
       TEXT_PREVIEW,
       textExpanded: {},
       /** NPS 的 0~10 分（分布条按这个顺序画） */
@@ -368,8 +361,7 @@ export default {
         { key: 'suspicious', label: '可疑样本', value: suspicious, icon: Warning, color: '#d97706', bg: 'linear-gradient(135deg,#fff5e6,#ffe9c7)' },
         { key: 'counted', label: '计入统计', value: counted, icon: CircleCheck, color: '#16a34a', bg: 'linear-gradient(135deg,#e9f9ef,#d6f3e3)' }
       ]
-      // ★ 判分摘要只在考试问卷出现（后端 gradedCount=0 时给 null，见 SurveyStatisticsDTO.ScoreSummary）：
-      //   「—」比 0 分更诚实 —— 没有已判分答卷时显示"平均分 0"会让人以为大家都考了 0 分。
+      // 判分摘要只在考试问卷出现；没有已判分答卷时显示「—」而不是 0 分，避免被误读。
       if (this.scoreSummary) {
         tiles.push({
           key: 'avgScore', label: '平均分',
@@ -390,9 +382,8 @@ export default {
       return this.quality.reasons.map(r => `${r.label}：${r.count} 份`).join('；')
     },
     /**
-     * 分享图里的环形数据：始终与"当前口径"一致 ——
-     * 关掉剔除时全部计入；打开剔除时把可疑样本单列出来。
-     * 两份加起来恒等于回收答卷数，不会出现"百分比加起来不是 100%"。
+     * 分享图里的环形数据：始终与当前口径一致 —— 关掉剔除时全部计入，
+     * 打开剔除时把可疑样本单列，两份之和恒等于回收答卷数。
      */
     shareSegments() {
       const suspicious = this.quality ? this.quality.suspicious : 0
@@ -413,11 +404,8 @@ export default {
   },
   beforeUnmount() {
     window.removeEventListener(THEME_EVENT, this.handleThemeChange)
-    // ★ resize 监听必须用具名函数，否则无法 removeEventListener：
-    //   匿名写法 `window.addEventListener('resize', () => chart.resize())` 会让每进一次统计页
-    //   就永久多一个监听，而且它还会对已 dispose 的实例调 resize。
-    //   具名 handler 存在 chartInstances 上，这里一并移除再 dispose。
-    //   （对照写法：SystemStatistics.vue 的 handleResize + removeEventListener。）
+    // resize 监听必须用具名函数才能移除：匿名写法会让每进一次统计页就永久多一个监听，
+    // 而且还会对已 dispose 的实例调 resize。
     Object.values(this.chartInstances).forEach(item => {
       if (item.resizeHandler) window.removeEventListener('resize', item.resizeHandler)
       if (item.chart) item.chart.dispose()
@@ -438,32 +426,27 @@ export default {
     },
 
     async loadAll() {
-      // ★ 切换"剔除可疑样本"会重跑本方法：先把旧图表 dispose 掉 ——
-      //   否则 v-for 重建 DOM 后，chart 还挂在已脱离文档的旧元素上，图表会变空白。
+      // 切换口径会重跑 loadAll：先 dispose 旧图表，否则重建 DOM 后图表挂在旧元素上会变空白。
       this.disposeCharts()
       this.loading = true
       try {
-        // ★ 一次请求取回全部：问卷标题 + 答卷数 + 题目列表 + 每题的统计/文本。
-        //   原实现是 `1 + 1 + 1 + N` 次请求，且最后一步是 for + await **串行** ——
-        //   N 道题就要等 N 个来回，延迟直接叠加（10 题约等于 10 倍往返）。
-        //   现在只发这 1 次（后端见 AnswerController.statisticsBySurvey）。
-        // ★ excludeInvalid：剔除可疑样本时后端走"只统计有效答卷"的口径（另一套缓存 key）。
+        // ★ 整份统计一次取回（statistics/survey）：标题 + 答卷数 + 题目 + 每题图表/文本；
+        // 单题接口仍保留，但本页只发这一次请求。
         const data = await api.answer.surveyStatistics(this.surveyId, this.excludeInvalid)
         this.surveyTitle = data.title
         this.responseCount = data.answerCount
-        // ★ 判分摘要：普通问卷后端给 null（见 SurveyStatisticsDTO），这里不做兜底数字
+        // 判分摘要：普通问卷后端给 null，这里不做兜底数字
         this.scoreSummary = data.scoreSummary || null
         this.checkinEnabled = data.checkinEnabled === true
 
-        // 后端每题返回 { question, chartData, textAnswers }；
-        // 摊平成模板一直用的结构（题目字段直接铺开 + 两个统计字段）。
+        // 后端每题返回 { question, chartData, textAnswers }，摊平成模板用的结构。
         this.questions = (data.questions || []).map(item => ({
           ...item.question,
           chartData: item.chartData,
           textAnswers: item.textAnswers
         }))
 
-        // 质控摘要（可疑份数 / 原因分布）：独立请求，失败不影响主流程
+        // 质控摘要独立请求，失败不影响主流程
         this.loadQuality()
       } catch {
         // 失败提示由接口层统一弹出，这里不再重复弹，避免出现两条红字。
@@ -471,8 +454,7 @@ export default {
         this.loading = false
       }
 
-      // ★ 骨架屏与内容是两个分支：必须等 loading=false 的那一帧挂完 DOM 再画，
-      //   否则图表容器不存在 → init 出来是 0 宽画布（表现为"卡片空白且不报错"）。
+      // 必须等 loading=false 那一帧挂完 DOM 再画图，否则容器不存在 → 0 宽画布（卡片空白且不报错）。
       await this.$nextTick()
       this.questions.forEach(q => {
         if (this.isEchart(q) && q.chartData && q.chartData.length > 0) {
@@ -507,7 +489,7 @@ export default {
     setChartRef(el, questionId) {
       if (!el) return
       if (!this.chartInstances[questionId]) {
-        // resizeHandler 与 chart 一起存，卸载时才能移除监听（见 beforeUnmount）
+        // resizeHandler 与 chart 一起存，卸载时才能移除监听
         this.chartInstances[questionId] = { el: null, chart: null, resizeHandler: null }
       }
       this.chartInstances[questionId].el = el
@@ -527,17 +509,17 @@ export default {
       const chart = echarts.init(ref.el)
       ref.chart = chart
 
-      // 评分题的 content 是 "1"~"5"，图表标签补上"分"，避免 x 轴只有裸数字
+      // 评分题的 content 是 "1"~"5"，补上"分"避免 x 轴只有裸数字
       const isRatingQuestion = isRating(question.type)
       const chartData = question.chartData.map(item => ({
         name: isRatingQuestion ? `${item.content} 分` : item.content,
         value: item.count
       }))
       const total = chartData.reduce((sum, d) => sum + Number(d.value || 0), 0)
-      // 全部选项都是 0 票：不画一个空坐标系，直接在图表中央给一句文案
+      // 全部选项都是 0 票：不画空坐标系，直接在图表中央给一句文案
       const isEmpty = total === 0
 
-      // 单选 / 下拉 = 圆环（中心总数）；多选 / 评分 = 横向条形（分布更好读）
+      // 单选/下拉 = 圆环（中心总数）；多选/评分 = 横向条形
       const pieLike = question.type === 1 || question.type === 5
       const option = pieLike
         ? {
@@ -637,15 +619,15 @@ export default {
       chart.setOption(option)
       // 首帧宽度可能还没算完：下一帧补一次 resize，避免画到 0 宽画布
       requestAnimationFrame(() => chart.resize())
-      // ★ 具名 handler，卸载时才能移除监听（见 beforeUnmount 的说明）
+      // 具名 handler，卸载时才能移除监听
       ref.resizeHandler = () => chart.resize()
       window.addEventListener('resize', ref.resizeHandler)
     },
 
     /**
      * 普通图表题：单选 / 多选 / 下拉 / 评分。
-     * ★ 矩阵 / 排序 / NPS 也属于 hasChart（后端走 chartData），但它们的图形结构完全不同，
-     *   必须各自定制渲染；混进 ECharts 分支会得到一张没有 ref 的空卡片。
+     * ★ 矩阵 / 排序 / NPS 也属于 hasChart，但图形结构完全不同，必须各自渲染；
+     * 混进 ECharts 分支会得到一张没有 ref 的空卡片。
      */
     isEchart(q) {
       return hasChart(q.type) && !isMatrix(q.type) && !isRanking(q.type) && !isNps(q.type)
@@ -663,7 +645,6 @@ export default {
       return isNps(q.type)
     },
 
-    // ===== 矩阵题 =====
     matrixRows(q) {
       return parseMatrixAxis(q.matrixRows)
     },
@@ -688,7 +669,6 @@ export default {
       return total > 0 ? Math.round(this.matrixCell(q, row, col) * 100 / total) : 0
     },
 
-    // ===== 排序题 =====
     sortedRanking(q) {
       return (q.chartData || []).slice().sort((a, b) => Number(a.avgRank) - Number(b.avgRank))
     },
@@ -707,7 +687,6 @@ export default {
       return `${Math.max(8, Math.round(ratio * 100))}%`
     },
 
-    // ===== NPS =====
     npsOf(q) {
       return calcNps(q.chartData)
     },
@@ -777,7 +756,7 @@ export default {
       this.textExpanded = { ...this.textExpanded, [questionId]: !this.textExpanded[questionId] }
     },
 
-    // 打开答卷列表：从第 1 页开始，成功了才开弹窗（失败提示由接口层弹）
+    /** 打开答卷列表：从第 1 页开始，成功后才开弹窗（失败提示由接口层弹） */
     async openAnswerList() {
       if (await this.loadAnswerPage(1)) {
         this.listVisible = true
@@ -785,11 +764,8 @@ export default {
     },
 
     /**
-     * 拉取一页答卷（分页器翻页也走这里）。
-     *
-     * ★ 后端返回 `{ total, list, pageNum, pageSize }`（PageResult）：
-     *   `answers` 只放**当前页**，`total` 交给分页器 —— 不要再把整个数组塞进内存。
-     * ★ 返回 true/false 供 openAnswerList 判断"要不要开弹窗"。
+     * 拉取一页答卷（分页器翻页也走这里）：answers 只放当前页，total 交给分页器。
+     * @returns {Promise<boolean>} true = 成功（openAnswerList 据此决定要不要开弹窗）
      */
     async loadAnswerPage(pageNum) {
       this.answerLoading = true
@@ -807,11 +783,10 @@ export default {
       }
     },
 
-    // 查看某份答卷详情
+    /** 查看某份答卷详情（传的是答卷 id，不是问卷 id） */
     async viewAnswerDetail(row) {
       this.currentAnswerId = row.id
       try {
-        //   api.answer.detail(row.id)（这里传的是答卷 id，不是问卷 id）
         this.answerDetails = await api.answer.detail(row.id)
         this.detailVisible = true
       } catch {
@@ -819,7 +794,7 @@ export default {
       }
     },
 
-    // 根据题目ID查题目标题
+    /** 根据题目 id 查题目标题（找不到时给不误导的占位） */
     getQuestionTitle(questionId) {
       const q = this.questions.find(item => item.id === questionId)
       return q ? q.title : `题目 #${questionId}`
@@ -843,9 +818,8 @@ export default {
     },
 
     /**
-     * 单份答卷详情里，一行明细怎么显示。
-     * ★ 矩阵一行一个矩阵行、排序一名一条 —— 只显示 content 会丢掉"是哪一行/第几名"，
-     *   用户看到的就会是一串互不相干的列标题/选项。
+     * 单份答卷一行明细怎么显示：矩阵一行一条、排序一名一条，
+     * 只显示 content 会丢掉"是哪一行/第几名"。
      */
     formatDetail(item) {
       const q = this.questions.find(x => x.id === item.questionId)
@@ -863,12 +837,8 @@ export default {
     },
 
     /**
-     * 导出 Excel。
-     *
-     * ★ api.answer.exportExcel() 内部走 http.download()，它解析响应头 Content-Disposition
-     *   里的文件名（后端用 RFC 5987 的 `filename*=UTF-8''` 传中文名，并给一个 ASCII 的
-     *   `filename` 兜底）并**直接触发浏览器下载** —— 所以页面只剩一行，
-     *   而且文件名终于是后端给的那个，不再是写死的兜底名。
+     * 导出 Excel：api.answer.exportExcel() 内部走 http.download()，解析
+     * Content-Disposition（RFC 5987 中文名 + ASCII 兜底）并直接触发下载。
      */
     async exportExcel() {
       try {
@@ -879,9 +849,8 @@ export default {
       }
     },
 
-    // ==================== 分享报告 ====================
 
-    /** 打开分享弹窗并生成图片（同步生成，1080×1320 一张 PNG，几十毫秒） */
+    /** 打开分享弹窗并生成图片（Canvas 手绘 1080×1320 PNG，不引截图库） */
     openShare() {
       this.shareVisible = true
       this.shareImage = ''
@@ -951,7 +920,6 @@ export default {
   gap: 10px;
 }
 
-/* ==================== 概览卡 ==================== */
 .stat-tile {
   display: flex;
   align-items: center;
@@ -989,7 +957,6 @@ export default {
   margin-top: 2px;
 }
 
-/* ==================== 质控条 ==================== */
 .quality-bar {
   display: flex;
   align-items: center;
@@ -1048,7 +1015,6 @@ export default {
   color: #92400e;
 }
 
-/* ==================== 题目卡 ==================== */
 .question-list {
   display: flex;
   flex-direction: column;
@@ -1101,7 +1067,6 @@ export default {
   height: 300px;
 }
 
-/* ==================== 矩阵题统计 ==================== */
 .matrix-table-wrap {
   overflow-x: auto;
 }
@@ -1148,7 +1113,6 @@ export default {
   color: var(--ink-3);
 }
 
-/* ==================== 排序题统计 ==================== */
 .ranking-stats {
   display: flex;
   flex-direction: column;
@@ -1201,7 +1165,6 @@ export default {
   flex-shrink: 0;
 }
 
-/* ==================== NPS 统计 ==================== */
 .nps-hero {
   display: flex;
   align-items: center;
@@ -1286,7 +1249,6 @@ html[data-theme="dark"] .rank-bar-wrap {
   background: #16263f;
 }
 
-/* ==================== 填空题回答 ==================== */
 .text-answers {
   display: flex;
   flex-direction: column;
@@ -1326,7 +1288,6 @@ html[data-theme="dark"] .rank-bar-wrap {
   align-self: flex-start;
 }
 
-/* ==================== 弹窗 ==================== */
 .dialog-head {
   display: flex;
   align-items: center;
@@ -1377,7 +1338,6 @@ html[data-theme="dark"] .rank-bar-wrap {
   word-break: break-word;
 }
 
-/* ==================== 分享报告 ==================== */
 .share-preview {
   border-radius: 14px;
   overflow: hidden;

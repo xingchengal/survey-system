@@ -1,20 +1,9 @@
 <!--
-  模板管理（管理员）。
+  模板管理（管理员）：集中维护 is_template = 1 的问卷，可编辑内容 / 改分类 / 取消模板 / 删除。
 
-  ── 为什么需要这个页面 ───────────────────────────────
-  之前"设为模板"只有一个入口（「全部问卷」里的开关 + 按钮），但没有**集中维护**的地方：
-    · 模板内容写错了，找不到"改模板"的入口（只能去全部问卷里翻）；
-    · 分类想调整，只能取消模板再重设；
-    · 模板多了以后，根本不知道模板广场里到底有哪些、分别是什么分类。
-  本页把 is_template = 1 的问卷集中列出，并给出四个动作：
-    编辑内容 / 改分类 / 取消模板 / 删除（移入回收站）。
-
-  ★ 复用现有端点，没有新增接口：
-    · 列表  GET  /api/survey/templates
-    · 分类  PUT  /api/survey/set-template/{id}?isTemplate=1&category=…
-    · 取消  PUT  /api/survey/set-template/{id}?isTemplate=0
-    · 删除  PUT  /api/survey/recycle/{id}
-    · 编辑  前端路由 /my/surveys/{id}/edit（meta.roles 含 admin）
+  ★ 模板分类独立于模板存在：分类清单是独立表，允许 0 个模板的空分类；新增分类后再「设为模板」即可用。
+  ★ 模板热度按 templateUseCount（被「从模板创建」的使用次数）算，后端已按它降序返回。
+  复用现有端点，无新增接口；编辑内容走前端路由 /admin/templates/{id}/edit。
 -->
 <template>
   <div>
@@ -56,7 +45,7 @@
       <span class="toolbar-tip">也可以把现有问卷「设为模板」（在「全部问卷」里）</span>
     </div>
 
-    <!-- 分类概览：点一下即筛选，避免只靠下拉框"猜"每个分类有多少模板 -->
+    <!-- 分类概览：点一下即筛选，比只靠下拉框直观 -->
     <div v-if="templates.length || templateCategories.length" class="category-chips">
       <button
         type="button"
@@ -76,7 +65,7 @@
       >
         {{ item.name }} <b>{{ item.count }}</b>
       </button>
-      <!-- ★ 新增分类：分类清单是独立表，可以是 0 个模板的"空分类" -->
+      <!-- 分类清单独立于模板：允许 0 个模板的空分类 -->
       <button type="button" class="cat-chip cat-chip-add" title="新增一个模板分类" @click="openAddCategory">
         <el-icon><component :is="Plus" /></el-icon>
         <span>新增分类</span>
@@ -102,7 +91,7 @@
             <el-tag size="small" type="success">{{ row.templateCategory || '通用' }}</el-tag>
           </template>
         </el-table-column>
-        <!-- 热度：模板被「从模板创建」使用的次数；后端已按它降序返回，这里再给可排序 -->
+        <!-- 热度：被「从模板创建」使用的次数；后端已按它降序返回，这里再给可排序 -->
         <el-table-column prop="templateUseCount" label="使用次数" width="110" align="center" sortable>
           <template #default="{ row }">
             <span v-if="row.templateUseCount > 0" class="usage-badge">🔥 {{ row.templateUseCount }} 次</span>
@@ -110,8 +99,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="createdTime" label="创建时间" width="165" />
-        <!-- ★ 不要 fixed="right"：整表宽度超过容器时，固定列会盖住「创建时间」，
-             而这一页 7 列的总宽并不需要固定操作列（见用户截图）。让表格整体滚动即可。 -->
+        <!-- 不要 fixed="right"：整表超宽时固定列会盖住「创建时间」，让表格整体滚动即可 -->
         <el-table-column label="操作" width="330" align="center">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="editContent(row)">编辑内容</el-button>
@@ -123,7 +111,7 @@
       </el-table>
     </div>
 
-    <!-- 改分类：allow-create 允许输入新分类（与「设为模板」弹窗一致，分类是模板广场的聚合维度） -->
+    <!-- 改分类：allow-create 允许输入新分类（分类是模板广场的聚合维度） -->
     <el-dialog v-model="categoryVisible" title="修改模板分类" width="440px">
       <p class="text-secondary" style="margin-top: 0;">模板：{{ categoryForm.title }}</p>
       <el-select
@@ -142,7 +130,7 @@
       </template>
     </el-dialog>
 
-    <!-- 新增分类：分类清单独立于模板，允许先建一个暂时没有模板的分类 -->
+    <!-- 新增分类：可先建一个暂时没有模板的分类 -->
     <el-dialog v-model="categoryAddVisible" title="新增模板分类" width="440px">
       <el-input
         v-model="newCategoryName"
@@ -160,8 +148,7 @@
       </template>
     </el-dialog>
 
-    <!-- 新建模板：先建一份草稿问卷，再打上模板身份，然后直接进模板编辑器加题目。
-         ★ 不走「我的问卷」的新建流程 —— 管理员只维护模板，不碰用户侧页面。 -->
+    <!-- 新建模板：先建一份草稿问卷，再打上模板身份，然后直接进模板编辑器加题目 -->
     <el-dialog v-model="createVisible" title="新建模板" width="520px">
       <el-form label-width="80px">
         <el-form-item label="模板标题" required>
@@ -203,11 +190,7 @@ export default {
   data() {
     return {
       templates: [],
-      /**
-       * 后端维护的分类清单（t_template_category）。
-       * ★ 它和 templates 里出现过的分类是**两件事**：清单可以含"暂时没有模板"的空分类，
-       *   这正是「+ 新增分类」存在的意义；展示时把两者合并，空分类显示 0。
-       */
+      /** 后端维护的分类清单（t_template_category）：与模板实际分类是两件事，可含 0 个模板的空分类 */
       templateCategories: [],
       loading: false,
       keyword: '',
@@ -216,36 +199,25 @@ export default {
       categoryVisible: false,
       categoryForm: { id: null, title: '', category: '' },
       saving: false,
-      // 新增分类弹窗
       categoryAddVisible: false,
       newCategoryName: '',
       addingCategory: false,
-      // 新建模板弹窗
       createVisible: false,
       createForm: { title: '', description: '', category: '通用' },
       creating: false,
-      // ★ :prefix-icon 用的是**变量**，不是 <Search /> 标签；
-      //   直接放进 data（markRaw 避免被 Vue 变成响应式代理）
+      // :prefix-icon 要的是变量，直接放 data（markRaw 避免被 Vue 变成响应式代理）
       Search: markRaw(Search),
       Plus: markRaw(Plus)
     }
   },
   computed: {
-    /**
-     * 可选分类 = 后端清单 ∪ 现有模板里出现过的分类。
-     * ★ 后者是防御性的：老模板可能带着一个还没进清单的 template_category
-     *   （例如手工 SQL 改过），合并后至少筛选下拉里不会凭空少一项。
-     */
+    /** 可选分类 = 后端清单 ∪ 模板里出现过的分类（老数据可能带清单外分类，合并后筛选不会少项） */
     categories() {
       const set = new Set(this.templateCategories)
       this.templates.forEach((t) => set.add(t.templateCategory || '通用'))
       return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'))
     },
-    /**
-     * 分类分布：先给后端清单里的每个分类放一个 0，再按模板数累加。
-     * ★ 必须从清单初始化，否则"暂时没有模板的新分类"根本不会出现在 chips 里 ——
-     *   用户刚点「+」建完分类，页面却看不到它，会以为没成功。
-     */
+    /** 分类分布：先从清单初始化 0，再按模板数累加，否则空分类不会出现在 chips 里 */
     categoryStats() {
       const map = new Map()
       this.templateCategories.forEach((name) => map.set(name, 0))
@@ -285,7 +257,7 @@ export default {
     async load() {
       this.loading = true
       try {
-        // ★ 复用模板广场接口（is_template = 1 且 deleted = 0）；keyword 由后端做 LIKE 转义
+        // 复用模板广场接口（is_template = 1 且 deleted = 0）；keyword 由后端做 LIKE 转义
         this.templates = await api.survey.templates({ keyword: this.keyword.trim() })
       } catch {
         // 失败提示由接口层统一弹出
@@ -295,10 +267,7 @@ export default {
       }
     },
 
-    /**
-     * 拉后端分类清单。
-     * ★ 失败不阻断页面：退回"从模板里推导分类"，只是「+ 新增分类」暂时不可用。
-     */
+    /** 拉后端分类清单；失败不阻断页面，只是「+ 新增分类」暂时不可用 */
     async loadCategories() {
       try {
         const list = await api.survey.templateCategories({ silent: true })
@@ -313,10 +282,7 @@ export default {
       this.categoryAddVisible = true
     },
 
-    /**
-     * 新增分类：POST /api/survey/template-categories?name=...
-     * ★ 后端返回完整清单，直接覆盖本地；不用再 loadCategories()。
-     */
+    /** 新增分类：POST /survey/template-categories?name=...，后端返回完整清单直接覆盖本地 */
     async submitCategory() {
       const name = (this.newCategoryName || '').trim()
       if (!name) {
@@ -348,9 +314,8 @@ export default {
     },
 
     /**
-     * 新建模板：POST /api/survey/add（草稿）→ PUT /api/survey/set-template（打上模板身份）
-     * → 跳模板编辑器加题目。两步都在前端完成，后端不需要新端点。
-     * ★ 建失败就停；设为模板失败时问卷已成草稿，可到「全部问卷」里手动设模板（不会丢）。
+     * 新建模板：POST /survey/add（草稿）→ PUT /survey/set-template 打上模板身份 → 进模板编辑器加题目。
+     * 设模板失败时问卷已是草稿，可到「全部问卷」手动设模板，不会丢。
      */
     async createTemplate() {
       const title = (this.createForm.title || '').trim()

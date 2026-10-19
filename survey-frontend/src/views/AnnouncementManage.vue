@@ -22,12 +22,14 @@
       <el-table-column prop="id" label="ID" width="70" align="center" />
       <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
       <el-table-column prop="content" label="内容" min-width="240" show-overflow-tooltip />
+      <!-- ★ status 只认 0/1：0=下架、1=上架，其它值会让状态标签与 /active 过滤同时失真 -->
       <el-table-column prop="status" label="状态" width="90" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.status === 1" type="success" size="small">已发布</el-tag>
           <el-tag v-else type="info" size="small">已下架</el-tag>
         </template>
       </el-table-column>
+      <!-- 过期时间留空 = 永不过期；管理端列表含已过期，用户端 /active 只下发 status=1 且未过期 -->
       <el-table-column prop="expireTime" label="过期时间" width="170">
         <template #default="{ row }">
           {{ row.expireTime || '永不过期' }}
@@ -82,15 +84,10 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-// Plus 用于属性变量形式（:icon="Plus"），必须 import（模板标签形式才可由全局注册提供）
 import { Plus } from '@element-plus/icons-vue'
-// ★ 统一接口层（src/api）：Authorization、query 拼接、非 2xx 抛错、错误提示、401 跳登录都在里面，
-//   本页只需关心「调哪个接口、拿到什么数据」
 import api from '../api'
-// 三态容器：骨架 / 空 / 错误（带重试）
 import PageState from '../components/PageState.vue'
 
-// 图标已在 main.js 全局注册；本页只有 Plus 需要按"属性变量"形式用（:icon="Plus"），所以单独 import
 export default {
   components: { PageState },
   data() {
@@ -101,7 +98,6 @@ export default {
       error: false,
       dialogVisible: false,
       form: { title: '', content: '', expireTime: null },
-      // ★ 关键：模板里用 :icon="Plus" 就要在 data 里返回
       Plus: markRaw(Plus)
     }
   },
@@ -113,10 +109,10 @@ export default {
       this.loading = true
       this.error = false
       try {
-        // 接口层已带登录凭证且会按 HTTP 状态码判成败，成功直接 resolve 响应体（数组）
+        // 接口层已按 HTTP 状态码判成败，成功直接 resolve 数组
         this.list = await api.announcement.list()
       } catch {
-        // ★ 接口层已统一 ElMessage.error，这里置 error 交 PageState 显示重试入口
+        // 接口层已统一提示；置 error 交 PageState 显示重试入口
         this.error = true
       } finally {
         this.loading = false
@@ -131,26 +127,26 @@ export default {
     async handleSubmit() {
       if (!this.form.title.trim()) return ElMessage.warning('请输入标题')
       if (!this.form.content.trim()) return ElMessage.warning('请输入内容')
+      // 发布者由后端按登录用户写真实昵称，前端不传 publisherName
       try {
-        // POST 与序列化由接口层负责，非 2xx 直接 throw ——「await 成功即成功」
+        // 非 2xx 直接 throw：await 成功即发布成功
         await api.announcement.add(this.form)
         ElMessage.success('发布成功')
         this.dialogVisible = false
         this.loadList()
       } catch {
-        // ★ 失败必定走 throw，提示已由接口层统一弹出，这里只做流程控制（不关弹窗、不刷新列表）
+        // 失败已由接口层提示：不关弹窗、不刷新列表，保留用户已填内容
       }
     },
 
     async handleToggle(row, status) {
       try {
-        // updateStatus 内部就是 PUT /api/announcement/status/{id}?status=，成功才 resolve ——
-        // ★ 不要退回"读 text 比对 msg"的写法，否则后端改文案前端就静默失效
+        // ★ 不要退回「读响应 text 比对 msg」的写法：后端改文案前端就会静默失效
         await api.announcement.updateStatus(row.id, status)
         ElMessage.success('操作成功')
         this.loadList()
       } catch {
-        // 失败提示已由接口层统一处理，这里不再重复弹窗
+        // 失败提示由接口层统一处理
       }
     },
 
@@ -161,13 +157,11 @@ export default {
         type: 'warning'
       }).then(async () => {
         try {
-          // 删除是 DELETE，非 2xx 一律抛错，await 通过就说明删掉了
           await api.announcement.remove(row.id)
           ElMessage.success('删除成功')
           this.loadList()
         } catch {
-          // 失败提示由接口层统一弹出；保留 catch 是为了不打断 Promise 链
-          // （外层 .catch(() => {}) 负责吞掉「取消」分支，两者作用不同）
+          // 失败提示由接口层弹出；外层 .catch 只负责吞掉「取消」分支
         }
       }).catch(() => {})
     }

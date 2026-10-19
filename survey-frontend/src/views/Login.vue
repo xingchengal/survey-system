@@ -39,8 +39,7 @@
         </h2>
         <p class="auth-subtitle">登录你的账号</p>
 
-      <!-- ★ 与注册页同一套口径：错误信息在表单区域展示，不使用弹窗 alert。
-           登录失败（账号或密码错误）就落在这里，**不弹 ElMessage.error**。 -->
+      <!-- 与注册页同口径：登录失败文案只落在页内 alert，不弹 ElMessage.error -->
       <el-alert
         v-if="serverError"
         :title="serverError"
@@ -63,7 +62,6 @@
         </el-form-item>
 
         <el-form-item label="密码" prop="password">
-          <!-- 密码框的显示/隐藏切换用 Element Plus 的 show-password -->
           <el-input
             v-model="form.password"
             type="password"
@@ -76,11 +74,9 @@
         </el-form-item>
 
         <div class="login-row">
-          <!-- 「记住我」用**双 token** 实现：勾选后额外下发 7 天的 refresh token（可吊销、一次性轮换），
-               access token 本身仍是 12 小时 —— 理由见 RefreshTokenService 的类注释。 -->
+          <!-- ★ 记住我：勾选后额外下发 7 天 refresh token（可吊销、一次性轮换），access token 仍 12 小时 -->
           <el-checkbox v-model="form.rememberMe">记住我（7 天内免登录）</el-checkbox>
-          <!-- "忘记密码"未实现（后端没有重置端点），所以这里刻意不放一个点了没反应的链接 ——
-               那比没有更糟。 -->
+          <!-- 忘记密码未实现（后端无重置端点），刻意不放一个点了没反应的链接 -->
         </div>
 
         <el-form-item>
@@ -99,7 +95,7 @@
 
         <div class="auth-footer">
           <span class="text-gray">没有账号？</span>
-          <!-- ★ 带上 redirect：从"仅限登录"的问卷跳过来的，注册完还要回那份问卷 -->
+          <!-- 带上 redirect：从"仅限登录"的问卷跳过来的，注册完还要回那份问卷 -->
           <el-button type="primary" link @click="goRegister">去注册</el-button>
         </div>
       </el-form>
@@ -112,7 +108,7 @@
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { setAuth, setPermissions, homePathFor } from '../utils/auth'
-// 品牌标识（与侧栏 logo、favicon 同一图形，替换原来的 📋 emoji）
+// 品牌标识（与侧栏 logo、favicon 同一图形）
 import BrandLogo from '../components/BrandLogo.vue'
 
 /** 账号规则：字母+数字，4~20 位（与后端 UserService.ACCOUNT_PATTERN 一致） */
@@ -127,10 +123,8 @@ export default {
       rules: {
         username: [
           { required: true, message: '请输入账号', trigger: 'blur' },
-          // ★★ 这条规则**只对符合新规的账号成立**：本项目库里存有历史账号（含中文、2 位长），
-          //    后端默认开启严格校验（app.strict-username-check），所以前端与后端保持一致。
-          //    这带来一个**有意的取舍**：若后端把开关关掉而前端仍拦，旧账号用户会被前端挡住；
-          //    相比之下，"放过一个后端必然拒绝的请求"更糟，所以选择对齐后端默认值。
+          // 与后端默认的严格校验（app.strict-username-check）对齐：宁可挡住旧账号，
+          //   也不放过一个后端必然拒绝的请求。
           { pattern: ACCOUNT_RE, message: '账号仅支持字母和数字，4~20个字符', trigger: 'blur' }
         ],
         password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
@@ -172,20 +166,17 @@ export default {
           password: this.form.password,
           rememberMe: this.form.rememberMe
         })
-        // ★ 一次性写入：access token、用户信息、以及（勾了记住我才有的）refresh token。
-        //   走 utils/auth.setAuth 而不是直接写 localStorage —— 它会保证"**没勾**记住我时主动清掉旧的那枚"，
-        //   否则上次登录残留的 refresh token 会让"这次没勾"也依然能续期 7 天（与用户选择不符）。
+        // 走 utils/auth.setAuth 写登录态：没勾「记住我」时它会主动清掉上次残留的 refresh token，
+        //   否则"这次没勾"也会续期 7 天，与用户选择不符。
         setAuth(res.token, res.user, res.refreshToken)
-      // ★ H2：后端登录接口同时下发全局权限点（菜单/按钮显隐用；后端仍会逐次校验）。
-      //   老后端没有这个字段 → setPermissions(undefined) 会清空，hasPermission 走角色兜底。
+      // 登录时同时下发全局权限点（仅用于菜单/按钮显隐，后端仍逐次校验）；
+      //   后端没有该字段时 → setPermissions(undefined) 清空，hasPermission 走角色兜底。
       setPermissions(res.permissions)
 
-        // ★ 首页按角色区分（管理员 → 系统总览，普通用户 → 个人看板），统一由 homePathFor 决定。
-        //   ★ 注意：这里不判断 data.success —— 后端失败是 400（非 2xx），
-        //     http.js 会抛 ApiError，根本走不到这一行。
+        // 首页统一由 homePathFor 按角色决定（subadmin → /admin/workbench）；
+        //   这里不判断 success —— 后端失败是非 2xx，http.js 已抛 ApiError，走不到这行。
         ElMessage.success('登录成功')
-        // ★ 支持 redirect：从「仅限登录」的问卷跳过来时，登录后回到那份问卷。
-        //   只接受站内路径（以单个 / 开头），挡掉 //evil.com 这类协议相对跳转。
+        // redirect 只接受站内路径（单个 / 开头），挡掉 //evil.com 这类协议相对跳转
         const redirect = this.$route.query.redirect
         if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')) {
           this.$router.push(redirect)
@@ -193,8 +184,7 @@ export default {
           this.$router.push(homePathFor(res.user && res.user.role))
         }
       } catch (e) {
-        // 后端对"账号不存在"与"密码错误"返回**同一句**「账号或密码错误」，
-        //   ★ 前端**不要**改写文案、也不要根据任何差异给出不同提示，否则等于帮人做账号探测。
+        // ★ 后端对"账号不存在"与"密码错误"返回同一句；前端不要改写或区分，否则等于帮人做账号探测
         this.serverError = (e && e.message) || '登录失败，请稍后重试'
       } finally {
         this.submitting = false
@@ -295,7 +285,6 @@ export default {
   margin-bottom: 18px;
 }
 
-/* ==================== 左侧装饰插画（纯 CSS） ==================== */
 .auth-illustration {
   display: none;
   flex: 1;

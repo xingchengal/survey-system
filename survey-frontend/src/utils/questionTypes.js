@@ -1,11 +1,9 @@
 /**
- * 题型元数据 —— 与后端 `common/QuestionType` 的数字**必须一致**。
+ * 题型元数据 —— 数字与后端 common/QuestionType 一一对应。
  *
- * ★ 数字只追加、绝不复用：历史答卷只存了 content，题型由 t_question.type 决定，
- *   复用数字会让"老答卷按新题型解释"，统计直接错乱。
- * ★ 页面里不要再写 `type === 1 || type === 2` 这种判断：用 hasOptions / hasChart。
- * ★ 矩阵题的行列标题是**两个 JSON 数组文本**（后端 t_question.matrix_rows/matrix_cols），
- *   读进来要先 parseMatrixAxis；编辑器内部用数组，保存前用 stringifyMatrixAxis 转回去。
+ * ★ 数字只追加、绝不复用：老答卷只存 content，题型由 t_question.type 解释，复用会统计错乱。
+ * ★ 矩阵题的行/列标题是两个 JSON 数组文本（matrix_rows / matrix_cols）：
+ *   读前 parseMatrixAxis，存前 stringifyMatrixAxis。
  */
 
 export const QTYPE = {
@@ -24,6 +22,7 @@ export const QTYPE = {
 /**
  * 题型展示元数据（标签 / 标签色 / 图标名）。
  * icon 用 main.js 里已全局注册的图标名，模板里通过 `<component :is="meta.icon" />` 渲染。
+ * 页面判断题型用 hasOptions / hasChart，不要写 `type === 1 || type === 2`。
  */
 export const QUESTION_TYPE_META = {
   1: { label: '单选题', tag: 'primary', icon: 'CircleCheck' },
@@ -110,8 +109,8 @@ export function isFreeText(type) {
 
 /**
  * 统计是否按"分布图 / 统计卡"渲染。
- * ★ 评分题没有 options，但 1~5 分的分布本身就是图表数据，和后端 hasChart 口径一致。
- * ★ 矩阵 / 排序 / NPS 同样走 chartData，但渲染方式各自定制（矩阵表格、排序平均名次、NPS 分档）。
+ * 评分题没有 options，但 1~5 分的分布本身就是图表数据，和后端 hasChart 口径一致；
+ * 矩阵 / 排序 / NPS 同样走 chartData，但渲染方式各自定制（矩阵表格、排序平均名次、NPS 分档）。
  */
 export function hasChart(type) {
   return hasOptions(type) || isRating(type) || isNps(type) || isMatrix(type)
@@ -134,12 +133,8 @@ export function ratingAverage(chartData) {
 }
 
 /**
- * 解析矩阵题的行/列标题。
- *
- * ★ 入参可能是三种形态：
- *   · 后端返回的 JSON 字符串（`["A","B"]`）—— 正常路径；
- *   · 编辑器内部已经在用的数组 —— 直接返回副本；
- *   · null / 空串 / 损坏的 JSON —— 返回空数组（页面显示"配置不完整"，不让页面崩）。
+ * 解析矩阵题的行/列标题：入参可能是后端 JSON 字符串、编辑器数组或 null。
+ * 损坏 / 空值一律返回空数组，页面显示"配置不完整"而不是崩掉。
  */
 export function parseMatrixAxis(raw) {
   if (Array.isArray(raw)) return raw.map(item => String(item == null ? '' : item))
@@ -159,9 +154,8 @@ export function stringifyMatrixAxis(list) {
 }
 
 /**
- * NPS 汇总：推荐者 9~10、被动者 7~8、贬损者 0~6。
- * NPS =（推荐者 - 贬损者）/ 总数 × 100，保留一位小数。
- * ★ 没有任何回答时返回 total=0、score=null（页面显示"暂无数据"，不显示 0 分）。
+ * NPS 汇总：推荐者 9~10、被动者 7~8、贬损者 0~6；NPS =（推荐者 - 贬损者）/ 总数 × 100。
+ * 没有任何回答时返回 total=0、score=null（页面显示"暂无数据"，不显示 0 分）。
  */
 export function npsSummary(chartData) {
   const buckets = { promoters: 0, passives: 0, detractors: 0, total: 0 }

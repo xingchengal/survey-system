@@ -1,8 +1,6 @@
 /**
- * 协作者相关接口（后端 SurveyCollaboratorController）。
- *
- * ★ 权限口径：增删改查某份问卷的协作者 = 作者本人或管理员（后端判），
- *   请求失败由 http.js 统一弹红字；这里不做任何中文比对。
+ * 协作者接口（后端 SurveyCollaboratorController）。
+ * ★ 管理某份问卷的协作者限作者本人或管理员（后端判）；apply / leave / shared 只按当前登录用户。
  */
 import http from './http'
 
@@ -28,6 +26,6 @@ export default {
   /** 申请变更自己的角色（作者会收到通知，需作者同意） */
   apply: (surveyId, role) => http.post(`/api/collaborator/self/${surveyId}/apply`, { role }),
 
-  /** 共享给我的问卷（只返回自己参与的） */
+  /** 共享给我的问卷（只按当前用户） */
   shared: () => http.get('/api/collaborator/shared')
 }

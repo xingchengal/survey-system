@@ -1,6 +1,5 @@
 <template>
   <div class="result-page">
-    <!-- 加载骨架 -->
     <div v-if="loading" class="result-card">
       <div class="sk-block" style="height: 120px; margin-bottom: 16px;"></div>
       <div v-for="i in 3" :key="i" class="sk-block" style="height: 88px; margin-bottom: 12px;"></div>
@@ -19,7 +18,6 @@
     </div>
 
     <template v-else>
-      <!-- 顶部：标题 + 概览 -->
       <header class="result-hero">
         <div class="hero-glow"></div>
         <div class="hero-badge">PUBLIC RESULT · 公开结果</div>
@@ -39,7 +37,7 @@
         </div>
       </header>
 
-      <!-- 逐题结果 -->
+      <!-- 逐题只做分布：选项 / 评分 / 矩阵 / 排序 / NPS，不展示回答原文 -->
       <div class="result-card">
         <div v-if="questions.length === 0" class="muted center">这份问卷还没有题目</div>
 
@@ -50,7 +48,6 @@
             <el-tag size="small" effect="plain" round>{{ typeLabel(item.question.type) }}</el-tag>
           </div>
 
-          <!-- 矩阵：行 × 列分布 -->
           <div v-if="isMatrix(item.question.type)">
             <div v-if="item.chartData && item.chartData.length" class="matrix-wrap">
               <table class="pub-matrix">
@@ -73,7 +70,6 @@
             <div v-else class="muted center">暂无回答数据</div>
           </div>
 
-          <!-- 排序：平均名次 -->
           <div v-else-if="isRanking(item.question.type)">
             <div v-if="item.chartData && item.chartData.length" class="bars">
               <div v-for="(row, ri) in sortedRanking(item)" :key="'rk' + ri" class="bar-row">
@@ -87,7 +83,6 @@
             <div v-else class="muted center">暂无回答数据</div>
           </div>
 
-          <!-- NPS：净推荐值 + 分布 -->
           <div v-else-if="isNps(item.question.type)">
             <div v-if="item.chartData && item.chartData.length" class="bars">
               <p class="q-avg nps-public">
@@ -106,7 +101,6 @@
             <div v-else class="muted center">暂无回答数据</div>
           </div>
 
-          <!-- 普通选项 / 评分：横向条形 -->
           <template v-else-if="hasChart(item.question.type)">
             <div v-if="item.chartData && item.chartData.length" class="bars">
               <div v-for="row in item.chartData" :key="row.content" class="bar-row">
@@ -123,7 +117,7 @@
             <div v-else class="muted center">暂无回答数据</div>
           </template>
 
-          <!-- 文本类：公开页不展示原文（可能含个人信息） -->
+          <!-- ★ 文本类：公开页不展示原文（可能含个人信息） -->
           <div v-else class="text-hidden">
             该题是开放填写，回答原文不公开
           </div>
@@ -136,8 +130,8 @@
 </template>
 
 <script>
-// ★ 公开结果页：**匿名可访问**，所以不引用任何需要登录态的组件/接口。
-//   后端只返回脱敏统计（不含填空题原文），这里也不做任何"补充查询"。
+// ★ 公开结果页匿名可访问，不引用任何需要登录态的组件/接口；后端仅在 public_result = 1 时返回脱敏统计，
+//   这里只展示后端返回的分布，不做任何"补充查询"。
 import api from '../api'
 import {
   typeLabel, hasChart, isRating, ratingAverage,
@@ -161,6 +155,7 @@ export default {
     }
   },
   mounted() {
+    // 分享码来自路由参数，公开结果按 shareCode 定位问卷
     this.shareCode = this.$route.params.shareCode
     this.load()
   },
@@ -192,7 +187,6 @@ export default {
       return Math.round((Number(count || 0) / total) * 100)
     },
 
-    // ===== 矩阵 =====
     matrixRows(item) {
       return parseMatrixAxis(item.question.matrixRows)
     },
@@ -213,7 +207,6 @@ export default {
       return total > 0 ? Math.round(this.matrixCell(item, row, col) * 100 / total) : 0
     },
 
-    // ===== 排序 =====
     sortedRanking(item) {
       return (item.chartData || []).slice().sort((a, b) => Number(a.avgRank) - Number(b.avgRank))
     },
@@ -228,7 +221,6 @@ export default {
       return `${Math.max(8, Math.round((1 - (avg - 1) / total) * 100))}%`
     },
 
-    // ===== NPS =====
     npsOf(item) {
       return npsSummary(item.chartData)
     },

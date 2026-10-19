@@ -14,11 +14,9 @@
 import { ref } from 'vue'
 
 /**
- * 表格行密度切换（默认 / 紧凑）。
- *
- * 实现方式：只切 <html data-density>，行高由 theme.css 统一收紧 ——
- * 这样任何一个 el-table 都不用改模板，也不需要在页面里传 :size。
- * 选择存 localStorage，刷新后保持。
+ * 表格行密度切换（默认 / 紧凑）：只切 <html data-density>，行高由 theme.css 统一收紧，
+ * 任何 el-table 都不用改模板或传 :size；选择存 localStorage，刷新后保持。
+ * ★ data-density 的取值与行高必须与 theme.css 里的同名选择器保持一致。
  */
 const KEY = 'survey_table_density'
 
@@ -35,7 +33,7 @@ function apply(value) {
 }
 
 const density = ref(load())
-// 模块加载即生效：刷新后沿用上次选择（不用等任何一个表格挂载）
+// 模块加载即生效：刷新后沿用上次选择，不用等表格挂载
 apply(density.value)
 
 export default {
@@ -46,7 +44,7 @@ export default {
       try {
         localStorage.setItem(KEY, value)
       } catch {
-        // 存不进去就只在本次会话生效
+        // 存不进去就只在当前会话生效
       }
       apply(value)
     }

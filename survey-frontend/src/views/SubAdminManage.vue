@@ -105,10 +105,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
 /**
- * 次级管理员管理（仅超管，路由 meta.roles 限定 admin）。
- *
- * ★ 这里只负责“选人 + 勾权限”，真正的安全边界在后端 AdminManagementService：
- *   超管不可被操作、权限只能取 ADMIN_GRANTABLE、角色与权限同事务。
+ * 次级管理员：搜索普通用户 → 勾选可分配权限 → 提升 / 改权限 / 降级（仅超管）。
+ * ★ 超管不可被操作、权限只认 ADMIN_GRANTABLE、角色与权限同事务 —— 安全边界在后端 AdminManagementService。
  */
 export default {
   name: 'SubAdminManage',
@@ -160,6 +158,7 @@ export default {
           keyword: (keyword || '').trim(),
           disabled: 0
         })
+        // 只留 role=user：超管/次级管理员不能被重复提升
         this.userOptions = (data.list || []).filter(u => u.role === 'user')
       } catch {
         this.userOptions = []
@@ -189,6 +188,7 @@ export default {
         return
       }
       if (!this.form.permissions.length) {
+        // 至少一项权限：后端也会拒绝空列表，前端先拦给出明确提示
         ElMessage.warning('请至少选择一项权限')
         return
       }

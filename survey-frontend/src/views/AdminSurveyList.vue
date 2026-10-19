@@ -8,11 +8,8 @@
     </div>
 
     <div class="toolbar-card">
-      <!-- "显示模板"开关：打开后走 api.survey.templates()，能看到全部模板并取消它们。
-           ★ 少了这个开关，管理员把问卷设为模板后它会从本页消失、再也无法在本页取消：
-           /api/survey/page 的 SQL 排除 is_template=1，而 /api/survey/templates 只提供读取。
-           ★ 不要加 inline-prompt：那会把文字塞进开关内部，实际宽度不够、标题被吞掉，
-             开关就成了一个"没有任何说明的灰色方块"（用户反馈过这一点）。 -->
+      <!-- ★ 模板视图必须走 /survey/templates：/survey/page 的 SQL 排除 is_template=1，
+           不切数据源就看不到模板、也无法在本页取消；开关不配 inline-prompt（文字会被吞掉） -->
       <el-switch
         v-model="showTemplates"
         active-text="显示模板"
@@ -24,8 +21,7 @@
         <el-option label="已发布" :value="1" />
         <el-option label="已结束" :value="2" />
       </el-select>
-      <!-- 创建时间范围（G3）：闭区间，只到"天"。
-           ★ /survey/templates 不支持时间筛选，所以模板视图下禁用，避免"选了日期但没生效"的错觉。 -->
+      <!-- 创建时间范围（闭区间，只到天）；/survey/templates 不支持时间筛选，模板视图下禁用 -->
       <el-date-picker
         v-model="dateRange"
         type="daterange"
@@ -39,17 +35,15 @@
       />
       <el-input v-model="keyword" placeholder="搜索标题或描述..." clearable :prefix-icon="Search" @keyup.enter="handleSearch" @clear="handleSearch" />
       <el-button type="primary" @click="handleSearch">搜索</el-button>
-      <!-- 重置：没有任何筛选条件时置灰。否则点了之后界面毫无变化，
-           "按钮点了没反应"和"按钮不该点"看起来一模一样 —— 用户会以为功能坏了。 -->
+      <!-- 无筛选条件时「重置」置灰：点了界面毫无变化，会被当成按钮坏了 -->
       <el-button :disabled="!hasFilter" @click="handleReset">重置</el-button>
       <!-- 刷新：带 loading 转圈。本地请求往往 <100ms，不加这个反馈就完全看不出点过 -->
       <el-button :icon="Refresh" :loading="loading" @click="loadSurveys">刷新</el-button>
-      <!-- 导出（G3）：导的是**当前筛选结果**（不是当前页），后端上限 10000 份。
-           模板视图没有对应口径（导出 SQL 与 /page 一致、不含模板），所以禁用。 -->
+      <!-- 导出的是**当前筛选结果**（不是当前页），后端上限 10000 份；模板视图无对应口径，禁用 -->
       <el-button type="success" plain :icon="Download" :loading="exporting" :disabled="showTemplates" @click="handleExport">
         导出 Excel
       </el-button>
-      <!-- 列设置（G3）：纯前端偏好，存 localStorage。至少保留一列，否则表格会空成一片。 -->
+      <!-- 列设置：纯前端偏好，存 localStorage。至少保留一列，否则表格会空成一片。 -->
       <el-popover placement="bottom-end" :width="180" trigger="click">
         <template #reference>
           <el-button :icon="Setting">列设置</el-button>
@@ -66,9 +60,8 @@
       <TableDensity />
     </div>
 
-    <!-- 批量操作条：选中 ≥1 项才出现。
-         ★ 所有批量动作都是**逐条调单条端点**（Promise.allSettled），后端没有批量端点 ——
-           这样能精确报告"哪几份成功、哪几份为什么失败"，而不是整批回滚。 -->
+    <!-- 批量操作条：选中 ≥1 项才出现。全部逐条调单条端点（Promise.allSettled），
+         后端没有批量端点，这样才能精确报告哪几份成功、哪几份为什么失败 -->
     <div v-if="selectedRows.length > 0" class="batch-bar">
       <span class="batch-count">已选 <strong>{{ selectedRows.length }}</strong> 项</span>
       <el-button type="danger" size="small" :icon="Delete" :loading="batchWorking" @click="handleBatchRecycle">
@@ -162,12 +155,8 @@
       <el-empty v-if="currentQuestions.length === 0" description="该问卷暂无题目" />
     </el-dialog>
 
-    <!-- 设为模板 / 取消模板（管理员）。
-         ★ 为什么要弹窗而不是直接调：模板的"分类"是必填信息（模板广场按它聚合），
-          否则直接调会把分类写成 NULL，模板广场里就会显示成"通用/其他"。
-         ★★ 文案方向必须跟 templateForm.targetIsTemplate 走（1=接下来要设为模板，0=要取消）：
-          原来这里把 1 当成"当前已是模板"，于是点「设为模板」反而弹出「取消模板」，
-          还顺手把分类选择框藏了起来 —— 用户看到的就是"点了设为模板却问我要不要取消"。 -->
+    <!-- 设为/取消模板：分类是必填（模板广场按它聚合），所以用弹窗收集而不是直接调；
+         文案方向跟 targetIsTemplate 走（1=接下来设为，0=取消），不要当成当前状态 -->
     <el-dialog
       v-model="templateDialogVisible"
       :title="templateForm.targetIsTemplate === 1 ? '设为模板' : '取消模板'"
@@ -207,26 +196,18 @@
 <script>
 import { markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-// 统一接口层：本页的请求全部走 src/api/ ——
-//   分页列表 / 模板列表（"显示模板"开关用）/ 题目列表 / 设为模板 / 移入回收站 / 导出。
-//   页面不再自己取 token、拼 query、判断 res.ok、parse JSON。
+// 本页请求统一走 src/api/，页面不自己取 token、拼 query、判断 res.ok、parse JSON
 import api from '../api'
 import { hasPermission } from '../utils/auth'
-// Refresh / Search / Download / Setting 都用于「属性变量」形式（:icon="Download"），
-// 这种写法需要真实的变量，所以必须 import；
-// 若某图标只以模板标签形式出现（<Bell />），则由 main.js 全局注册即可，无需在这里 import。
+// :icon="Download" 这类属性变量需要真实变量，必须 import；模板标签形式由 main.js 全局注册
 import { Refresh, Search, Download, Setting, Delete } from '@element-plus/icons-vue'
-// 三态容器：骨架 / 空 / 错误（带重试）
 import PageState from '../components/PageState.vue'
-// 行密度切换（默认 / 紧凑）
 import TableDensity from '../components/TableDensity.vue'
-// 页码记忆（sessionStorage）
 import { readPageNum, savePageNum } from '../utils/pageMemory'
 
-/** 本页在 sessionStorage 里的页码键 */
 const PAGE_KEY = 'AdminSurveyList'
 
-/** 列设置（G3）的 localStorage 键：记住"哪几列可见"，刷新页面后不丢 */
+/** 列设置的 localStorage 键 */
 const COLUMN_KEY = 'AdminSurveyList:columns'
 
 /** 可开关的列（ID / 标题 / 描述 / 状态 / 创建时间）。模板分类列只在模板视图出现，一并纳入开关。 */
@@ -269,9 +250,6 @@ function summarizeBatch(rows, results) {
   return { ok, failures }
 }
 
-// 图标已在 main.js 里全局注册，这里不再重复注册。
-// 说明：模板标签形式（<Bell />）和属性变量形式（:icon="Refresh"）都不受影响 ——
-//       前者走全局注册，后者走本文件顶部的 import。
 export default {
   components: { PageState, TableDensity },
   data() {
@@ -282,11 +260,9 @@ export default {
       error: false,
       keyword: '',
       statusFilter: '',
-      // 创建时间范围（G3）：['2026-10-01', '2026-10-02'] 或 null。
-      // ★ value-format 决定它永远是 'YYYY-MM-DD' 字符串，直接进 query 不用再格式化。
+      // 创建时间范围：['2026-10-01', '2026-10-02'] 或 null；value-format 保证是 'YYYY-MM-DD'，可直接进 query
       dateRange: null,
-      // false = 走 api.survey.page（排除模板，默认视图）
-      // true  = 走 api.survey.templates（含模板，用来管理模板身份）
+      // false = /survey/page（排除模板）；true = /survey/templates（含模板，用来管理模板身份）
       showTemplates: false,
       pageNum: 1,
       pageSize: 10,
@@ -294,27 +270,20 @@ export default {
       dialogVisible: false,
       currentSurvey: {},
       currentQuestions: [],
-      // ===== G3：多选 / 批量 / 导出 / 列设置 =====
-      // el-table 的选中行（selection-change 事件回填）
       selectedRows: [],
       batchWorking: false,
       exporting: false,
       visibleColumns: readVisibleColumns(),
       columnOptions: COLUMN_OPTIONS,
-      // ===== 并发保护（修「重置/刷新点了没反应」）=====
-      // 每次发请求自增；响应回来时若 seq 已不是最新的，就**丢弃这份结果**。
-      // ★ 为什么必须要它：点「重置」会连发两次请求 —— 日期控件的 @change 一次 + handleReset 自己一次；
-      //   快速点搜索/翻页同理。两个请求的**返回顺序不保证**，慢的那个后到就会把新结果覆盖成旧数据，
-      //   界面上看就是"点了重置，列表却还是筛选前的样子"（或反之）。这不是错觉，是真 bug。
+      // 并发保护：每次请求自增 seq，响应回来时若已不是最新序号就丢弃。
+      //   「重置」会连发两次请求（日期 @change + handleReset），返回顺序不保证，
+      //   慢的那个后到会把新结果覆盖成旧数据。
       loadSeq: 0,
-      // ===== 设为/取消模板 =====
       templateDialogVisible: false,
       templateSubmitting: false,
-      // title 只用于弹窗文案；targetIsTemplate 是**目标状态**：
-      //   1 = 这次要设为模板（显示分类选择），0 = 这次要取消模板
+      // targetIsTemplate 是**目标状态**：1 = 这次要设为模板（显示分类选择），0 = 这次要取消模板
       templateForm: { id: null, title: '', category: '', targetIsTemplate: 0 },
-      // 初始兜底 7 类；mounted 时用后端 /survey/template-categories 覆盖，
-      // 这样「模板管理」里新增的分类会立刻出现在这里（allow-create 仍可现场输入新分类）。
+      // 兜底 7 类，mounted 时用后端 /survey/template-categories 覆盖；allow-create 仍可现场输入新分类
       templateCategoryOptions: ['满意度', '报名', '反馈', '调研', '教育', '健康', '其他'],
       Search: markRaw(Search),
       Refresh: markRaw(Refresh),
@@ -329,10 +298,8 @@ export default {
       return hasPermission('template:manage')
     },
     /**
-     * 当前是否有任何筛选条件（用于「重置」按钮的置灰）。
-     * ★ 为什么要它：没有筛选条件时点「重置」，界面不会有任何变化 ——
-     *   用户会把它当成"按钮坏了"。置灰等于把"现在没东西可重置"这件事显式说出来。
-     * ★ statusFilter 的 0（草稿）是**有效值**，不能用真值判断（`!this.statusFilter` 会把它当空）。
+     * statusFilter 的 0（草稿）是有效值，不能用真值判断；
+     * 没有任何筛选时「重置」置灰，否则点了界面毫无变化，用户会当成按钮坏了。
      */
     hasFilter() {
       return Boolean(
@@ -360,11 +327,8 @@ export default {
     this.loadTemplateCategories()
   },
   methods: {
-    // ===== 分页加载全部问卷（管理员）=====
-    // 关联：surveys 喂给表格；total 喂给 el-pagination；statusFilter / keyword / dateRange 来自顶部筛选栏。
-    // ★ showTemplates 为真时必须走 api.survey.templates()（模板列表）：
-    //   api.survey.page 的 SQL 排除 is_template = 1，不切数据源就看不到模板、也就无法取消它。
-    // ★ **并发保护**：见 data.loadSeq 的注释。只有最后一次请求的响应允许写回界面。
+    // showTemplates 为真时必须走 api.survey.templates()：/survey/page 的 SQL 排除模板，
+    //   不切数据源就看不到模板、也无法取消它。
     async loadSurveys() {
       const seq = ++this.loadSeq
       this.loading = true
@@ -380,10 +344,8 @@ export default {
           this.surveys = list.slice(start, start + this.pageSize)
           return
         }
-        // 参数对象交给 api.survey.page()，由 http.js 的 toQuery 统一拼串并做 URL 编码。
-        // ★ 注意 status 的 0（草稿）不会被误当成空值丢掉 —— toQuery 只过滤 '' / null / undefined，
-        //   所以这里不必自己判空。
-        // ★ dateRange 为 null 时下面两个字段都是 undefined，toQuery 会自动跳过（= 不限制时间）。
+        // status 的 0（草稿）不会被 toQuery 丢掉（只过滤 '' / null / undefined）；
+        //   dateRange 为 null 时两个字段是 undefined，自动跳过 = 不限制时间。
         const data = await api.survey.page({
           pageNum: this.pageNum,
           pageSize: this.pageSize,
@@ -397,7 +359,7 @@ export default {
         this.total = data.total || 0
       } catch {
         // 错误提示已由 src/api/http.js 统一弹出，这里只置 error 让 PageState 显示重试入口
-        // ★ 同样只在"这次仍是最新请求"时才置错，否则一次早已被取代的失败会把界面打成错误态
+        // 同样只在"这次仍是最新请求"时才置错，否则一次早已被取代的失败会把界面打成错误态
         if (seq === this.loadSeq) this.error = true
       } finally {
         if (seq === this.loadSeq) this.loading = false
@@ -410,7 +372,7 @@ export default {
       this.loadSurveys()
     },
 
-    /** 重置全部筛选条件（G3）：关键词 / 状态 / 时间范围一起清，页码回 1 */
+    /** 重置全部筛选条件：关键词 / 状态 / 时间范围一起清，页码回 1 */
     handleReset() {
       this.keyword = ''
       this.statusFilter = ''
@@ -418,8 +380,7 @@ export default {
       this.handleSearch()
     },
 
-    // ★ 模板列表接口不分页（一次给全部），前端本地分页；
-    //   切换视图时把页码复位，否则在"全部问卷"翻到第 3 页再切"显示模板"会落到空页。
+    // 切视图页码复位，否则翻到第 3 页再切会落到空页
     handleTemplateViewChange() {
       this.pageNum = 1
       savePageNum(PAGE_KEY, 1)
@@ -441,7 +402,6 @@ export default {
       this.loadSurveys()
     },
 
-    // ===== G3：多选与批量操作 =====
     handleSelectionChange(rows) {
       this.selectedRows = rows || []
     },
@@ -455,11 +415,8 @@ export default {
     },
 
     /**
-     * 批量移入回收站。
-     * ★ 逐条调用 `PUT /api/survey/recycle/{id}`（管理员对该端点有权限，见审计表「需登录+归属」档）。
-     *   传 `{ silent: true }` 是为了**不让 http.js 对每条失败各弹一次红字** ——
-     *   批量 10 条里有 3 条失败时，弹 3 次比一次汇总更难读。
-     * ★ 用 allSettled 而不是 all：一条失败不该让已成功的回滚（后端本来就是各自独立的事务）。
+     * ★ 逐条调 PUT /api/survey/recycle/{id}，用 allSettled 而非 all：一条失败不该回滚已成功的。
+     * 每条传 { silent: true }，否则 10 条里 3 条失败会弹 3 次红字，比一次汇总更难读。
      */
     handleBatchRecycle() {
       const rows = [...this.selectedRows]
@@ -487,12 +444,10 @@ export default {
       }).catch(() => {})
     },
 
-    // ===== G3：导出（当前筛选结果，不是当前页）=====
     async handleExport() {
       this.exporting = true
       try {
-        // ★ 走 http.download()：解析后端 Content-Disposition 里的文件名并触发浏览器下载。
-        //   失败（如超过 10000 份）由 http.js 统一弹红字并 throw，这里不用再提示。
+        // 走 http.download()：解析 Content-Disposition 文件名并触发下载；失败（如超过 10000 份）由 http.js 统一弹错
         await api.survey.exportExcel({
           keyword: this.keyword.trim(),
           status: this.statusFilter,
@@ -501,26 +456,21 @@ export default {
         })
         ElMessage.success('导出已开始，请查看浏览器下载')
       } catch {
-        // 失败提示已由 http.js 统一弹出
+        // 失败提示已由 http.js 统一弹出（如超过 10000 份）
       } finally {
         this.exporting = false
       }
     },
 
-    // ===== G3：列设置 =====
     isColumnVisible(key) {
       return this.visibleColumns.includes(key)
     },
 
-    // ===== 查看问卷详情（弹窗里列出题目）=====
-    // 关联：currentSurvey / currentQuestions 分别喂给 el-dialog 的标题和题目列表。
     async handleView(row) {
       this.currentSurvey = row
       this.dialogVisible = true
       try {
-        // ★ 带 X-Survey-Editor：这是「管理/编辑视角」的读取，不是填写人视角。
-        //   不带的话，管理员查看一份**设了答题密码**的问卷会被 400 拦住（后端只对
-        //   编辑器/管理视角豁免口令，填写页必须输对密码）。
+        // 带 X-Survey-Editor：管理/编辑视角读取；否则查看设了答题密码的问卷会被 400 拦住
         this.currentQuestions = await api.question.list(row.id, {
           headers: { 'X-Survey-Editor': '1' }
         })
@@ -530,12 +480,9 @@ export default {
       }
     },
 
-    // ===== 设为模板 / 取消模板（管理员）=====
-    // 关联：PUT /api/survey/set-template/{id}?isTemplate=0|1&category=xxx
-    //   · 后端已把 isTemplate 收成只允许 0/1；category 只在"设为模板"时有意义
-    //   · 后端还会挡"回收站里的问卷"（400），失败提示由 http.js 统一弹出
-    //   · 分类清单来自 GET /api/survey/template-categories（与「模板管理」共用一份，
-    //     后端在 setTemplate 时会把新输入的分类自动登记，所以两边不会各有一份白名单）
+    // 设为/取消模板：PUT /survey/set-template/{id}?isTemplate=0|1&category=xxx
+    // · 后端只允许 0/1；category 只在设为模板时有意义，回收站里的问卷会被 400 拦住
+    // · 分类清单与「模板管理」共用 /survey/template-categories，后端会自动登记新分类
     async loadTemplateCategories() {
       try {
         const list = await api.survey.templateCategories({ silent: true })
@@ -546,16 +493,12 @@ export default {
     },
 
     handleTemplate(row) {
-      // ★ targetIsTemplate 是**目标状态**，不是当前状态：
-      //   当前是模板 → 目标 0（取消）；当前不是 → 目标 1（设为）。
       const targetIsTemplate = row.isTemplate === 1 ? 0 : 1
       this.templateForm = {
         id: row.id,
         title: row.title,
-        // ★ 取消模板时分类传空串（后端 SurveyService.setTemplate 会把空白归一成 NULL）；
-        //   否则库里会留下 template_category='其他'，与既有的 NULL 混成两种"没有分类" ——
-        //   前端展示恰好都显示成"通用/其他"，表面看不出问题，但按分类统计会分裂成两组。
-        // 设为模板时预填原分类或"其他"，便于快速确认。
+        // 取消模板时分类传空串（后端归一成 NULL）：否则库里留下 '其他'，与既有的 NULL
+        //   混成两种"没有分类"，按分类统计会分裂成两组。
         category: targetIsTemplate === 1 ? (row.templateCategory || '其他') : '',
         targetIsTemplate
       }
@@ -584,8 +527,7 @@ export default {
       }
     },
 
-    // ===== 把问卷移入回收站 =====
-    // 关联：成功后要重新拉列表（recycle 不改本地数组，必须重新 loadSurveys）。
+    // 移入回收站：recycle 不改本地数组，成功后必须重新 loadSurveys
     handleDelete(row) {
       ElMessageBox.confirm(`确定将问卷「${row.title}」移入回收站吗？`, '提示', {
         confirmButtonText: '移入回收站',
@@ -593,7 +535,7 @@ export default {
         type: 'warning'
       }).then(async () => {
         try {
-          // ★ 失败由 http.js 按状态码弹错并 throw，所以页面按"能 await 成功就是成功"写即可。
+          // 失败由 http.js 按状态码弹错并 throw，所以页面按"能 await 成功就是成功"写即可。
           await api.survey.recycle(row.id)
           ElMessage.success('已移入回收站')
           this.loadSurveys()
@@ -613,7 +555,7 @@ export default {
   flex: 0 0 auto;
 }
 
-/* 批量操作条（G3）：选中才出现，粘在工具栏与表格之间 */
+/* 批量操作条：选中才出现，粘在工具栏与表格之间 */
 .batch-bar {
   display: flex;
   align-items: center;

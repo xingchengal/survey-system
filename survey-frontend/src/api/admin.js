@@ -1,8 +1,6 @@
 /**
  * 次级管理员管理（后端 AdminManagementController，仅超级管理员）。
- *
- * ★ 这些接口会改“谁能进管理端、谁有什么权限”，失败一律 400/403；
- *   前端只按 HTTP 状态码判断，不做中文文案比对。
+ * ★ 提升 / 改权限都传 permissions 数组；失败 400/403，前端只认 HTTP 状态码，不比对中文文案。
  */
 import http from './http'
 

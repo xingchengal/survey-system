@@ -7,7 +7,6 @@
       </div>
     </div>
 
-    <!-- ==================== 顶部 6 个数据卡片 ==================== -->
     <el-row :gutter="16">
       <el-col :span="4" :xs="12" :sm="8" :md="4">
         <el-card shadow="hover" class="stat-card">
@@ -77,9 +76,7 @@
       </el-col>
     </el-row>
 
-    <!-- ==================== 第一行：饼图 + 趋势图 ==================== -->
     <el-row class="mt-20" :gutter="20">
-      <!-- 左：问卷状态分布 -->
       <el-col :span="10" :xs="24" :sm="24" :md="10">
         <el-card style="height: 380px;">
           <template #header>
@@ -93,7 +90,6 @@
         </el-card>
       </el-col>
 
-      <!-- 右：创建趋势 -->
       <el-col :span="14" :xs="24" :sm="24" :md="14">
         <el-card style="height: 380px;">
           <template #header>
@@ -107,7 +103,6 @@
       </el-col>
     </el-row>
 
-    <!-- ==================== 新增：答卷分布 + 问卷构成 ==================== -->
     <el-row class="mt-20" :gutter="20">
       <el-col :span="12" :xs="24" :sm="12">
         <el-card style="height: 360px;">
@@ -133,9 +128,7 @@
       </el-col>
     </el-row>
 
-    <!-- ==================== 第二行：回收量排行 + 系统概况 ==================== -->
     <el-row class="mt-20" :gutter="20">
-      <!-- 左：问卷回收量排行榜 -->
       <el-col :span="14" :xs="24" :sm="24" :md="14">
         <el-card style="height: 420px;">
           <template #header>
@@ -180,7 +173,6 @@
         </el-card>
       </el-col>
 
-      <!-- 右：系统概况 -->
       <el-col :span="10" :xs="24" :sm="24" :md="10">
         <el-card style="height: 420px;">
           <template #header>
@@ -192,7 +184,6 @@
             <div ref="healthRef" style="width: 100%; height: 150px;"></div>
           </div>
 
-          <!-- 关键指标 -->
           <div class="metric-list">
             <div class="metric-row">
               <span class="metric-name">答卷回收率</span>
@@ -218,14 +209,10 @@
 </template>
 
 <script>
-// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
-//   本页用到：饼图、折线图、仪表盘，以及 graphic.LinearGradient 做渐变填充
+// 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）：饼图 / 折线 / 仪表盘 + 渐变
 import echarts from '../utils/echarts'
-// ★ 统一接口层：本页只调 **2 个接口方法**（systemOverview + listWithResponseCount）——
-//   概况 1 次、问卷列表 1 次；每份问卷的答卷数由后端批量 GROUP BY 一次带回，
-//   而不是逐份 count（那会是 1 概况 + 1 列表 + N 次逐份答卷数请求）。
-//   注意这里不 import ElMessage：catch 里的失败提示统一由 src/api/http.js 弹出，
-//   页面层重复弹会一次失败弹两个框。
+// ★ 整份统计一次取回：systemOverview 概况 + listWithResponseCount（问卷与批量 GROUP BY 的答卷数）；
+//   不逐份 count（1 概况 + 1 列表 + N 次串行请求）。本页不 import ElMessage：失败提示统一由 http.js 弹。
 import api from '../api'
 import {
   chartText, chartStrong, chartSplit, chartTooltip, THEME_EVENT,
@@ -233,19 +220,17 @@ import {
 } from '../utils/chartTheme'
 // 本页图标均为模板标签形式，已由 main.js 全局注册，无需 import
 
-// 图标已在 main.js 全局注册，不再重复注册（View 是 HTML 保留标签名）
 export default {
   data() {
     return {
       stats: { users: 0, total: 0, published: 0, draft: 0, ended: 0, responses: 0, views: 0 },
-      ranking: [],          // 问卷回收量排行
+      ranking: [],
       pieChart: null,
       trendChart: null,
       healthChart: null,
       bucketChart: null,
       typeChart: null,
       templateCount: 0,
-      // 趋势图数据
       trendDates: [],
       trendCounts: [],
       recent7DaysTotal: 0
@@ -256,7 +241,7 @@ export default {
       return Math.max(...this.ranking.map(r => r.responseCount), 1)
     },
     responseRate() {
-      // 答卷回收率 = 总答卷 / (已发布问卷数 * 一个假设的满额数)。这里用简单公式：总答卷 / 已发布问卷数 取整
+      // 答卷回收率按「总答卷 / (已发布问卷数 × 10)」估算，上限 100%
       if (this.stats.published === 0) return 0
       return Math.min(100, Math.round(this.stats.responses / (this.stats.published * 10) * 100))
     },
@@ -304,18 +289,12 @@ export default {
   methods: {
     async loadAll() {
       try {
-        // 1. 系统概况：api.survey.systemOverview() 内部走 http.get
-        //    （统一带 token、统一按状态码判成败）。
+        // 1. 系统概况：http.js 统一带 token、按状态码判成败
         this.stats = await api.survey.systemOverview()
 
-        // 2. 问卷列表 + 每份的答卷数（一次请求拿到，替代逐份 count 的 N+1 做法）
-        //    逐份做法是 `for (const s of surveys) { await api.answer.count(s.id) }` ——
-        //    n 份问卷就要 n 次**串行**往返（10 份 = 1+1+10 次请求，越往后越慢，
-        //    问卷上百时这个页面要转很久）。后端本来就批量算好了答卷数，
-        //    只是缺一个"问卷 + 答卷数一起返回"的端点，本页用的就是这个端点。
+        // 2. 问卷 + 每份答卷数一次拿回：后端批量 GROUP BY，逐份 count 会是 1+1+N 次串行请求
         const rows = await api.survey.listWithResponseCount()
 
-        // 3. 组装排行（字段与逐份查询时一致）
         const ranking = rows.map(s => ({
           title: s.title,
           status: s.status,
@@ -325,10 +304,10 @@ export default {
         ranking.sort((a, b) => b.responseCount - a.responseCount)
         this.ranking = ranking
 
-        // 4. 计算近7天趋势（只用到 createdTime，rows 里已经带了）
+        // 3. 近 7 天趋势只用 createdTime，rows 里已经带了
         this.calcTrend(rows)
 
-        // 5. 模板数量（用于"模板 / 普通"构成图；失败不影响整页）
+        // 4. 模板数量用于「模板 / 普通」构成图；失败不影响整页
         try {
           const tpl = await api.survey.templates()
           this.templateCount = Array.isArray(tpl) ? tpl.length : 0
@@ -336,7 +315,6 @@ export default {
           this.templateCount = 0
         }
 
-        // 6. 渲染图表
         this.$nextTick(() => {
           this.initPie()
           this.initTrend()
@@ -345,8 +323,7 @@ export default {
           this.initType()
         })
       } catch (e) {
-        // ★ 失败提示由 src/api/http.js 统一弹出（非 2xx / 网络异常都会弹），
-        //   页面层再弹一次会重复，所以这里只留控制台日志便于排查，属于流程控制。
+        // 失败提示由 http.js 统一弹出，这里只留日志便于排查
         console.error(e)
       }
     },
@@ -362,7 +339,6 @@ export default {
         const pad = n => String(n).padStart(2, '0')
         const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
         dates.push(`${pad(d.getMonth() + 1)}-${pad(d.getDate())}`)
-        // 统计这一天创建的问卷数
         const cnt = surveys.filter(s => (s.createdTime || '').startsWith(key)).length
         counts.push(cnt)
       }
@@ -371,7 +347,7 @@ export default {
       this.recent7DaysTotal = counts.reduce((a, b) => a + b, 0)
     },
 
-    /** 主题切换：销毁三张图，用新配色重画（不重新请求数据） */
+    /** 主题切换：销毁全部图表按新配色重画（不重新请求数据） */
     async handleThemeChange() {
       const charts = [this.pieChart, this.trendChart, this.healthChart, this.bucketChart, this.typeChart]
       charts.forEach(c => c && c.dispose())
@@ -388,7 +364,6 @@ export default {
       this.initType()
     },
 
-    // ==== 饼图 ====
     initPie() {
       if (this.stats.total === 0 || !this.$refs.pieRef) return
       if (this.pieChart) this.pieChart.dispose()
@@ -408,7 +383,7 @@ export default {
           formatter: p => `${p.name}：${chartNum(p.value)} 份（${chartPct(p.percent)}%）`,
           ...chartTooltip()
         },
-        // ★ 与「问卷构成」环形图保持同一套视觉：中心总数 + 底部圆形图例 + 同宽圆环
+        // 与「问卷构成」环形图保持同一套视觉：中心总数 + 底部圆形图例 + 同宽圆环
         title: {
           text: String(this.stats.total),
           subtext: '问卷总数',
@@ -438,7 +413,6 @@ export default {
       })
     },
 
-    // ==== 趋势折线图 ====
     initTrend() {
       if (!this.$refs.trendRef) return
       if (this.trendChart) this.trendChart.dispose()
@@ -501,7 +475,6 @@ export default {
       })
     },
 
-    // ==== 答卷量分布（柱状） ====
     initBucket() {
       if (!this.$refs.bucketRef) return
       if (this.bucketChart) this.bucketChart.dispose()
@@ -554,7 +527,6 @@ export default {
       })
     },
 
-    // ==== 模板 / 普通问卷构成（环形） ====
     initType() {
       if (!this.$refs.typeRef) return
       if (this.typeChart) this.typeChart.dispose()
@@ -606,7 +578,6 @@ export default {
       this.typeChart.setOption(option)
     },
 
-    // ==== 系统健康度圆环 ====
     initHealth() {
       if (!this.$refs.healthRef) return
       if (this.healthChart) this.healthChart.dispose()

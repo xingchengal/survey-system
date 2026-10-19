@@ -1,14 +1,6 @@
 <!--
-  我的钱包（H5 额度钱包，模拟付费）。
-
-  ── 页面回答哪三个问题 ───────────────────────────────
-  1. 我还有多少额度？（顶部余额卡）
-  2. 额度是怎么花掉的/怎么来的？（流水表，金额带正负）
-  3. 不够了怎么办？（模拟充值；演示用，不接真实支付）
-
-  ── 为什么"模拟充值"要生成幂等键 ─────────────────────
-  前端每次打开弹窗生成一个 key，提交时带上；连点/重试都会命中同一 key，
-  后端只到账一次（t_wallet_transaction.idempotency_key 全表唯一）。
+  我的钱包：顶部余额、流水（amount 有符号，支出为负）、模拟充值。
+  ★ 充值 1~1000 点，提交必须带幂等键：每次打开弹窗生成一个新 key，连点/重试只到账一次。
 -->
 <template>
   <div>
@@ -53,6 +45,7 @@
             <el-tag size="small" :type="typeTag(row.type)">{{ typeLabel(row.type) }}</el-tag>
           </template>
         </el-table-column>
+        <!-- 金额有符号：正数显示 +，支出按负数展示 -->
         <el-table-column label="变动" width="110" align="right">
           <template #default="{ row }">
             <span :class="row.amount > 0 ? 'amount-in' : 'amount-out'">
@@ -156,7 +149,7 @@ export default {
       rechargeVisible: false,
       rechargeAmount: 30,
       recharging: false,
-      /** 本次充值弹窗的幂等键（打开弹窗时生成，提交成功后作废） */
+      /** 本次充值弹窗的幂等键（打开弹窗时生成；重试复用同一个） */
       rechargeKey: ''
     }
   },

@@ -41,11 +41,8 @@ import {
 import { getUser, hasPermission } from '../utils/auth'
 
 /**
- * 次级管理员工作台。
- *
- * ★ 为什么不复用 /dashboard：超管的系统总览里有用户数、系统指标等，
- *   次级管理员没有 system:view 时进去只会看到 403/空白；工作台按权限列出可去的地方。
- * ★ 卡片只做“导航 + 说明”，真正的权限仍在后端；前端隐藏不代表授权。
+ * 次级管理员首页：只显示 hasPermission 通过的模块；一个都没有时提示联系超管授权。
+ * ★ 前端隐藏不等于授权，真正的权限校验在后端。
  */
 export default {
   name: 'AdminWorkbench',
@@ -53,6 +50,7 @@ export default {
   data() {
     return {
       user: getUser() || {},
+      // 模块清单：permission 必须与后端权限点一致，写错会导致该模块永远不显示
       modules: [
         { permission: 'system:view', title: '系统总览', desc: '查看全站运营数据', path: '/dashboard', icon: markRaw(DataBoard), color: '#2f80ed', bg: '#e8f3ff' },
         { permission: 'survey:manage', title: '全部问卷', desc: '管理问卷、回收站与导出', path: '/admin/surveys', icon: markRaw(Document), color: '#0284c7', bg: '#e0f2fe' },

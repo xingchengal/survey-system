@@ -1,7 +1,6 @@
 /**
- * 举报相关接口（后端 SurveyReviewController）。
- * ★ 提交举报在 api/survey.js 的 report()（它属于"某份问卷"的操作）；
- *   这里只放"我的举报"与"管理端审核"。
+ * 举报接口（后端 SurveyReviewController）。
+ * ★ 举报入口是 api/survey.js 的 report()；这里只放我的举报与管理端审核（列表 / 处理 / 取消下架）。
  */
 import http from './http'
 
@@ -9,7 +8,7 @@ export default {
   /** 我的举报 */
   my: () => http.get('/api/review/my'),
 
-  /** 管理端列表：status = PENDING / APPROVED / REJECTED / null（全部） */
+  /** 管理端列表：status = PENDING / APPROVED / REJECTED，不传 = 全部 */
   list: (status) => http.get('/api/review/list' + (status ? `?status=${status}` : '')),
 
   /** 取消下架（管理员；只对 SUSPENDED 有效） */

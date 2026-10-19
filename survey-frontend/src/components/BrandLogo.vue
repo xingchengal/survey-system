@@ -9,9 +9,8 @@
   >
     <!--
       品牌标识：天空蓝渐变圆角方块 + 白色问卷线条。
-      ★ 与 AdminLayout 侧栏 logo、登录/注册页标题、public/favicon.svg 是同一套图形，
-        改这里记得同步改 favicon（两处图形保持一致即可，不要求逐像素相同）。
-      ★ 渐变 id 固定：同页出现多个实例时共用同一份 <defs>，视觉无误。
+      ★ 色值与 theme.css 的 --brand-gradient 三个节点一致，换主题色时同步，不要另起一套。
+      与 AdminLayout 侧栏、登录/注册页标题、public/favicon.svg 同源，改图形要同步 favicon。
     -->
     <defs>
       <linearGradient id="brand-logo-gradient" x1="0" y1="0" x2="1" y2="1">

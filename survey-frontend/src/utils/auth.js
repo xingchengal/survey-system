@@ -1,51 +1,24 @@
 /**
- * 登录态读写工具 —— 统一管理 localStorage 里的 token、refreshToken 与 user。
+ * 登录态读写工具 —— 统一管理 localStorage 里的 token / refreshToken / user 与权限点。
+ * token 放 Authorization: Bearer；refreshToken 只有"记住我"才有（7 天），用于静默续期。
  *
- * ══ 为什么要有这个文件 ══
- *   各处直接写 `JSON.parse(localStorage.getItem('user'))` 时**必须**自己 try-catch：
- *   那个值一旦被写坏（比如手工改过、或旧版本存了别的格式），JSON.parse 就会抛异常 ——
- *   在路由守卫里抛异常 = **整个应用白屏**，连登录页都进不去。
- *   所以统一收到这里：解析失败就当作"未登录"，清掉脏数据，用户可以正常去登录。
- *
- * ══ 另一个脆弱点：token 与 user 不一致 ══
- *   只看 `user` 存在就放行是不行的。如果 token 过期或被清了、user 还在，
- *   用户会"进得去页面但每个请求都 401"，然后被踢回登录页 —— 体验很割裂。
- *   所以 isLoggedIn() 要求**两者同时存在**。
- *
- * ══ localStorage 里的三个 key（与后端约定一致）══
- *   token        : 登录接口返回的 JWT（access token，12 小时），请求时放在 Authorization: Bearer <token>
- *   refreshToken : 勾了"记住我"才有，7 天有效，只用来换新的 access token
- *                  （在 api/http.js 的 401 分支里自动使用，页面层不用管它）
- *   user         : { id, username, nickname, role, phone, ... }，role 用于前端权限判断
- *
- * ★ 为什么 refreshToken 必须由这里统一管：它和 token 的**生命周期不同**（7 天 vs 12 小时），
- *   一旦某处只清 token 不清它，"退出登录后刷新页面又自动登录"就会发生
- *   （任何一次 401 都会拿残留的 refresh token 去续期）。所以 setAuth/clearAuth 都成对处理。
- *
- * ⚠️ 安全说明：localStorage 是明文可篡改的，所以**前端的角色判断只是"体验层"**，
- *    真正的权限防线在后端（JwtAuthFilter + 各接口的归属/角色校验）。
- *    前端改 role 最多让自己看到空的页面，拿不到任何不该拿的数据。
+ * ★ token / refreshToken / user 必须一起写、一起清：漏清 refreshToken 会导致
+ *   "退出登录后刷新页面又自动登录"。
+ * 前端角色判断只是体验层（localStorage 可改），真正的权限防线在后端。
  */
 
 const TOKEN_KEY = 'token'
 const USER_KEY = 'user'
 const REFRESH_KEY = 'refreshToken'
-/**
- * ★ H2 新增：登录接口下发的**全局权限点**（survey:edit / user:manage …）。
- *   它只用于**界面显隐**（隐藏按钮/菜单）—— localStorage 可改，后端才是防线。
- *   "对某一份问卷"的权限不在这里，由 GET /api/survey/{id} 的 myPermissions 单独给。
- */
+/** 登录接口下发的全局权限点（survey:edit 等），只用于界面显隐；单份问卷权限看 myPermissions */
 const PERMISSIONS_KEY = 'permissions'
 
-/**
- * 安全解析 JSON：解析失败返回 null（并顺手清掉这个坏值）。
- * 这是本文件存在的核心理由 —— 避免一个坏值让整个应用崩掉。
- */
+/** 安全解析 JSON：失败返回 null 并清掉坏值 —— 路由守卫里抛异常会让整个应用白屏 */
 function safeParse(raw, storageKey) {
   if (!raw) return null
   try {
     const parsed = JSON.parse(raw)
-    // 只接受对象（有些旧数据可能存的是字符串 "undefined" 之类）
+    // 只接受对象（旧数据可能存的是字符串 "undefined" 之类）
     return parsed && typeof parsed === 'object' ? parsed : null
   } catch {
     console.warn(`[auth] localStorage.${storageKey} 不是合法 JSON，已清除。原值：`, raw)
@@ -60,21 +33,8 @@ export function getToken() {
 }
 
 /**
- * 取 refresh token（只有勾了"记住我"才有；没有则返回 null）。
- *
- * ★ 为什么需要它：登出时要把它交给后端**精确吊销这一枚**。
- *   不带它的话，`POST /user/logout` 会走"没带 token"的分支 ——
- *   后端只能 `revokeAllByUser`（吊销该用户**全部** refresh token）。
- *   结果不算坏（甚至更彻底），但：
- *     ① 与 `api.user.logout(refreshToken)` 的签名不一致，看代码的人会以为"这里漏了"；
- *     ② 将来若改成"只吊销本设备"，这里就会变成一个静默的越权吊销。
- * ★ 不要在页面里直接 `localStorage.getItem('refreshToken')` —— key 名只有本文件知道，
- *   散出去就会出现"改了 key 名之后有一处没跟着改"的经典问题。
- *
- * ⚠️ 已知的一处重复：`api/http.js` 内部**也**有一份 `REFRESH_KEY = 'refreshToken'`
- *   （它在 401 静默续期里自己读写，且为了不让底层模块反向依赖 utils，刻意没 import 本文件）。
- *   ⇒ **改这个 key 名时两处都要改**。两份都用同一个字符串，所以现在行为一致；
- *   真要合并，得把 http.js 改成 import 本文件，属于"动核心 401 链路"，另开一轮再做。
+ * 取 refresh token（只有勾了"记住我"才有），登出时要交给后端精确吊销。
+ * ★ key 名只有本文件与 api/http.js 知道，改名必须两处一起改。
  */
 export function getRefreshToken() {
   return localStorage.getItem(REFRESH_KEY)
@@ -85,29 +45,20 @@ export function getUser() {
   return safeParse(localStorage.getItem(USER_KEY), USER_KEY)
 }
 
-/** 当前用户角色：'admin' / 'user' / null */
+/** 当前用户角色：'admin' / 'subadmin' / 'user' / null */
 export function getRole() {
   const user = getUser()
   return user ? user.role : null
 }
 
-/**
- * 是否已登录。
- * ★ 要求 token 与 user **同时存在** —— 只有 user 而没有 token 时，
- *   页面能进去但所有请求都会 401，不如直接当未登录去登录页。
- */
+/** 是否已登录：token 与 user 必须同时存在，否则进得去页面但每个请求都 401 */
 export function isLoggedIn() {
   return Boolean(getToken() && getUser())
 }
 
 /**
  * 保存登录态（登录成功后调用）。
- *
- * @param {string} token         access token（JWT）
- * @param {object} user          用户对象
- * @param {string} [refreshToken] 勾了"记住我"时后端会给，必须一起存；
- *                               不勾时传空 → **主动删掉旧的**，否则上次登录残留的那枚
- *                               会让"这次我没勾记住我"却依然能续期 7 天（与用户选择不符）。
+ * refreshToken 传空时主动删掉旧值，否则上次的"记住我"会继续生效 7 天。
  */
 export function setAuth(token, user, refreshToken) {
   if (token) localStorage.setItem(TOKEN_KEY, token)
@@ -142,17 +93,13 @@ export function setPermissions(permissions) {
 }
 
 /**
- * 前端权限判断 —— **只用于显隐**，不是安全边界。
- *
- * ★ 兼容老登录态：localStorage 里根本没有权限点（本次上线前登录的会话）时按角色兜底：
- *   admin 全放行；普通用户放行 survey:*（与 user 角色的种子权限一致），
- *   否则老用户会在刷新前丢掉一半按钮。
+ * 前端权限判断 —— 只用于显隐，不是安全边界。
+ * 没有权限点时（旧登录态）按角色兜底：admin 恒 true，普通用户放行 survey:*，
+ * 否则老用户刷新前会丢掉一半按钮。
  */
 export function hasPermission(code) {
   if (!code) return true
-  // ★ 超管在**后端**是兜底放行；前端也必须同一口径：
-  //   否则老后端只下发 7 个旧权限点时，新菜单里的 survey:manage/template:manage 会被误判为“没权限”，
-  //   超管反而看不到模块入口。次级管理员不走这条分支，仍逐项判断。
+  // admin 恒放行，与后端同一口径：老后端只下发旧权限点时，超管仍要看到新菜单
   if (getRole() === 'admin') return true
   const stored = localStorage.getItem(PERMISSIONS_KEY)
   if (stored == null) {
@@ -170,39 +117,31 @@ export function setUser(user) {
 
 /**
  * 清空登录态（登出、401 时调用）。
- * ★ refresh token **必须一起清** —— 它是 7 天的长效凭证，
- *   漏掉就等于"用户以为退出了，但服务端那枚凭证还能续期"。
+ * 四个 key 必须一起清：残留 refreshToken 还能续期，残留权限会让下个账号短暂按旧菜单渲染。
  */
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(USER_KEY)
   localStorage.removeItem(REFRESH_KEY)
-  // ★ 权限点要跟着登录态一起清：否则下次以另一个账号登录前，
-  //   旧权限会短暂留在 localStorage 里（菜单按旧权限渲染）。
+  // 权限点跟着登录态一起清
   localStorage.removeItem(PERMISSIONS_KEY)
 }
 
-/**
- * 是否管理端人员（超级管理员 admin / 次级管理员 subadmin）。
- * ★ 只用于“能不能进管理端外壳/菜单分组”，具体某个模块还要看 hasPermission()。
- */
+/** 是否管理端人员（admin / subadmin）：只用于数据范围与管理端外壳，模块权限看 hasPermission() */
 export function isStaff(role) {
   const r = role || getRole()
   return r === 'admin' || r === 'subadmin'
 }
 
-/**
- * 是否超级管理员（admin）。
- * ★ 次级管理员即使有再多权限，也不能进“次级管理员管理 / 演示数据”等超管专属入口。
- */
+/** 是否超级管理员（admin）：次级管理员即使权限再多，也看不到超管专属入口 */
 export function isSuperAdmin(role) {
   const r = role || getRole()
   return r === 'admin'
 }
 
 /**
- * 按角色算出"首页"路径 —— 路由守卫和登录跳转都用它，避免两处写死同样的三元表达式。
- * 超管去系统总览；次级管理员去工作台（只显示被分配的模块）；普通用户去个人数据看板。
+ * 按角色算首页路径（路由守卫与登录跳转共用）：
+ * admin → 系统总览，subadmin → /admin/workbench，其余 → 个人数据看板。
  */
 export function homePathFor(role) {
   if (role === 'admin') return '/dashboard'

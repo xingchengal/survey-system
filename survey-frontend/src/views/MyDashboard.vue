@@ -1,6 +1,5 @@
 <template>
   <div class="dash">
-    <!-- ==================== 骨架屏 ==================== -->
     <div v-if="loading" class="dash-skeleton">
       <div class="sk-block" style="height: 168px;"></div>
       <el-row :gutter="20" class="mt-20">
@@ -15,7 +14,6 @@
     </div>
 
     <template v-else>
-      <!-- ==================== 欢迎横幅 ==================== -->
       <section class="hero">
         <div class="hero-glow hero-glow-1"></div>
         <div class="hero-glow hero-glow-2"></div>
@@ -24,9 +22,7 @@
           <h2 class="hero-title">👋 你好，{{ userName }}</h2>
           <p class="hero-sub">欢迎回来，这里是你的问卷数据总览</p>
           <div class="hero-actions">
-            <!-- ★ 只留一个按钮：原来「新建问卷」和「查看我的问卷」都 push 同一个 /my/surveys，
-                 属于重复入口（侧栏本来就有「我的问卷」，下方最近问卷卡也有「查看全部」）。
-                 现在这个直接带 ?create=1，落地就打开新建弹窗，按钮语义才成立。 -->
+            <!-- 新建带 ?create=1：MySurveys 挂载后直接打开新建弹窗 -->
             <el-button
               class="hero-btn hero-btn-primary"
               @click="$router.push('/my/surveys?create=1')"
@@ -51,7 +47,6 @@
         </div>
       </section>
 
-      <!-- ==================== 数据卡片 ==================== -->
       <el-row :gutter="20" class="mt-20">
         <el-col v-for="card in statCards" :key="card.key" :span="6" :xs="12" :sm="12" :md="6">
           <el-card shadow="hover" class="metric-card">
@@ -67,9 +62,7 @@
         </el-col>
       </el-row>
 
-      <!-- ==================== 下方两块 ==================== -->
       <el-row class="mt-20 equal-row" :gutter="20">
-        <!-- 左：状态分布 -->
         <el-col :span="10" :xs="24" :sm="24" :md="10">
           <el-card class="panel-card">
             <template #header>
@@ -81,7 +74,6 @@
             <div v-if="stats.total > 0" ref="pieRef" class="pie"></div>
             <el-empty v-else description="暂无问卷" :image-size="90" />
 
-            <!-- 环形图下方的三个派生指标：让"统计"不止一张饼图 -->
             <div class="kpi-grid">
               <div class="kpi">
                 <div class="kpi-label">发布率</div>
@@ -100,7 +92,7 @@
               </div>
             </div>
 
-            <!-- 近 7 天答卷趋势：补上"变化"这个维度（上面三格都是当前快照） -->
+            <!-- 近 7 天答卷趋势：补上"变化"维度，上面三格只是当前快照 -->
             <div class="trend-block">
               <div class="trend-head">
                 <span class="trend-title">近 7 天答卷</span>
@@ -135,7 +127,6 @@
           </el-card>
         </el-col>
 
-        <!-- 右：最近问卷 -->
         <el-col :span="14" :xs="24" :sm="24" :md="14">
           <el-card class="panel-card">
             <template #header>
@@ -174,7 +165,6 @@
           </el-card>
         </el-col>
       </el-row>
-      <!-- ==================== 快捷入口 ==================== -->
       <el-row class="mt-20" :gutter="20">
         <el-col v-for="a in quickActions" :key="a.title" :span="6" :xs="12" :sm="12" :md="6">
           <div class="quick-tile" @click="go(a.path)">
@@ -194,11 +184,9 @@
 </template>
 
 <script>
-// ★ 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
+// 按需引入 ECharts（不要全量 import * as echarts，见 utils/echarts.js）
 import echarts from '../utils/echarts'
 import { Document, Promotion, EditPen, ChatDotRound, MagicStick, Delete, User } from '@element-plus/icons-vue'
-// ★ 统一接口层：统计数据走 api.survey.myStatistics()。
-//   本文件在 src/views/ 下，api 在 src/api/，所以相对路径是 '../api'。
 import api from '../api'
 import { getUser } from '../utils/auth'
 import {
@@ -210,7 +198,7 @@ export default {
   data() {
     return {
       userName: '',
-      /** 首次进入时的骨架屏；数据回来（成功或失败）就关掉，避免一直转圈 */
+      /** 首屏骨架屏：数据回来（成功或失败）就关掉，避免一直转圈 */
       loading: true,
       stats: {
         total: 0,
@@ -218,22 +206,22 @@ export default {
         draft: 0,
         ended: 0,
         responses: 0,
+        // 最近问卷：responseCount 由后端批量 count 回填，避免 N+1
         recent: [],
-        // 近 7 天答卷趋势（后端 /my-statistics 返回；旧后端可能没有，兜底为空数组）
+        // 近 7 天答卷趋势（后端 /my-statistics 返回；缺失时兜底为空数组）
         trendDates: [],
         trendCounts: [],
         recent7Answers: 0
       },
       pieChart: null,
-      /** 图表容器 ref 的兜底重试标记（只重试一次，避免死循环） */
+      /** 图表容器宽度为 0 时的兜底重试标记（只重试一次，避免死循环） */
       pieRetried: false
     }
   },
   computed: {
     /**
-     * 顶部四张数据卡。
-     * ★ 每张卡有自己的颜色与图标：问卷 / 已发布 / 草稿 / 答卷 ——
-     *   颜色不是装饰，是"同一功能在全站都用这个色"的记忆点（与列表徽标、图表一致）。
+     * 顶部四张数据卡：问卷 / 已发布 / 草稿 / 答卷。
+     * 颜色与图标沿用功能语义，与列表徽标、图表保持一致。
      */
     statCards() {
       return [
@@ -255,9 +243,8 @@ export default {
     },
     /**
      * 近 7 天趋势的折线坐标。
-     * ★ 用纯 SVG 画而不是再开一个 ECharts 实例：这张图只有一个折线 + 面积，
-     *   引 chart 实例反而要多一套 init / resize / 主题重画的代码；
-     *   SVG 的 stroke 直接用 CSS 变量，深色模式自动跟随，不需要 THEME_EVENT。
+     * 用纯 SVG 而不是再开一个 ECharts 实例：只有一条折线 + 面积，
+     * stroke 直接用 CSS 变量，深色模式自动跟随。
      */
     trendPoints() {
       const counts = this.stats.trendCounts || []
@@ -291,8 +278,7 @@ export default {
     },
     /**
      * 底部快捷入口。
-     * ★ 新建 / AI 创建都带 query，MySurveys 挂载时会据此直接打开对应弹窗，
-     *   用户少点一次；图标颜色沿用功能语义（蓝=问卷、紫=AI、红=回收站、青=个人）。
+     * 新建 / AI 创建都带 query，MySurveys 挂载时会据此直接打开对应弹窗。
      */
     quickActions() {
       return [
@@ -304,7 +290,6 @@ export default {
     }
   },
   mounted() {
-    // ★ 读本地用户走 utils/auth.getUser()
     const user = getUser() || {}
     this.userName = user.nickname || user.username || '用户'
     this.loadStats()
@@ -319,9 +304,8 @@ export default {
   methods: {
     async loadStats() {
       try {
-        // ★ api.survey.myStatistics() 里 http.js 自动带 Authorization，
-        //   成功时 resolve 出响应体（后端返回的统计对象），直接赋给 this.stats。
-        //   趋势字段做个兜底：旧后端没有这三个字段时，页面退化成"近 7 天暂无数据"，不会报错。
+        // ★ 统计数据全部来自 GET /api/survey/my-statistics（带 Authorization 由 http.js 统一处理）；
+        //   趋势三字段缺失时退化为"近 7 天暂无数据"，不报错。
         const data = await api.survey.myStatistics()
         this.stats = {
           ...this.stats,
@@ -331,15 +315,13 @@ export default {
           recent7Answers: Number(data.recent7Answers) || 0
         }
       } catch {
-        // 失败提示已由 http.js 用后端 message 弹过，这里只做流程控制：
-        // 保持 stats 为初始值（页面显示 0 / 空图表），不渲染饼图。
+        // 失败提示由 http.js 统一弹出；这里保持初始值（0 / 空图表），不渲染饼图。
       } finally {
         this.loading = false
       }
 
-      // ★★ 顺序很重要（本轮踩过的 bug）：图表容器在 `v-else` 分支里，
-      //    `loading = false` 之后的那一帧才挂到 DOM。如果在这之前 init，
-      //    `$refs.pieRef` 是 undefined → 直接 return，页面表现就是"卡片一片空白、控制台也不报错"。
+      // ★ 必须等 loading=false 后的下一帧再 init：饼图容器在 v-else 分支里，
+      //   早了 $refs.pieRef 是 undefined，页面表现为卡片空白且控制台不报错。
       await this.$nextTick()
       this.initPie()
       // flex 等高布局下首帧宽度可能还没算完；再补一次 resize，避免画到 0 宽画布
@@ -352,8 +334,7 @@ export default {
       if (this.stats.total === 0) return
 
       const el = this.$refs.pieRef
-      // ★ 容器宽度为 0 时（首帧布局未完成）init 出来的画布也是 0 宽 —— 页面同样表现为空白。
-      //   与 ref 缺失共用同一次重试，避免无限循环。
+      // 容器宽度为 0（首帧布局未完成）时 init 出的画布也是 0 宽，与 ref 缺失共用同一次重试
       if (!el || !el.clientWidth) {
         if (!this.pieRetried) {
           this.pieRetried = true
@@ -429,7 +410,6 @@ export default {
 </script>
 
 <style scoped>
-/* ==================== 欢迎横幅 ==================== */
 .hero {
   position: relative;
   overflow: hidden;
@@ -556,7 +536,6 @@ export default {
   }
 }
 
-/* ==================== 数据卡片 ==================== */
 .metric-card {
   position: relative;
   overflow: hidden;
@@ -609,7 +588,6 @@ export default {
   opacity: 0.08;
 }
 
-/* ==================== 下方面板 ==================== */
 .panel-card {
   height: 100%;
 }
@@ -672,7 +650,6 @@ export default {
   transition: width 0.6s var(--ease);
 }
 
-/* ==================== 近 7 天趋势 ==================== */
 .trend-block {
   margin-top: 14px;
   padding-top: 12px;
@@ -775,7 +752,6 @@ export default {
   width: 100%;
 }
 
-/* ==================== 快捷入口 ==================== */
 .quick-tile {
   display: flex;
   align-items: center;

@@ -1,12 +1,6 @@
 <!--
-  钱包管理（管理员，H5）。
-
-  ── 三个作用 ──────────────────────────────────────────
-  1. 看全站用户余额（可疑的"余额特别高/特别低"一眼可见）；
-  2. 手动调整（补偿、修正；amount 为正加、为负扣，必须带幂等键）；
-  3. 一键对账 —— 口径只有一条：SUM(流水金额) 必须等于余额，不等就列出来。
-
-  ★ 对账只报告、不自动"修"：自动修会把错误藏起来，应该由人确认后再调整。
+  钱包管理：分页查看余额、手动调整（amount 正加负扣，必须带幂等键）、一键对账。
+  ★ 对账只报告不自动修：SUM(流水金额) ≠ 余额的记录列出来，由人确认原因后再用「调整」补账。
 -->
 <template>
   <div>
@@ -126,6 +120,7 @@
 import { ElMessage } from 'element-plus'
 import walletApi from '../api/wallet'
 
+/** 调整的幂等键：同一弹窗内重试复用同一个，避免重复加减 */
 function newIdempotencyKey() {
   const rand = Math.random().toString(36).slice(2, 10)
   return `adjust:${Date.now()}-${rand}`
@@ -196,7 +191,6 @@ export default {
         balance: row.balance,
         amount: 10,
         reason: '',
-        // 每次打开弹窗生成一个幂等键：同一个弹窗里重试不会重复调整
         idempotencyKey: newIdempotencyKey()
       }
       this.adjustVisible = true

@@ -1,9 +1,8 @@
 /**
  * 主题切换（浅色 / 深色）。
- *
- * ★ 唯一入口：所有读写都走这里，不要在页面里直接碰 localStorage 或 documentElement。
- * ★ 存在 localStorage 的 `survey_theme` 里；刷新后由 main.js 的 initTheme() 在最早期恢复，
- *   避免"先闪一下浅色再变深色"。
+ * ★ 唯一入口：读写都走这里，页面不要直接碰 localStorage 或 documentElement。
+ * ★ 颜色令牌只在 styles/theme.css 定义，这里只负责切换 <html data-theme="...">；
+ *   main.js 最早调 initTheme() 恢复，避免刷新时先闪一下浅色。
  */
 
 const KEY = 'survey_theme'
@@ -26,7 +25,7 @@ export function applyTheme(theme) {
   try {
     localStorage.setItem(KEY, value)
   } catch {
-    // 隐私模式下 localStorage 可能不可写：主题仍在本次会话生效，不抛错
+    // 隐私模式下可能不可写：主题仍在本次会话生效，不抛错
   }
   return value
 }

@@ -1,8 +1,8 @@
 <!--
-  举报审核（管理端，§H-H1-3）。
-  ★ 只做两件事：看列表、点通过/驳回。通过 = 问卷 lifecycle 转 SUSPENDED（status 不变），
-    后端会通知作者与举报人；驳回 = 只通知举报人。
-  ★ 前端不判断"能不能通过"—— 状态非 PENDING 时按钮不出现，后端还有一道幂等。
+  举报审核（管理端）：只处理 PENDING。
+  ★ 通过 = 只把 lifecycle 转 SUSPENDED（status 不变），通知作者与举报人；驳回 = 只通知举报人。
+  ★ 前端不判断「能不能通过」：非 PENDING 按钮不出现，后端 WHERE status='PENDING' 再兜一次幂等。
+  已知缺口：举报人不能自批 —— 后端当前未强制，具备 review:handle 的账号仍可处理自己的举报。
 -->
 <template>
   <div class="review-page">
@@ -43,8 +43,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <!-- ★ 新增：问卷当前是否还在下架。已恢复的记录默认从「已通过」里隐藏，
-           否则审核页会被历史记录堆满；「恢复上架」也只对仍下架的记录显示（否则必 400）。 -->
+      <!-- 已恢复的记录默认在「已通过」里隐藏；「恢复上架」只对仍 SUSPENDED 的记录显示，否则必 400 -->
       <el-table-column label="问卷状态" width="110">
         <template #default="{ row }">
           <el-tag v-if="row.surveyLifecycle === 'SUSPENDED'" type="danger" size="small">已下架</el-tag>
@@ -90,16 +89,13 @@ export default {
       rows: [],
       loading: false,
       status: 'PENDING',
-      /** 「已通过」里是否显示已恢复的历史记录（默认关：日常只看仍在下架的） */
+      /** 「已通过」里是否显示已恢复的记录（默认关：日常只看仍在下架的） */
       showRestored: false
     }
   },
   computed: {
     /**
-     * 审核页真正要展示的记录。
-     * ★ 只有「已通过」且没开「显示已恢复」时，才把 surveyLifecycle != SUSPENDED 的记录滤掉：
-     *   已恢复的举报已经处理完，留在待办里只会造成干扰（用户反馈过）。
-     *   「全部」保持原样，历史仍可查。
+     * 「已通过」默认只列仍 SUSPENDED 的记录；开 showRestored 或切「全部」才展示全部。
      */
     visibleRows() {
       if (this.status !== 'APPROVED' || this.showRestored) return this.rows
@@ -111,9 +107,7 @@ export default {
     }
   },
   mounted() {
-    // ★ 从「恢复上架申请」通知点进来时会带 ?status=APPROVED：那条举报早已处理完（已通过），
-    //   不预先切筛选的话管理员会落在「待处理」的空列表上，根本找不到要恢复的问卷。
-    //   只接受已知状态值，避免 URL 里塞任意字符串把下拉弄成空选中。
+    // 从「恢复上架申请」通知带 ?status=APPROVED 进来：只接受已知状态值，避免把下拉弄成空选中
     const q = this.$route.query.status
     if (typeof q === 'string' && ['PENDING', 'APPROVED', 'REJECTED'].includes(q)) {
       this.status = q

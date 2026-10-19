@@ -1,17 +1,8 @@
 /**
- * 接口层统一出口 —— 页面里这样用：
- *
- *   import api from '../api'
- *   const list = await api.survey.my()
- *   await api.notification.read(id)
- *   await api.errorLog.page({ pageNum: 1, pageSize: 10 })
- *
- * ★ 为什么要有这一层：路径、HTTP 方法、错误处理全部集中到 api/ 目录 ——
- *   页面里不要自己 fetch、不要自己拼 URL，改接口只动这里。
- *
- * ★ 命名约定：为了避免出现 `api.demo.demo.init()` 这种套娃写法，
- *   这里把各模块内部的命名导出**提升到顶层**（demo / misc / operationLog / errorLog），
- *   所以统一用扁平形式调用。
+ * 接口层统一出口：页面里 `import api from '../api'`，按 `api.survey.my()` 调用。
+ * ★ 新增页面用 `api.survey.xxx`，不要直接 import 具体模块，也不要自己 fetch / 拼 URL；
+ *   存量还有页面直接 import wallet / review / collaborator（index.js 尚未 re-export 这三个）。
+ * 命名约定：各模块的命名导出（demo / misc / operationLog / errorLog）提升到顶层，避免 api.demo.demo.init()。
  */
 import http, { ApiError, request, toQuery, notifyError, download } from './http'
 import survey from './survey'
@@ -37,9 +28,9 @@ const api = {
   announcement,
   operationLog, // api.operationLog.page(...)
   errorLog, // api.errorLog.page(...)
-  demo, // api.demo.init() / api.demo.reset()
-  misc, // api.misc.health() / api.misc.seedTemplates()
-  captcha, // api.captcha.slider()（注册页滑块验证码）
+  demo, // api.demo.init() / reset()
+  misc, // api.misc.health() / seedTemplates()
+  captcha, // api.captcha.slider()
   admin // api.admin.subAdmins() / promote() / updatePermissions() / demote()
 }
 

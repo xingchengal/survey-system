@@ -109,15 +109,9 @@
 import api from '../api'
 
 /**
- * 我的答卷 / 答题记录。
- *
- * ── 为什么只有"登录态提交"的记录 ──────────────────────
- *   t_answer.user_id 只在 POST /answer/submit/{surveyId} 这条路径上写入；
- *   网页上的匿名问卷走 submit-share（userId 恒为 null），没有身份可回溯，
- *   所以匿名答卷**不会**出现在这里 —— 这是产品口径，不是漏查。
- *
- * ── 为什么还要显示"已删除/已结束" ────────────────────
- *   历史记录不该因为作者删了问卷就凭空消失；只是不能再打开（前端禁用入口）。
+ * 我的答卷：只查当前登录用户（后端按登录态取 user_id），分页加载。
+ * ★ 匿名答卷走 submit-share，userId 恒为 null，无法关联账号，不会出现在这里 —— 产品口径，不是漏查。
+ * 已删除/已结束的问卷仍保留记录，只是入口禁用（canOpen 只放行未删除、进行中、有分享码）。
  */
 export default {
   data() {
@@ -127,7 +121,6 @@ export default {
       total: 0,
       pageNum: 1,
       pageSize: 10,
-      // 答卷详情弹窗
       detailVisible: false,
       detailLoading: false,
       detail: null
@@ -143,13 +136,13 @@ export default {
         const data = await api.answer.my(this.pageNum, this.pageSize)
         this.rows = data.list || []
         this.total = data.total || 0
-        // ★ 后端会把页码夹在 [1,10000]；如果当前页已超出（比如删了数据），回退到第 1 页
+        // ★ 后端把页码夹在 [1,10000]；当前页超界（数据被删）时回退第 1 页，否则会停在空页
         if (this.rows.length === 0 && this.total > 0 && this.pageNum > 1) {
           this.pageNum = 1
           await this.load()
         }
       } catch {
-        // 失败提示由 http.js 统一弹出，这里保持页面即可
+        // 失败提示由 http.js 统一弹出；保持当前列表即可
       } finally {
         this.loading = false
       }
@@ -208,7 +201,7 @@ export default {
   margin-top: 14px;
 }
 
-/* ===== 答卷详情弹窗 ===== */
+/* 答卷详情弹窗 */
 .detail-head {
   display: flex;
   align-items: baseline;

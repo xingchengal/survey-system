@@ -1,7 +1,7 @@
 <template>
   <div class="edit-page">
     <div class="editor-shell">
-      <!-- 左侧题型面板（占整个页面最左，像问卷星）（像问卷星那样按类别摆，题型多了也直观；窄屏自动落到底部） -->
+      <!-- 左侧题型面板：按类别摆放，窄屏自动落到底部 -->
       <aside class="add-sidebar">
         <div class="add-bar-title">添加题目</div>
         <div class="add-group">
@@ -53,7 +53,7 @@
         <div class="add-group">
           <div class="add-group-title">
             进阶题型
-            <!-- ★ 价格不写死：从 GET /api/wallet/pricing 的动态目录取（后端 WalletFeature 是唯一出处） -->
+            <!-- 价格不写死：唯一出处是后端 WalletFeature（GET /api/wallet/pricing） -->
             <span class="add-group-badge">
               {{ advancedTypeCost == null ? '按份计费' : `${advancedTypeCost} 点 / 份` }}
             </span>
@@ -81,8 +81,7 @@
       </aside>
 
       <div class="editor-main">
-    <!-- ★ 回收站里的问卷禁止保存/发布：点下去**必然 400**（后端 OwnershipGuard.requireNotInRecycleBin /
-          SurveyController.update / QuestionController.save 三处都会拦），所以这里明确告知并给恢复入口。 -->
+    <!-- 回收站里的问卷禁止保存/发布：后端三处都会拦（必 400），这里先告知并给恢复入口 -->
     <el-alert
       v-if="surveyInfo.deleted === 1"
       class="mb-16"
@@ -100,7 +99,7 @@
       </template>
     </el-alert>
 
-    <!-- ★ 题目加载失败：既不是"没有题目"，也不能让用户在这里保存（会把题目删光） -->
+    <!-- ★ 题目加载失败 ≠ 没有题目：此时保存是全量覆盖，会把已有题目删光 -->
     <el-alert
       v-if="questionsLoadFailed"
       class="mb-16"
@@ -120,7 +119,7 @@
       </template>
     </el-alert>
 
-    <!-- ★ 被举报下架：内容冻结，只能查看；恢复正常后自动解除 -->
+    <!-- 被举报下架：内容冻结，只能查看；管理员处理后自动解除 -->
     <el-alert
       v-if="isSuspended"
       class="mb-16"
@@ -132,7 +131,7 @@
       请回到「我的问卷」点「申请恢复」，管理员处理后会解除限制。
     </el-alert>
 
-    <!-- ★ 只读/无发布权（协作者 viewer / analyst）：先把话说清，再把按钮禁掉 -->
+    <!-- 只读/无发布权（viewer / analyst）：先说明原因，再禁用按钮 -->
     <el-alert
       v-else-if="!canEditSurvey || !canPublishSurvey"
       class="mb-16"
@@ -155,20 +154,13 @@
       </div>
       <div class="header-actions">
         <el-button @click="goBack">返回</el-button>
-        <!-- ★ 回收站里禁止保存/发布（点了必 400），按钮直接禁用并把原因写在标题里。
-             ★ `saving` 门控：保存首次是"预存 + 正式提交"两次往返，期间禁用以免连点触发第二次全量覆盖。 -->
-        <!-- ★ 注意：这里**不**因为 questionsLoadFailed 而禁用按钮。
-             禁用会让点击"完全没反应"，用户根本不知道发生了什么（实测就是这么被卡住的）。
-             现在改成：按钮可点，点下去由 saveQuestions 统一说明"为什么不能保存"。 -->
+        <!-- 回收站里禁止保存/发布（点了必 400），按钮禁用并把原因写进标题；saving 门控防连点触发第二次全量覆盖 -->
+        <!-- 不因题目加载失败而禁用保存：禁用后点击"毫无反应"，改为可点并由 saveQuestions 说明原因 -->
         <el-button type="primary" :disabled="inRecycleBin || saving || !canEditSurvey" :loading="saving" @click="saveQuestions">保存</el-button>
-        <!-- ★ 模板编辑模式：不出现"发布"与"设置"——
-             模板只是在模板广场里被复制，status 与答题密码/限收/公开结果都不会带到副本
-             （copySurvey 只拷 title/description/题目/选项），摆出来只会让管理员误以为它们有用。 -->
+        <!-- 模板模式不出现发布/设置：这些设置不会被复制到副本，摆出来只会误导 -->
         <el-tag v-if="isTemplateMode" type="info" effect="light" round>模板（无需发布）</el-tag>
         <template v-else>
-          <!-- ★ status 为 0 或 2 都要给发布按钮：后端支持"延长（或清空）结束时间后重新发布"。
-                已结束但结束时间仍在过去时，按钮变成"重新发布"并禁用（否则用户点了只吃 400），
-                并在下面给出"请先把结束时间改到未来"的提示。 -->
+          <!-- status 0/2 都给发布按钮；已结束且截止时间未改到未来时禁用（否则点下去必 400） -->
           <el-button
             v-if="surveyInfo.status === 0 || surveyInfo.status === 2"
             type="success"
@@ -179,14 +171,14 @@
           <!-- 设置：答题密码 / 限收份数 / 提交后展示 / 公开结果 -->
           <el-button :disabled="inRecycleBin || !canEditSurvey" @click="settingsVisible = true">设置</el-button>
         </template>
-        <!-- 预览：按填写者视角看当前编辑态（不保存、不产生答卷） -->
+        <!-- 预览：按填写者视角查看当前编辑态，不保存、不落库 -->
         <el-button :disabled="questions.length === 0" @click="openPreview">预览</el-button>
-        <!-- 历史版本：回收站里禁用（回滚走的是"全量覆盖式保存"，在回收站问卷上执行会让历史答卷的 question_id 悬空） -->
+        <!-- 历史版本：回收站里禁用（回滚是覆盖式保存，会让历史答卷的 question_id 悬空） -->
         <el-button :disabled="inRecycleBin" @click="openVersions">历史版本</el-button>
       </div>
     </div>
 
-    <!-- ★ 已结束但结束时间还没改到未来：给出可执行的提示，而不是让用户点发布去撞 400 -->
+    <!-- 已结束但截止时间还没改到未来：给出可执行提示，别让用户点发布去撞 400 -->
     <el-alert
       v-if="surveyInfo.status === 2 && !endExtended"
       class="mb-16"
@@ -203,8 +195,7 @@
       </template>
       <el-form label-width="90px">
         <el-form-item label="问卷标题">
-          <!-- ★ maxlength 必须与后端 TextLimits.SURVEY_TITLE(200) / 数据库 varchar(200) 对齐，
-               否则用户写超长只有提交后吃 400。 -->
+          <!-- maxlength 与后端 TextLimits.SURVEY_TITLE(200) / 数据库 varchar(200) 对齐 -->
           <el-input v-model="surveyInfo.title" placeholder="请输入问卷标题" maxlength="200" show-word-limit size="large" />
         </el-form-item>
         <el-form-item label="问卷描述">
@@ -252,7 +243,7 @@
           {{ qTypeLabel(q.type) }}
         </el-tag>
         <el-checkbox class="ml-10" v-model="q.required" :true-value="1" :false-value="0">必填</el-checkbox>
-        <!-- 考试判分：分值（0 = 不参与判分）。只有单选/多选/下拉显示这个输入框。 -->
+        <!-- 分值：0 = 不参与判分；只有单选/多选/下拉显示 -->
         <div v-if="qIsGradable(q.type)" class="q-score">
           <span class="q-score-label">分值</span>
           <el-input-number
@@ -271,7 +262,7 @@
 
       <el-input v-model="q.title" class="q-title-input" placeholder="请输入题目内容" maxlength="500" show-word-limit />
 
-      <!-- 矩阵题：行标题 × 列标题（两维都存 JSON 数组文本，见 utils/questionTypes.parseMatrixAxis） -->
+      <!-- 矩阵题：行列标题在编辑器里是数组，保存时转 JSON 文本 -->
       <div v-if="qIsMatrix(q.type)" class="q-options matrix-editor">
         <div class="matrix-axis">
           <div class="matrix-axis-head">
@@ -355,8 +346,7 @@
           </span>
           <el-input v-model="opt.content" class="option-input" placeholder="请输入选项内容" maxlength="500" />
 
-          <!-- 考试判分：标记"正确答案"。只有单选/多选/下拉能判分（后端 Grader 同口径）。
-               ★ 单选/下拉只能有一个正确答案，由 onCorrectChange 互斥处理。 -->
+          <!-- 正确答案：只有单选/多选/下拉可判分；单选/下拉只能有一个，由 onCorrectChange 互斥 -->
           <el-checkbox
             v-if="qIsGradable(q.type)"
             v-model="opt.isCorrect"
@@ -366,13 +356,8 @@
             @change="onCorrectChange(q, oIndex)"
           >正确答案</el-checkbox>
 
-          <!-- 跳转设置：单选和多选都支持 -->
-          <!-- ★ `:value` 必须是 question.id：保存时后端会按数组重排 sort_order、并删掉本次没传的题，
-               若这里存"第几题"的序号，删题/调序之后已存的规则就会**静默指向错的题**。
-               ★ 新建的题在保存前没有数据库 id，所以由前端先发一个**负数的临时 id**（见 data.tempQuestionId），
-                 保存成功后替换成真实 id —— 否则新建问卷的每一道题都会因为 `!target.id` 而被禁用，根本设不了跳转。
-               ★ 只允许往后跳（ti <= qIndex 的禁用）：反向跳会破坏答题页的"路径推进"模型
-                 （那里靠"目标必须在当前题之后"来防环）。 -->
+          <!-- 跳转设置：`:value` 必须是 question.id（存序号会在删题/调序后静默指错）；新题没有真 id，
+               先发临时负数 id，保存后按回显换成真 id；只允许往后跳，反向跳会破坏答题页的路径推进模型。 -->
           <el-select
             v-if="!qIsRanking(q.type)"
             v-model="opt.nextQuestionId"
@@ -398,7 +383,7 @@
         <div v-if="qIsMulti(q.type)" class="option-hint">
           💡 多选跳转规则：勾选的多个选项中，按选项顺序取第一个命中的跳转
         </div>
-        <!-- 排序题：没有跳转（一张问卷里排序题通常是"整段评价"的一部分，逐项跳转没有意义） -->
+        <!-- 排序题没有跳转（逐项跳转没有意义） -->
         <div v-if="qIsRanking(q.type)" class="option-hint">
           💡 填写者会把全部选项拖成 1~N 名；统计页按**平均名次**排序（越小越靠前）。
         </div>
@@ -417,7 +402,7 @@
 
     </div><!-- /editor-body -->
 
-    <!-- ===== 历史版本对话框 ===== -->
+    <!-- 历史版本对话框 -->
     <el-dialog v-model="versionVisible" title="历史版本" width="820px">
       <div style="color:#666; font-size:13px; margin-bottom:12px;">
         每次「保存」只要题目结构有变化就会留一个版本（每份问卷最多保留 50 个）。
@@ -482,7 +467,7 @@
       </div>
     </el-dialog>
 
-    <!-- ===== 问卷设置（答题密码 / 限收份数 / 提交后展示 / 公开结果） ===== -->
+    <!-- 问卷设置：字段与后端 update / SurveyDTO 一一对应，随「保存」一起提交 -->
     <el-dialog v-model="settingsVisible" title="问卷设置" width="560px">
       <el-alert
         class="mb-16"
@@ -667,7 +652,7 @@
       </template>
     </el-dialog>
 
-    <!-- ===== 预览：按填写者视角查看当前编辑态（不保存、不产生答卷） ===== -->
+    <!-- 预览：按填写者视角查看当前编辑态，不保存、不产生答卷 -->
     <el-dialog v-model="previewVisible" width="720px" top="5vh">
       <template #header>
         <div class="pv-header">
@@ -828,7 +813,7 @@
       </div>
     </el-dialog>
 
-    <!-- ===== 发布成功分享卡（替代单条 toast：链接 + 二维码 + 复制） ===== -->
+    <!-- 发布成功分享卡：链接 + 二维码 + 复制 -->
     <el-dialog v-model="shareVisible" title="🎉 发布成功" width="560px">
       <p class="text-secondary">把下面的链接或二维码发给填写人，他们无需登录即可作答：</p>
       <el-input v-model="shareLink" readonly class="share-link">
@@ -853,17 +838,14 @@
 
 <script>
 import { ElMessage } from 'element-plus'
-// 发布成功后的分享卡用二维码（qrcode 已在依赖里，与 MySurveys 分享弹窗同一套用法）
 import QRCode from 'qrcode'
-// ★ 统一接口层：本页请求全部走 src/api/ ——
-//   接口路径、Authorization、成败判断、错误提示都收敛在 src/api/http.js，
-//   页面只关心"调哪个接口、拿到什么数据"。
+// 请求统一走 src/api/http.js：鉴权、错误提示、成败判断都收口在那里
 import api from '../api'
-// ★ 计费目录：价格唯一出处是后端 WalletFeature，编辑器只读不写死
+// 价格唯一出处是后端 WalletFeature，编辑器只读不写死
 import walletApi from '../api/wallet'
-// ★ 判断角色/读用户统一走 utils/auth（不要裸 JSON.parse localStorage）
+// 角色/用户信息统一走 utils/auth，不要裸读 localStorage
 import { getUser } from '../utils/auth'
-// 题型元数据：数字必须与后端 common/QuestionType 一致（只追加、不复用）
+// 题型数字必须与后端 common/QuestionType 一致（只追加、不复用）
 import {
   NPS_SCORES, RATING_LABELS, typeLabel, typeMeta, hasOptions, isMulti, isSingle,
   parseMatrixAxis, stringifyMatrixAxis, isMatrix, isRanking, isNps
@@ -875,9 +857,8 @@ const DRAFT_PREFIX = 'survey_draft_'
 const DRAFT_DEBOUNCE = 2000
 
 export default {
-  // ★ 必须用组件内的 beforeRouteLeave（Options API 支持）：watch '$route' 拿不到"即将离开"的时机。
-  //   dirty 只在"保存成功"后清掉，所以这里判断它是安全的。
-  //   （eslint 的 vue/order-in-components 要求路由守卫写在 data 之前）
+  // 必须用组件内路由守卫：watch '$route' 拿不到"即将离开"的时机；dirty 只在保存成功后清
+  // （vue/order-in-components 要求路由守卫写在 data 之前）
   beforeRouteLeave(to, from, next) {
     if (!this.dirty) {
       next()
@@ -899,12 +880,10 @@ export default {
         shareCode: null,
         startTime: null,
         endTime: null,
-        // ★ 后端 findById **不过滤 deleted**，所以详情里带得回来；
-        //   用来判断"这份问卷是不是在回收站里"（回收站里禁止编辑/保存/发布）
+        // 后端 findById 不过滤 deleted，所以详情带得回来；回收站里的问卷禁止编辑/保存/发布
         deleted: 0,
         // 服务端最后更新时间：用来判断自动草稿是否比服务端版本更新
         updatedTime: null,
-        // ===== 问卷设置（设置弹窗里编辑，随「保存」一起提交）=====
         accessPassword: '',
         maxResponses: null,
         thankText: '',
@@ -925,16 +904,14 @@ export default {
       },
       questions: [],
 
-      // ===== 设置弹窗 =====
       settingsVisible: false,
       /** 评分题的 5 档文案，模板里做「N 分 · 满意」的提示 */
       ratingLabels: RATING_LABELS,
       /** NPS 的 0~10 分（预览与填写页共用同一份常量） */
       npsScores: NPS_SCORES,
-      /** 「进阶题型包」的价格（来自 /api/wallet/pricing；null = 还没取到，不显示数字） */
+      /** 「进阶题型包」价格（/api/wallet/pricing；null = 未取到，不显示数字） */
       advancedTypeCost: null,
 
-      // ===== 未保存提示 / 保存状态 =====
       /** 是否有未保存修改（标题、描述、题目、选项任意变化都会置 true，保存成功后清 false） */
       dirty: false,
       /** 正在用接口数据回填编辑器：期间不把变化算成"用户修改"，避免一进页面就显示未保存 */
@@ -947,7 +924,6 @@ export default {
       /** 自动草稿定时器 / 自动草稿最后写入时间 */
       draftTimer: null,
 
-      // ===== 拖拽排序 =====
       /** 正在拖的题目下标 / 悬停到的题目下标 */
       dragQIndex: null,
       dragOverQIndex: null,
@@ -955,38 +931,23 @@ export default {
       dragOption: null,
       dragOverOption: null,
 
-      // ===== 预览（填写者视角） =====
       previewVisible: false,
       /** 预览里的作答状态：只存在于本页内存，不会提交、也不会污染编辑态 */
       previewAnswers: {},
       previewTexts: {},
 
-      // ===== 发布成功分享卡 =====
       shareVisible: false,
       shareLink: '',
       qrDataUrl: '',
-      /**
-       * 是否正在保存（门控）。
-       * 保存首次是"预存 + 正式提交"两次往返，期间按钮若还可点，用户很容易连点出第二次保存 ——
-       * 两次全量覆盖并发执行，轻则重复插入题目、重则把对方的更新覆盖掉。
-       * 所以点击后立刻置 true，**直到两次请求全部结束**（含失败）才放开。
-       */
+      /** 保存门控：保存是「预存 + 正式提交」两次往返，期间放开按钮会连点出第二次全量覆盖 */
       saving: false,
       /**
-       * 草稿阶段的**临时题目 id**（从 -1000 递减）。
-       * 新建的题在保存前没有数据库 id，而"跳转目标"这个下拉框必须有一个值可用，
-       * 否则新建的问卷完全设不了跳转（AI 创建与模板创建之所以正常，是因为它们的题目自带宽 id）。
-       * 前端自己发号，保存成功后会用真实 id 覆盖掉（见 saveQuestions）。
-       *
-       * ★★ **不能从 -1 开始**：`-1` 在跳转语义里是"结束问卷"这个保留值
-       *   （见下拉框的"结束问卷"选项与 SurveyFillByCode 的 `targetId === -1`）。
-       *   若某道新题拿到 -1，用户配的"结束问卷"就会在映射时被替换成那道题的 id ——
-       *   一句话都不报，症状却是"选了结束却跳到某道题"。
-       *   这里从 -1000 起留出安全间隔；真实 id 全是正数，负数区只属于前端。
+       * 草稿阶段的临时题目 id（从 -1000 递减）：新题没有数据库 id，跳转下拉框又必须有值。
+       * ★ 不能从 -1 起：-1 是"结束问卷"的保留值，被新题占用后会静默把跳转改成那道题。
+       * 保存成功后按后端回显 [{id, sortOrder}] 覆盖临时 id（见 applyServerIdOrder）。
        */
       tempQuestionId: -1000,
 
-      // ===== 历史版本（编辑历史 / 对比 / 回滚）=====
       versionVisible: false,
       versions: [],
       /** 对比用的两个版本 id（旧 → 新） */
@@ -997,11 +958,8 @@ export default {
       /** 正在回滚的版本 id（用于按钮 loading，避免连点两次回滚） */
       rollingBack: null,
       /**
-       * 题目是否**加载失败**（不是"这份问卷没有题目"）。
-       * ★★ 两者必须分开：题目数组在加载失败时也是 []，而保存接口是**全量覆盖**语义 ——
-       *   分不清就会在"没读到题目"的情况下点保存，把库里已有题目全部删掉。
-       *   实测事故（2026-10-18）：作者给自己的问卷设了答题密码，编辑器读题目时被 400 拦下，
-       *   页面显示"还没有题目"，一保存就留下"删除 7 题"的历史版本。
+       * 题目是否加载失败（不是"这份问卷没有题目"）：加载失败时 questions 也是 []，
+       * 而保存是全量覆盖，分不清就会把库里已有题目全部删掉。
        */
       questionsLoadFailed: false,
       /** 题目加载失败的具体原因（直接显示给用户，别再让他去猜） */
@@ -1017,9 +975,8 @@ export default {
       return Boolean(user && user.role === 'admin')
     },
     /**
-     * 我对这份问卷能否编辑 / 发布（H2）。
-     * ★ myPermissions 为 null 表示后端没给（老版本/异常），此时**不拦**，避免把老用户挡在门外；
-     *   真正的拦截在后端，前端这里只是"别让按钮点了必 400"。
+     * 我对这份问卷能否编辑 / 发布（H2）。myPermissions 为 null = 后端没给，此时不拦；
+     * 真正的权限防线在后端，前端只是避免按钮点了必 400。
      */
     canEditSurvey() {
       const perms = this.surveyInfo.myPermissions
@@ -1042,25 +999,19 @@ export default {
       return this.surveyInfo.deleted !== null && this.surveyInfo.deleted !== 0
     },
     /**
-     * 是否被举报下架（lifecycle=SUSPENDED）。
-     * ★ 下架期间内容冻结：后端会拦保存/发布/回滚/加协作者，
-     *   前端把提示写成"申请恢复"而不是泛泛的"只读权限"。
+     * 是否被举报下架（lifecycle=SUSPENDED）：下架期间后端会拦保存/发布/回滚，前端提示走"申请恢复"。
      */
     isSuspended() {
       return this.surveyInfo.lifecycle === 'SUSPENDED'
     },
     /**
-     * 是否「模板编辑模式」。
-     * ★ 从 /admin/templates 进入（路由 meta.fromTemplate）：
-     *   · 不显示「立即发布」「设置」——模板不发布，这些设置也不会被复制到副本；
-     *   · 返回按钮回模板管理，而不是跳进用户侧的「我的问卷」（管理员在那里是 0 份空态）。
+     * 模板编辑模式（路由 meta.fromTemplate）：不显示发布/设置，返回回模板管理而不是「我的问卷」。
      */
     isTemplateMode() {
       return this.$route.meta.fromTemplate === true
     },
     /**
-     * 「已结束」的问卷是否已经把截止时间改到了未来（或清空）。
-     * ★ 与后端 SurveyService.publish 的判定保持一致：endTime 为 null 或晚于当前时间 → 允许重新发布。
+     * 已结束的问卷是否已把截止时间改到未来（或清空）：与后端 SurveyService.publish 判定一致。
      */
     endExtended() {
       if (!this.surveyInfo.endTime) return true
@@ -1085,8 +1036,7 @@ export default {
     }
   },
   watch: {
-    // ★ 深度监听整份编辑态：标题 / 描述 / 时间 / 题目 / 选项任意一处变化都算"有未保存修改"，
-    //   同时触发自动草稿（2 秒防抖）。hydrating 期间（接口回填）不算修改。
+    // 深度监听整份编辑态：任意变化都算"有未保存修改"并触发自动草稿；hydrating 期间（接口回填）不算。
     surveyInfo: {
       deep: true,
       handler() {
@@ -1119,10 +1069,7 @@ export default {
     if (this.draftTimer) clearTimeout(this.draftTimer)
   },
   methods: {
-    /**
-     * 取「进阶题型包」的价格（用于左侧面板的角标）。
-     * ★ 失败就静默：价格只是提示，取不到不影响编辑/保存。
-     */
+    /** 取「进阶题型包」价格（失败静默：只是提示，取不到不影响编辑/保存） */
     async loadAdvancedTypeCost() {
       try {
         const list = await walletApi.pricing()
@@ -1140,8 +1087,7 @@ export default {
       // 等 watch 的 flush 跑完再解除 hydrating，否则回填会被当成用户修改
       await this.$nextTick()
       this.hydrating = false
-      // ★ 首次加载失败时**自动重试一次**：后端刚重启/网络抖一下是常见场景，
-      //   让人手点 F5 重来一遍很冤；真失败的话顶部会给红条并带上原因。
+      // 首次加载失败自动重试一次（后端刚重启/网络抖动很常见）；仍失败由顶部红条给出原因。
       if (this.questionsLoadFailed) {
         await new Promise(resolve => setTimeout(resolve, 800))
         await this.loadQuestions()
@@ -1159,47 +1105,44 @@ export default {
           shareCode: data.shareCode,
           startTime: data.startTime,
           endTime: data.endTime,
-          // ★ 带上 deleted —— 回收站里的问卷禁止保存/发布，页面要能判断并给出提示
+          // 带上 deleted —— 回收站里的问卷禁止保存/发布，页面要能判断并给出提示
           deleted: data.deleted == null ? 0 : data.deleted,
-          // ★ 带上 lifecycle —— 被举报下架（SUSPENDED）的问卷内容冻结，
-          //   页面要显示"申请恢复"的提示，而不是泛泛的"只读权限"。
+          // 带上 lifecycle：下架（SUSPENDED）问卷内容冻结，页面要显示"申请恢复"而不是泛泛的只读
           lifecycle: data.lifecycle || null,
           updatedTime: data.updatedTime || null,
-          // ===== 问卷设置（GET /api/survey/{id} 是作者接口，会带回真实密码）=====
+          // 问卷设置（作者接口，会带回真实密码）
           accessPassword: data.accessPassword || '',
           maxResponses: data.maxResponses == null ? null : data.maxResponses,
           thankText: data.thankText || '',
           redirectUrl: data.redirectUrl || '',
           publicResult: data.publicResult === 1 ? 1 : 0,
-          // ★ IP 限制（高级设置包）：默认 0，老后端不返回该字段时也不会误开
+          // IP 限制（高级设置包）：默认 0，老后端不返回该字段时也不会误开
           ipLimit: data.ipLimit === 1 ? 1 : 0,
-          // ★ 考试判分：老后端不返回时按"普通问卷"处理（不误开），及格分保持 null
+          // 考试判分：老后端不返回时按"普通问卷"处理（不误开），及格分保持 null
           gradeEnabled: data.gradeEnabled === 1 ? 1 : 0,
           passScore: data.passScore == null ? null : data.passScore,
-          // ★ 限时：库里是秒，编辑器按分钟展示（空/0 都视为不限）
+          // 限时：库里是秒，编辑器按分钟展示（空/0 都视为不限）
           timeLimitMinutes: data.timeLimitSeconds ? Math.round(data.timeLimitSeconds / 60) : null,
           showAnswerAfterSubmit: data.showAnswerAfterSubmit === 1 ? 1 : 0,
-          // ★ 仅限登录用户填写：默认 0（老后端不返回时也不会误开）
+          // 仅限登录用户填写：默认 0（老后端不返回时也不会误开）
           requireLogin: data.requireLogin === 1 ? 1 : 0,
-          // ★ 签到核销 / 公开报名名单：默认都关
+          // 签到核销 / 公开报名名单：默认都关
           checkinEnabled: data.checkinEnabled === 1 ? 1 : 0,
           showParticipants: data.showParticipants === 1 ? 1 : 0,
-          // ★ H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
+          // H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
         // 服务端最后更新时间就是"上次保存时间"，进页面即可显示"已保存 · X"
         this.lastSavedAt = this.toTimestamp(data.updatedTime) || null
       } catch {
-        // ★ 失败提示已由 src/api/http.js 统一弹出（ElMessage.error），
-        //   catch 只保留流程控制的位置（本场景无需额外处理，保持页面不变）。
+        // 失败提示已由 src/api/http.js 统一弹出，这里只做流程控制
       }
     },
 
     async loadQuestions() {
       try {
-        // ★ 带 X-Survey-Editor：声明"这是编辑器在读题目"。
-        //   后端只在校验来源是编辑器时才允许"作者/管理员免答题密码"；
-        //   填写页不带这个头，所以作者自己打开分享链接仍然要输对密码。
+        // 带 X-Survey-Editor 声明"编辑器在读题目"：后端只对编辑器放行作者/管理员免答题密码，
+        // 填写页不带这个头，作者自己打开分享链接仍要输密码。
         const data = await api.question.list(this.surveyId, {
           headers: { 'X-Survey-Editor': '1' }
         })
@@ -1208,9 +1151,8 @@ export default {
         this.questionsLoadError = ''
         return true
       } catch (e) {
-        // 失败提示由 src/api/http.js 统一弹出（这里只做流程控制）
-        // ★★ 必须留下标记：此时 questions 仍是 []，而"保存"是全量覆盖 ——
-        //   不拦的话用户点一下保存就把库里已有题目全删了（实测发生过）。
+        // 必须留下加载失败标记：此时 questions 仍是 []，而保存是全量覆盖 ——
+        // 不拦的话用户一点保存就把库里已有题目全删了。
         this.questionsLoadFailed = true
         this.questionsLoadError = (e && e.message) || '未知错误（请查看浏览器控制台）'
         return false
@@ -1234,23 +1176,21 @@ export default {
       return (data || []).map(q => ({
         ...q,
         required: q.required || 0,
-        // ★ 分值：老数据/老后端可能没有这一列 —— 统一归一成 0（不参与判分），
-        //   否则 el-input-number 拿到 undefined 会显示成空白、保存时又被当成"没传"。
+        // 分值：老数据可能没有这一列，统一归一成 0（不参与判分），否则保存时会被当成没传（未提交）
         score: q.score == null ? 0 : q.score,
         options: (q.options || []).map(o => ({
           ...o,
-          // ★ 正确答案标记：只认 0/1，避免历史脏值（true / 2）让勾选框显示异常
+          // 正确答案标记：只认 0/1，避免历史脏值（true / 2）让勾选框显示异常
           isCorrect: o.isCorrect === 1 ? 1 : 0
         })),
-        // ★ 后端给的是 JSON 文本；编辑器内部统一用数组（新增/删除行更直观）。
-        //   保存前再由 toSavePayload 转回 JSON 文本（见 stringifyMatrixAxis）。
+        // 后端矩阵行列是 JSON 文本，编辑器内部用数组；保存前用 stringifyMatrixAxis 转回
         matrixRows: isMatrix(q.type) ? parseMatrixAxis(q.matrixRows) : [],
         matrixCols: isMatrix(q.type) ? parseMatrixAxis(q.matrixCols) : []
       }))
     },
 
     addQuestion(type) {
-      // ★ 草稿阶段的题没有数据库 id，先发一个临时 id（负数），否则"跳转目标"下拉框无值可用。
+      // 草稿阶段的题没有数据库 id，先发一个临时 id（负数），否则"跳转目标"下拉框无值可用。
       const newQ = { id: this.tempQuestionId--, type, title: '', required: 0, options: [], score: 0 }
       // 单选 / 多选 / 下拉 / 排序：都给两个空选项起步；评分 / 日期 / 文本类不需要选项
       if (hasOptions(type)) {
@@ -1299,7 +1239,6 @@ export default {
       this.questions[qIndex].options.splice(oIndex, 1)
     },
 
-    // ==================== 未保存状态 / 自动草稿 ====================
 
     /** 任何编辑动作都会走到这里：标记 dirty + 排一次自动草稿 */
     markDirty() {
@@ -1317,14 +1256,12 @@ export default {
 
     saveDraft() {
       this.draftTimer = null
-      // ★ 题目没加载出来时**不写草稿**：否则会存下一份 questions=[] 的草稿，
-      //   下次进页面选"恢复草稿"就等于把已有题目清空（保存是全量覆盖语义）。
+      // 题目没加载出来时不写草稿：否则会存下 questions=[] 的草稿，恢复时等于把已有题目清空。
       if (this.questionsLoadFailed) return
       if (!this.surveyId || !this.dirty) return
       try {
-        // ★ 答题密码**不写进本地草稿**：localStorage 是明文、且可能多人共用同一台机器。
-        //   草稿恢复时本来就只回填标题/描述/起止时间（见 offerDraftRestore），
-        //   即使不存密码也不会丢"设置"（设置随保存走服务端）。
+        // 答题密码不写进本地草稿：localStorage 是明文且可能多人共用一台机器；
+        // 恢复草稿只回填标题/描述/起止时间，设置仍随保存走服务端。
         const info = { ...this.surveyInfo }
         delete info.accessPassword
         const payload = {
@@ -1339,9 +1276,8 @@ export default {
     },
 
     /**
-     * 进页面时问一次"要不要恢复上次没保存的草稿"。
-     * 只有草稿比服务端版本更新才问 —— 否则在别的设备上保存过之后，
-     * 旧草稿会把新内容覆盖回去。
+     * 进页面时问一次"要不要恢复上次未保存的草稿"：只有草稿比服务端版本新才问，
+     * 否则在别的设备上保存过之后，旧草稿会把新内容覆盖回去。
      */
     async offerDraftRestore() {
       const key = DRAFT_PREFIX + this.surveyId
@@ -1354,8 +1290,7 @@ export default {
         return
       }
       if (!draft || !draft.savedAt || !Array.isArray(draft.questions)) return
-      // ★ 草稿里 0 题、而服务端这次读到了题目：这份草稿多半是"上次读题目失败"时留下的，
-      //   恢复它等于把已有题目清空 —— 直接丢弃，不拿它去覆盖真实数据。
+      // 草稿 0 题而服务端读到了题目：多半是上次读题失败留下的，恢复它等于清空题目，直接丢弃。
       if (draft.questions.length === 0 && this.questions.length > 0) {
         this.clearDraft()
         return
@@ -1388,8 +1323,7 @@ export default {
         endTime: info.endTime || null
       }
       this.questions = this.normalizeQuestions(draft.questions)
-      // ★ 题目来自本地草稿（比服务端新），此时保存是安全的 —— 解除"加载失败"标记，
-      //   否则用户会一直卡在"点了保存没反应/被禁用"的状态里。
+      // 题目来自比服务端新的草稿，保存是安全的：解除加载失败标记，否则保存会一直被拦。
       this.questionsLoadFailed = false
       this.questionsLoadError = ''
       await this.$nextTick()
@@ -1438,15 +1372,10 @@ export default {
       e.returnValue = ''
     },
 
-    // ==================== 拖拽排序（题目 / 选项） ====================
 
     /**
-     * 只有**拖拽把手**（.drag-handle）可拖，卡片本体不再是 draggable。
-     *
-     * ★ 为什么改（第四十五轮用户实测反馈）：整卡可拖时，在题干/选项输入框里选中文字、
-     *   或只是点一下卡片空白处，都会误触发拖拽，"点哪儿都能拖"体感很差。
-     *   把手只有图标大小，误触概率趋近于零，也让"哪里能拖"一目了然。
-     * ★ 因此这里不再需要"是否点在输入框上"的护栏 —— 把手本身不是输入控件。
+     * 只有拖拽把手（.drag-handle）可拖：整卡 draggable 会让选中文字、点空白处都误触发拖拽；
+     * 把手本身不是输入控件，因此也不需要"是否点在输入框上"的护栏。
      */
     onQuestionDragStart(index, e) {
       this.dragQIndex = index
@@ -1519,21 +1448,17 @@ export default {
      * 保存问卷信息 + 题目。
      *
      * @returns {Promise<boolean>} true = 保存成功；false = 校验失败或后端拒绝（提示已弹出）
-     * ★ 返回值是给 publishSurvey() 用的：必须先确认"真的保存成功"再去发布，
-     *   否则会出现"发布成功但标题/题目改动没保存"（本方法校验失败时只 `return`、
-     *   后端失败时 `catch` 吞掉，调用方无从得知）。
+     * 返回值供 publishSurvey() 判断：必须真的保存成功才能发布，否则会"发布成功但改动没保存"。
      */
     async saveQuestions() {
-      // ★★ 题目没加载出来时**禁止保存**：此时 questions=[]，而保存是全量覆盖语义，
-      //   提交空数组 = 把这份问卷的题目全部删掉（用户实测踩到过，历史版本里留下"删除 7 题"）。
-      //   要恢复：刷新页面重新加载题目（或先排查后端为什么拒绝返回题目）。
-      // ★ 只读协作者：按钮已禁用，这里再兜一层（键盘回车/脚本触发都能挡住，并给出原因）。
+      // 题目没加载出来时禁止保存：questions=[] 提交上去 = 把这份问卷的题目全部删掉。
+      // 只读协作者：按钮已禁用，这里再兜一层（键盘/脚本触发也能挡住并给出原因）。
       if (!this.canEditSurvey) {
         ElMessage.error('你在这份问卷上没有编辑权限')
         return false
       }
       if (this.questionsLoadFailed) {
-        // ★ 必须把**原因**说出来：用户看到的是"点了没反应"，实际是题目根本没读到。
+        // 必须把原因说出来：否则用户看到的是"点了没反应"，实际是题目根本没读到。
         ElMessage.error(
           '题目没加载出来（' + (this.questionsLoadError || '原因未知') +
           '），保存会把题目全部删掉，已阻止。请点页面上方的「重新加载题目」，或刷新页面重试。'
@@ -1550,8 +1475,8 @@ export default {
           return false
         }
       }
-      // ★ 矩阵题：行列标题必须非空、不重复、够数（与后端 MatrixConfig 同一口径，
-      //   前端先拦一次是为了把"哪一行错了"说清楚；后端 400 只有一句笼统的文案）。
+      // 矩阵题行列标题必须非空、不重复、够数（与后端 MatrixConfig 同口径）；
+      // 前端先拦是为了把"哪一行错了"说清楚，后端 400 只有一句笼统文案。
       for (let i = 0; i < this.questions.length; i++) {
         const q = this.questions[i]
         if (!isMatrix(q.type)) continue
@@ -1574,11 +1499,8 @@ export default {
         q.matrixRows = rows
         q.matrixCols = cols
       }
-      // ★★ "有选项"的题型（单选/多选/下拉）不允许保存空选项。
-      //   为什么必须拦在这里：答题页拿 opt.content 当 el-radio / el-checkbox 的 value，
-      //   多个空选项的 value 全是 "" —— 点其中一个，整组会**同时显示为选中**（"一点全点"）；
-      //   下拉则渲染成空白面板、选不出任何东西，一旦必填就把访客永久卡在该题。
-      //   这类问卷发布出去就是废卷，所以保存这一步直接拒绝（后端 doSaveQuestions 还有同口径兜底）。
+      // 有选项的题型不允许空选项：答题页拿 opt.content 当 radio/checkbox 的值，
+      // 空值会让整组同时显示为选中，下拉则渲染成空白面板（后端 doSaveQuestions 同口径兜底）。
       for (let i = 0; i < this.questions.length; i++) {
         const q = this.questions[i]
         if (!this.qHasOptions(q.type)) continue
@@ -1591,9 +1513,7 @@ export default {
           ElMessage.warning(`第 ${i + 1} 题（排序题）至少需要 2 个选项才能排序`)
           return false
         }
-        // ★ 选项内容必须**互不相同**：答题页把选项原文当 radio/checkbox 的值，
-        //   两个同名选项的值相同 —— 点一个会**同时选中两个**（用户实测报障："点一个相当于同时点"）。
-        //   统计也按 content 分组，同名选项本来就没法区分。
+        // 选项内容必须互不相同：同名选项的 value 相同，点一个会同时选中两个，统计也无法区分。
         const seenOptions = new Set()
         for (let j = 0; j < opts.length; j++) {
           const text = typeof opts[j].content === 'string' ? opts[j].content.trim() : ''
@@ -1610,10 +1530,8 @@ export default {
           opts[j].content = text
         }
       }
-      // ★★ 考试配置的前端预检（后端 QuestionService / SurveyService 还有同口径校验）：
-      //    ① 开启考试模式时至少要有一道题设了分值 —— 否则"总分 0"，成绩卡只能是 0/0；
-      //    ② 设了分值的题必须标正确答案；单选/下拉只能有一个。
-      //   放在这里是为了把"第几题错"说清楚，后端的 400 文案只有一句笼统的话。
+      // 考试配置前端预检（后端同口径）：开启考试至少要有一道题有分值；
+      // 设了分值的题必须标正确答案，单选/下拉只能有一个。这里拦是为了说清"第几题错"。
       if (this.surveyInfo.gradeEnabled === 1) {
         if (this.examTotalScore <= 0) {
           ElMessage.warning('已开启考试模式，请先给至少一道单选/多选/下拉题设置分值')
@@ -1633,8 +1551,7 @@ export default {
           }
         }
       }
-      // ★ 门控不能静默：上一次保存还卡着（网络挂了/请求没返回）时，
-      //   用户再点会像"按钮坏了"——这里必须说清楚。
+      // 门控不能静默：上一次保存还卡着时再点会像"按钮坏了"，必须说清楚。
       if (this.saving) {
         ElMessage.warning('上一次保存还没结束，请稍等；若一直转圈，请刷新页面后重试')
         return false
@@ -1642,83 +1559,58 @@ export default {
 
       this.saving = true
       try {
-        // 0. ★ **保存前的跳转预检查**：任何选项的跳转目标都必须指向"编辑器里现在存在的某道题"。
-        //    典型触发场景：用户删掉了被别的题跳转指向的那道题 ——
-        //    这时规则已经失效，必须**拦住保存并说清是哪一题**，
-        //    而不是让后端拒绝（提示不够具体）或静默把规则丢掉（用户以为还在）。
+        // 保存前跳转预检查：每个选项的跳转目标都必须是编辑器里现存的某道题。
+        // 用户删掉被指向的题后规则已失效，必须拦住保存并说清是哪一题，而不是静默丢掉规则。
         if (!this.validateJumpTargets()) return false
 
-        // 1. 保存题目
-        //   api.question.save(surveyId, questions) 的第二个参数就是**本次完整题目数组**
-        //   （后端是全量覆盖语义，见 src/api/question.js 的注释），
-        //   返回值是**按下标一一对应**的题目 id 列表（后端保存后回显）。
-        // ★ 失败时后端返回 400 + message，由 http.js 弹红字并 throw。
-        //
-        // ★★ 草稿阶段新加的题还没有数据库 id，而"跳转目标"必须存真 id，所以：
-        //    ① 先**预存**一次（提交完整数组，去掉"指向临时题"的跳转）拿到真实 id；
-        //    ② 用真实 id 替换掉题目 id 与所有跳转目标；
-        //    ③ 再正式保存一次（此时跳转目标全是真 id）。
-        //    首次保存因此是两次往返，之后题目都有真 id，永远只有一次。
-        //
-        // ★★ 为什么题目必须排在"更新问卷信息"**之前**（第四十五轮踩到）：
-        //   开启考试模式时，后端要按**库里题目的分值**校验总分与及格分；
-        //   若先存设置，读到的是上一版分值（首次开启时全是 0）→ 一律 400
-        //   「开启考试模式前，请先给题目设置分值」，用户会以为功能坏了。
+        // 1. 保存题目（api.question.save 第二个参数是本次完整题目数组，后端全量覆盖）。
+        // 新题没有真 id，而跳转目标必须存真 id：先预存一次拿到真实 id，
+        // 替换题目 id 与所有跳转目标后再正式保存一次；之后题目都有真 id，只需一次。
+        // 题目必须排在"更新问卷信息"之前：后端按库里题目分值校验考试总分与及格分。
         const pending = await this.ensureRealQuestionIds()
         if (!pending) return false
-        // ★ 换完真 id 之后再查一次：预存可能被后端重建了题目（id 变了），
-        //   这时"原来解析得通的目标"有可能解析不通了 —— 必须拦在正式提交之前。
+        // 换完真 id 后再查一次：预存可能重建题目，导致跳转目标失效。
         if (!this.validateJumpTargets()) return false
-        // 第二次提交做**有限重发**：第一次已经成功、只是它的响应丢了（网络抖动）时，
-        // 重发一次就能救回来 —— 否则用户以为没保存，再点一次反而要走完整流程。
+        // 第二次提交做有限重发：第一次已成功但响应丢了时，重发一次即可救回。
         const idItems = await this.saveWithRetry()
         this.applyServerIdOrder(idItems)
 
-        // 2. 更新问卷信息（含时间字段与考试设置）
-        // ★ 这里【不要】再传 shareCode：
-        //   分享码由服务端独占管理（SurveyController.update() 会无条件沿用数据库里的旧值），
-        //   传了也会被忽略，属于冗余参数，而且容易让人误以为前端能改分享码。
-        // ★ 也【不要】再传 status：SurveyMapper.update 的 SET 列表里根本没有 status
-        //   （改状态收口在 publish / updateStatusAndRecycle 等专用入口），
-        //   传了不生效，只会让人误以为"保存时能顺手改状态"。
+        // 2. 更新问卷信息（含时间字段与考试设置）。
+        // 不要传 shareCode / status：两者由服务端独占管理，传了也不生效。
         await api.survey.update({
           id: this.surveyId,
           title: this.surveyInfo.title,
           description: this.surveyInfo.description,
           startTime: this.surveyInfo.startTime,
           endTime: this.surveyInfo.endTime,
-          // ★ 问卷设置：后端 update 是**静态 SQL**，没传的字段会被写成 NULL。
-          //   所以这里必须每次带上全量设置（留空 = 关闭该功能，是后端的既定语义）。
+          // 后端 update 是静态 SQL，没传的字段会被写成 NULL：设置必须每次带全量（留空 = 关闭）。
           accessPassword: this.surveyInfo.accessPassword || null,
           maxResponses: this.surveyInfo.maxResponses ?? null,
           thankText: this.surveyInfo.thankText || null,
           redirectUrl: this.surveyInfo.redirectUrl || null,
           publicResult: this.surveyInfo.publicResult === 1 ? 1 : 0,
-          // ★ 考试判分：必须每次带上（后端 update 是静态 SQL，不传会被写成 0/NULL），
-          //   关闭考试模式时及格分一并清空（后端也会清，这里传 null 让请求体自解释）。
+          // 考试判分也必须每次带上（静态 SQL 不传会被写成 0/NULL），关闭时及格分一并清空。
           gradeEnabled: this.surveyInfo.gradeEnabled === 1 ? 1 : 0,
           passScore: this.surveyInfo.gradeEnabled === 1 ? (this.surveyInfo.passScore ?? null) : null,
-          // ★ P1：限时（分钟 → 秒）与"提交后显示答案"。
-          //   ★ 显示答案只在考试模式下有意义，关闭时传 0（后端也会归一）。
+          // 限时：分钟 → 秒；"提交后显示答案"只在考试模式下有意义，关闭时传 0。
           timeLimitSeconds: this.surveyInfo.timeLimitMinutes
             ? Math.round(this.surveyInfo.timeLimitMinutes * 60) : null,
           showAnswerAfterSubmit: this.surveyInfo.gradeEnabled === 1
             && this.surveyInfo.showAnswerAfterSubmit === 1 ? 1 : 0,
-          // ★ 仅限登录用户填写：默认 0，关闭时也传 0（静态 SQL，不传会被写成默认值）
+          // 仅限登录用户填写：静态 SQL 不传会被写成默认值，关闭时也显式传 0
           requireLogin: this.surveyInfo.requireLogin === 1 ? 1 : 0,
-          // ★ 签到核销 / 公开报名名单
+          // 签到核销 / 公开报名名单
           checkinEnabled: this.surveyInfo.checkinEnabled === 1 ? 1 : 0,
           showParticipants: this.surveyInfo.showParticipants === 1 ? 1 : 0
         })
 
-        // ★ 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿
+        // 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿
         this.markSaved()
         ElMessage.success('保存成功')
         return true
       } catch (e) {
-        // ★ HTTP 错误（400/401/429/5xx）已由 src/api/http.js 弹过红字，这里不重复；
-        //   但**非 HTTP 异常**（TypeError / 代码 bug）以前会被这一行静默吞掉 ——
-        //   表现就是"点保存毫无反应"。这类错误必须说出来，否则根本没法排查。
+        // HTTP 错误已由 src/api/http.js 弹过红字；非 HTTP 异常（TypeError / 代码 bug）
+        // 必须自己报出来，否则表现就是"点保存毫无反应"，无法排查。
         if (!e || typeof e.status !== 'number') {
           console.error('[保存失败]', e)
           ElMessage.error('保存失败：' + ((e && e.message) || '未知错误') + '（先按 F5 刷新页面再试）')
@@ -1730,15 +1622,10 @@ export default {
     },
 
     /**
-     * 保存前的跳转预检查。
+     * 保存前跳转预检查：nextQuestionId 只能是 null / undefined / -1（结束）或编辑器现存的题目 id。
+     * 只报告第一条问题并定位到题号。
      *
-     * 规则：每个选项的 `nextQuestionId` 只能是
-     *   · `null`（按顺序）/ `undefined`（没设）/ `-1`（结束问卷）；或
-     *   · 某道**当前编辑器里存在**的题的 id（含还没保存的新题的临时 id —— 它们随后会被换成真 id）。
-     *
-     * 只报告**第一条**问题并定位到题号，让用户能直接去改。
-     *
-     * @returns {boolean} true = 全部合法，可以保存；false = 已弹提示，必须中止保存
+     * @returns {boolean} true = 全部合法；false = 已弹提示，必须中止保存
      */
     validateJumpTargets() {
       const existingIds = new Set(this.questions.map(q => q.id))
@@ -1760,7 +1647,7 @@ export default {
     },
 
     /**
-     * 矩阵题行/列标题的本地校验：非空、不重复、不超长。
+     * 矩阵题行/列标题本地校验：非空、不重复、不超长。
      * @returns {string} 空串 = 合法；否则是给用户看的错误文案（不含题号，由调用方补）
      */
     matrixAxisError(list, label) {
@@ -1776,36 +1663,28 @@ export default {
     },
 
     /**
-     * 生成给后端的题目数组。
-     *
-     * ★ 矩阵题在编辑器里用数组（`matrixRows: ['行1','行2']`），后端要的是 JSON 文本
-     *   （`t_question.matrix_rows` 是 varchar）。不转换的话 Jackson 会把数组绑到 String 字段上，
-     *   直接 400（而且错误文案与矩阵无关，很难查）。
-     * ★ 其它题型的这两列必须显式给 null：后端保存时会清空，但显式传更不容易被误读成"没传就别动"。
+     * 生成给后端的题目数组：矩阵行列在编辑器里是数组，后端要 JSON 文本，
+     * 不转换会 400（错误文案还和矩阵无关）；非矩阵题显式传 null。
      */
     toSavePayload(list) {
       return (list || []).map(q => ({
         ...q,
-        // ★ 分值：只有可判分题型保留；其它题型强制 0（后端也会归一，这里让请求体自解释）
+        // 分值：只有可判分题型保留；其它题型强制 0（后端也会归一，这里让请求体自解释）
         score: this.qIsGradable(q.type) ? (Number(q.score) || 0) : 0,
         matrixRows: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixRows) : null,
         matrixCols: isMatrix(q.type) ? stringifyMatrixAxis(q.matrixCols) : null,
         options: (q.options || []).map(opt => ({
           content: opt.content,
           nextQuestionId: opt.nextQuestionId,
-          // ★ 正确答案标记：只有可判分题型保留（排序题也有 options，但正确答案没有意义）
+          // 正确答案标记：只有可判分题型保留（排序题也有 options，但正确答案没有意义）
           isCorrect: this.qIsGradable(q.type) && opt.isCorrect === 1 ? 1 : 0
         }))
       }))
     },
 
     /**
-     * 提交题目，失败时**有限重发**（最多 2 次，间隔 400ms）。
-     *
-     * ★ 只重发**可恢复的失败**：网络中断 / 超时 / 5xx。
-     *   4xx（尤其是 400）是**业务拒绝**，重发不会变好，反而会重复打扰用户 —— 直接抛出。
-     * ★ 为什么值得重发：走到这里说明"预存"已经成功、临时 id 也已经换成真 id，
-     *   只差最后一次落库；网络抖一下就让用户重头再点一遍，代价远大于重发一次。
+     * 提交题目，失败时有限重发（最多 2 次，间隔 400ms）。
+     * 只重发可恢复的失败（网络/超时/5xx）；4xx 是业务拒绝，重发不会变好，直接抛。
      */
     async saveWithRetry() {
       const MAX_ATTEMPTS = 2
@@ -1826,28 +1705,22 @@ export default {
     },
 
     /**
-     * 让**所有题目**都拥有真实的数据库 id（草稿阶段只有前端发的临时 id，从 -1000 递减）。
-     *
-     * ★★ **预存必须提交"完整的题目数组"**：后端这个接口是**全量覆盖**语义
-     *   （没传的题会被删掉），所以只提交新题会把问卷里**已有的题目全删了**。
-     *   这里提交完整数组，只把**指向临时 id 的跳转目标去掉**
-     *   —— 它们此刻还没有对应的真实题，留着只会被后端置空并把这几条规则悄悄丢掉。
-     *
-     * @returns {Promise<boolean>} true = 现在所有题都有真 id（可以正式保存）；
-     *                             false = 预存失败（提示已弹出，调用方应中止本次保存）
+     * 让所有题目都拥有真实数据库 id（草稿阶段只有前端发的临时 id）。
+     * 预存必须提交完整题目数组：后端是全量覆盖，只提交新题会把已有题目全删；
+     * 只去掉指向临时 id 的跳转目标，随后用回显的真 id 替换。
+     * @returns {Promise<boolean>} true = 所有题都有真 id；false = 预存失败
      */
     async ensureRealQuestionIds() {
       if (!this.questions.some(q => !this.isRealId(q.id))) {
         return true   // 常见路径：题目都已在库里，一次提交即可
       }
-      // ① 完整数组 + 去掉"指向临时题"的跳转（完整是硬要求，见方法注释）
-      //   ★ 走 toSavePayload：矩阵题的行列数组必须先转成 JSON 文本再提交
+      // ① 完整数组 + 去掉"指向临时题"的跳转（完整是硬要求）；走 toSavePayload 让矩阵先转 JSON
       const payload = this.toSavePayload(this.questions).map(q => ({
-        id: this.isRealId(q.id) ? q.id : undefined,   // 已有题带上真 id，避免被当成新题重建
+        id: this.isRealId(q.id) ? q.id : undefined,   // 已有题带真 id，避免被当成新题重建
         type: q.type,
         title: q.title,
         required: q.required,
-        // ★ 预存也要带上分值与正确答案：否则这次"预存"会把考试配置清空（后端是全量覆盖）
+        // 预存也要带分值与正确答案：否则这次预存会把考试配置清空（后端全量覆盖）
         score: q.score,
         matrixRows: q.matrixRows,
         matrixCols: q.matrixCols,
@@ -1864,7 +1737,7 @@ export default {
         ElMessage.error('保存题目失败（后端未返回题目 id，请重试）')
         return false
       }
-      // ② 临时 id → 真实 id（题目自身的 id，以及跳转目标里指向临时 id 的）
+      // ② 临时 id → 真实 id（题目自身 id 与跳转目标）
       const idMap = new Map()
       this.questions.forEach((q, i) => {
         if (!this.isRealId(q.id)) idMap.set(q.id, idItems[i].id)
@@ -1884,10 +1757,8 @@ export default {
     },
 
     /**
-     * 保存成功后，把编辑态的题目顺序/真实 id 与后端回显对齐。
-     *
-     * 后端按数组顺序重排 sortOrder，所以回显的第 i 项就对应本次提交的第 i 项。
-     * 这里只做**校验 + 兜底**：正常情况下编辑态已经是正确的（正式提交前就换好了真 id）。
+     * 保存成功后按后端回显 [{id, sortOrder}] 对齐编辑态（回显第 i 项对应本次提交第 i 项）。
+     * 正常路径不会命中，这里只是校验 + 兜底。
      */
     applyServerIdOrder(idItems) {
       if (!Array.isArray(idItems) || idItems.length !== this.questions.length) return
@@ -1895,7 +1766,7 @@ export default {
       idItems.forEach((item, i) => {
         const q = this.questions[i]
         if (q && this.isRealId(item.id) && q.id !== item.id) {
-          q.id = item.id      // 兜底：理论上不该发生，发生即说明上面的映射有漏
+          q.id = item.id      // 兜底：命中即说明上面的映射有漏
           mismatch++
         }
         if (q) q.sortOrder = item.sortOrder
@@ -1905,13 +1776,10 @@ export default {
       }
     },
 
-    // ===== 预览（填写者视角） =====
 
     /**
-     * 打开预览：把当前编辑态初始化成一份可点选的"假答卷"。
-     * ★ 每次打开都重置：题号/题目会变，残留上次的选择会让人以为"数据串了"。
-     * ★ 预览只是把题面渲染一遍，跳转逻辑不模拟 —— 那要跑真实的答题路径，
-     *   弹窗里做既容易和填写页逻辑不一致，也会误导用户"预览里这样，发布后就一定这样"。
+     * 打开预览：按当前编辑态初始化一份可点选的"假答卷"，每次打开都重置。
+     * 预览只渲染题面，不模拟跳转 —— 与填写页逻辑不一致会误导用户。
      */
     openPreview() {
       const answers = {}
@@ -1938,7 +1806,6 @@ export default {
       list.splice(target, 0, item)
     },
 
-    // ===== 题型展示（模板里不写 type === 1 这类魔数）=====
     qTypeLabel(type) {
       return typeLabel(type)
     },
@@ -1976,8 +1843,7 @@ export default {
     },
     /**
      * 勾选「正确答案」后的互斥处理：单选/下拉只能有一个正确答案。
-     * ★ 不在模板里用 radio 的原因：多选需要 checkbox，两套控件会让选项行布局不一致；
-     *   统一 checkbox + 这里互斥，作者看到的行为仍然是"单选只能选一个"。
+     * 统一用 checkbox + 这里互斥，避免单选/多选两套控件导致选项行布局不一致。
      */
     onCorrectChange(q, changedIndex) {
       if (!this.qIsGradable(q.type)) return
@@ -1994,7 +1860,6 @@ export default {
       window.open(`/r/${this.surveyInfo.shareCode}`, '_blank')
     },
 
-    // ===== 历史版本 =====
 
     async openVersions() {
       this.versionVisible = true
@@ -2026,10 +1891,10 @@ export default {
         const created = await api.survey.rollbackVersion(v.id)
         ElMessage.success(`已回滚到 v${v.versionNo}，生成新版本 v${created.versionNo}`)
         await this.loadVersions()
-        // ★ 必须重新加载题目：编辑器里还是回滚前的数组，此时直接点保存会把回滚结果覆盖掉
+        // 必须重新加载题目：否则编辑态还是旧数组，直接保存会把回滚结果覆盖掉
         await this.loadQuestions()
         if (this.questionsLoadFailed) {
-          // 回滚其实成功了（后端已生成新版本），只是刷新题目失败 —— 别让用户以为白点了
+          // 回滚其实成功了，只是刷新题目失败 —— 别让用户以为白点了
           ElMessage.warning('版本回滚已完成，但题目没能重新加载，请刷新页面查看结果')
         }
       } finally {
@@ -2042,7 +1907,7 @@ export default {
     },
 
     async publishSurvey() {
-      // ★★ **先确认保存成功，再发布**：否则会出现"发布成功但改动没保存"。
+      // 必须先确认保存成功再发布，否则会出现「发布成功但改动没保存」
       const wasEnded = this.surveyInfo.status === 2
       const saved = await this.saveQuestions()
       if (!saved) {
@@ -2050,12 +1915,11 @@ export default {
         return
       }
       try {
-        //   返回后端响应体（后端会按需生成分享码 shareCode）。
         const data = await api.survey.publish(this.surveyId)
         if (data && data.shareCode) {
           this.surveyInfo.status = 1
           this.surveyInfo.shareCode = data.shareCode
-          // ★ 发布前已保存成功：状态是干净的（不弹"未保存"提示），并显示分享卡而不是单条 toast
+          // 发布前已保存成功：清掉未保存态，并显示分享卡（而不是单条 toast）
           this.markSaved()
           this.showShareCard()
           ElMessage.success(wasEnded ? '已重新发布' : '发布成功')
@@ -2094,12 +1958,11 @@ export default {
     },
 
     goBack() {
-      // ★ 模板编辑模式回模板管理：不要跳进用户侧的「我的问卷」——
-      //   管理员在那里只会看到 0 份问卷的空态，也把"模板维护"和"用户问卷"两条边界混在一起。
+      // 模板编辑模式回模板管理：用户侧「我的问卷」对管理员是 0 份空态
       this.$router.push(this.isTemplateMode ? '/admin/templates' : '/my/surveys')
     },
 
-    /** ★ 回收站提示里的"去回收站"入口（管理员与普通用户看到的都是自己的回收站页） */
+    /** 回收站提示里的"去回收站"入口：管理员与普通用户各去自己的回收站页 */
     goRecycle() {
       this.$router.push(this.isAdmin ? '/admin/recycle' : '/my/recycle')
     }
@@ -2109,8 +1972,7 @@ export default {
 
 <style scoped>
 .edit-page {
-  /* ★ 编辑器是**独立全屏页面**（不套 AdminLayout）：题型面板要占整个页面最左，
-     像问卷星那样左边工具、右边画布。页面自己负责背景与内边距。 */
+  /* 编辑器是独立全屏页面（不套 AdminLayout）：左侧题型面板占满页面高度 */
   min-height: 100vh;
   box-sizing: border-box;
   padding: 18px 22px 32px;
@@ -2154,12 +2016,11 @@ export default {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 20px;
-  /* ★ 按钮区不许被挤到第二行：它的位置必须稳定（两次截图的按钮分布不一致就是这里换行导致的） */
+  /* 按钮区不许换行：换行会把操作按钮挤到下一行 */
   flex-wrap: nowrap;
 }
 
-/* ★ 左侧标题区允许收缩（min-width:0 + 省略号），把宽度让给右侧按钮区：
-   "已保存 · 45 分钟前" 比 "已保存 · 刚刚" 宽，以前会把按钮挤到下一行。 */
+/* 左侧标题区可收缩（min-width:0 + 省略号）把宽度让给按钮区；否则长状态文案会把按钮挤到下一行 */
 .edit-header > div:first-child {
   min-width: 0;
   flex: 1 1 auto;
@@ -2168,7 +2029,7 @@ export default {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 0 0 auto;      /* 不参与伸缩：副标题长短不再影响按钮排布 */
+  flex: 0 0 auto;      /* 不参与伸缩：副标题长短不影响按钮排布 */
   flex-wrap: nowrap;
 }
 .card-title {
@@ -2181,7 +2042,6 @@ export default {
   margin-bottom: 4px;
 }
 
-/* ==================== 空态 ==================== */
 .empty-questions {
   text-align: center;
   padding: 48px 20px;
@@ -2205,7 +2065,6 @@ export default {
   color: var(--ink-3);
 }
 
-/* ==================== 题目卡 ==================== */
 .q-card {
   border-radius: var(--r-lg);
 }
@@ -2244,7 +2103,6 @@ export default {
   font-weight: 600;
 }
 
-/* ==================== 选项 ==================== */
 .q-options {
   margin-top: 16px;
 }
@@ -2278,7 +2136,7 @@ export default {
   width: 158px;
   flex-shrink: 0;
 }
-/* 考试判分：选项行的「正确答案」勾选 + 题头的「分值」 */
+/* 考试判分：选项行「正确答案」勾选 + 题头「分值」 */
 .option-correct {
   flex-shrink: 0;
   margin-right: 2px;
@@ -2302,7 +2160,6 @@ export default {
   margin: 12px 0 0 36px;
 }
 
-/* ==================== 矩阵题编辑器 ==================== */
 .matrix-editor {
   display: flex;
   flex-wrap: wrap;
@@ -2334,7 +2191,6 @@ export default {
   flex: 1;
 }
 
-/* NPS：没有选项可配，给一句说明 */
 .q-nps-hint {
   margin-top: 16px;
   padding: 14px 16px;
@@ -2353,8 +2209,7 @@ export default {
   color: var(--ink-3);
 }
 
-/* ==================== 右侧题型面板 ==================== */
-/* 布局：左侧 sticky 题型栏（固定宽）+ 右侧题目列表（可伸缩）；窄屏时题型栏落到底部并横向排列 */
+/* 布局：左侧 sticky 题型栏固定宽 + 右侧题目列表可伸缩；窄屏时题型栏落到底部 */
 .editor-body {
   display: flex;
   gap: 16px;
@@ -2411,7 +2266,7 @@ export default {
   color: var(--ink-3);
 }
 @media (max-width: 1150px) {
-  /* 窄屏：题目在前、题型面板在后（手机端先看内容，再往下加题） */
+  /* 窄屏：题目在前、题型面板在后（先看内容，再往下加题） */
   .editor-shell {
     flex-direction: column;
   }
@@ -2462,31 +2317,26 @@ export default {
   border-color: #cdf2dc;
   color: #15803d;
 }
-/* 下拉：与单选同色系，靠图标区分 */
 .add-select {
   background: #eaf3ff;
   border-color: #d5e7ff;
   color: #1d4ed8;
 }
-/* 多行文本：文本类绿色 */
 .add-textarea {
   background: #e9f9ef;
   border-color: #cdf2dc;
   color: #15803d;
 }
-/* 评分：琥珀色（与"多选"同族，都是需要打分的题型） */
 .add-rating {
   background: #fff6e8;
   border-color: #ffe6bf;
   color: #b45309;
 }
-/* 日期：中性青灰，避免和上面几类撞色 */
 .add-date {
   background: #e7fbff;
   border-color: #cdf0fa;
   color: #0e7490;
 }
-/* 进阶题型：统一用更"重"的色系，和基础题型区分开 */
 .add-matrix {
   background: #fdeef0;
   border-color: #f8d4da;
@@ -2523,7 +2373,6 @@ export default {
   opacity: 0.75;
 }
 
-/* ==================== 保存状态 / 拖拽 ==================== */
 .save-state {
   display: inline-flex;
   align-items: center;
@@ -2614,7 +2463,6 @@ html[data-theme="dark"] .option-row.is-drag-over {
   background: #16263f;
 }
 
-/* ==================== 发布成功分享卡 ==================== */
 .share-link {
   margin-top: 10px;
 }
@@ -2640,7 +2488,6 @@ html[data-theme="dark"] .option-row.is-drag-over {
   font-size: 13px;
 }
 
-/* ==================== 问卷设置 ==================== */
 .settings-form :deep(.el-form-item__content) {
   flex-wrap: wrap;
 }
@@ -2670,7 +2517,6 @@ html[data-theme="dark"] .option-row.is-drag-over {
   color: var(--ink-3);
 }
 
-/* ==================== 预览（填写者视角） ==================== */
 .pv-header {
   display: flex;
   align-items: center;
@@ -2793,7 +2639,6 @@ html[data-theme="dark"] .option-row.is-drag-over {
   color: var(--ink-3);
 }
 
-/* ==================== 预览：矩阵 / 排序 / NPS ==================== */
 .pv-matrix-wrap {
   overflow-x: auto;
 }

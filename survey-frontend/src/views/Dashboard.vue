@@ -1,6 +1,6 @@
 <template>
   <div>
-    <!-- 顶部 8 个指标卡：从「只有规模」升级为「规模 + 运营待办 + 新能力」 -->
+    <!-- 顶部 8 个指标卡：全部来自 /system-overview 真实数据，没有就补 0 -->
     <el-row :gutter="16">
       <el-col
         v-for="card in statCards"
@@ -28,7 +28,6 @@
       </el-col>
     </el-row>
 
-    <!-- 中间：状态分布 + 近 7 天趋势 -->
     <el-row class="mt-20 equal-height-row" :gutter="20">
       <el-col :span="9" :xs="24" :sm="24" :md="9">
         <el-card>
@@ -56,7 +55,6 @@
       </el-col>
     </el-row>
 
-    <!-- 下：热门问卷 TOP 5 + 运营待办/系统信息 -->
     <el-row class="mt-20 equal-height-row" :gutter="20">
       <el-col :span="15" :xs="24" :sm="24" :md="15">
         <el-card>
@@ -135,7 +133,7 @@
             </div>
           </div>
 
-          <!-- 待办：点击直达对应页面（数字全部来自 /system-overview，不是假数据） -->
+          <!-- 待办：点击直达对应页面；数字全部来自 /system-overview，不是假数据 -->
           <div class="ops-list">
             <div class="ops-item" @click="$router.push('/admin/reviews')">
               <span class="ops-label">待处理举报</span>
@@ -163,7 +161,7 @@
             </div>
           </div>
 
-          <!-- 动态提示：按严重程度告诉管理员"现在该关注什么"（不是静态文案） -->
+          <!-- 动态提示：按严重程度告诉管理员现在该关注什么 -->
           <div class="ops-hint" :class="{ warn: opsHintWarn }">
             <span class="ops-hint-icon">{{ opsHintWarn ? '⚠️' : '💡' }}</span>
             <span>{{ opsHint }}</span>
@@ -177,7 +175,6 @@
       </el-col>
     </el-row>
 
-    <!-- 底部：快捷操作（按新能力补齐入口） -->
     <el-card class="mt-20">
       <template #header>
         <span class="text-bold">⚡ 快捷操作</span>
@@ -202,13 +199,11 @@
       </el-row>
     </el-card>
 
-    <!-- 技术栈与系统信息：沿用原总览里那张"项目用了什么"的表，放到页面最底部，
-         不抢运营指标的第一屏；样式与上面的卡片一致（el-card + el-descriptions + 标签）。 -->
     <el-card class="mt-20">
       <template #header>
         <div class="flex-between">
           <span class="text-bold">🧩 技术栈与系统信息</span>
-          <span class="panel-hint">v2.3.0 · 98 端点 · 339 测试 · 21 张表</span>
+          <span class="panel-hint">v2.3.0 · 110 端点 · 440 测试 · 23 张表</span>
         </div>
       </template>
 
@@ -220,7 +215,7 @@
           Spring Boot 4 · MyBatis · PageHelper · OkHttp · JJWT · Redis（Lettuce）
         </el-descriptions-item>
         <el-descriptions-item label="数据库">
-          MySQL 8.x（survey_db · 21 张表 · utf8mb4）
+          MySQL 8.x（survey_db · 23 张表 · utf8mb4）
         </el-descriptions-item>
         <el-descriptions-item label="缓存 / 限流">
           Redis 5：统计缓存 + 分布式限流 + 熔断降级（不可用时回退进程内计数）
@@ -247,17 +242,17 @@
 </template>
 
 <script>
-// ★ 按需引入 ECharts（只打包用得到的图表）：整库 import 会把全部图表打进产物。
+// 按需引入 ECharts（只打包用得到的图表），不要全量 import * as echarts
 import echarts from '../utils/echarts'
-// ★ 统一接口层：本页的请求一律走 src/api/（token、401 跳转、错误提示都由它处理）。
+// ★ 8 指标 / 7 天趋势 / TOP5 全部来自 GET /api/survey/system-overview 的真实数据；缺字段补 0，不造假数字
 import api from '../api'
 import {
   chartText, chartSplit, chartTooltip, THEME_EVENT,
   chartPalette, chartColor, chartNum, chartPct
 } from '../utils/chartTheme'
-// ★ 失败提示由 src/api/http.js 统一弹出，所以本文件不需要 import ElMessage
+// 失败提示由 src/api/http.js 统一弹出，本文件不 import ElMessage
 
-// 图标已在 main.js 全局注册（新增 Wallet），模板里用 <component :is="'Xxx'" /> 即可
+// 图标已在 main.js 全局注册，模板里用 <component :is="'Xxx'" /> 即可
 export default {
   data() {
     return {
@@ -407,7 +402,7 @@ export default {
       if (this.trendChart) this.trendChart.resize()
     },
 
-    // ===== 后端健康检查（运营卡片的绿点/红点）=====
+    // 后端健康检查：运营卡片右上角的绿点 / 红点
     async checkHealth() {
       try {
         await api.misc.health()
@@ -417,7 +412,7 @@ export default {
       }
     },
 
-    // ===== 一次拉全总览，再画两张图 =====
+    // 一次拉全总览（8 指标 / 趋势 / TOP5），再画两张图
     async loadStats() {
       try {
         const data = await api.survey.systemOverview()
@@ -542,8 +537,7 @@ export default {
 </script>
 
 <style scoped>
-/* 两栏等高：el-row 是 flex，把 el-col 也变成 flex 容器后，
-   里面的 el-card 会拉伸到整行高度 —— 右侧内容变高时左侧图表卡自动跟上。 */
+/* 两栏等高：el-col 变成 flex 容器后，里面的 el-card 会拉伸到整行高度 */
 .equal-height-row :deep(.el-col) {
   display: flex;
 }
