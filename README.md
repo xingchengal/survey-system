@@ -334,12 +334,17 @@ docker compose up --build
 ```
 IdeaProjects/
 ├── README.md                          # 本文件
+├── SPRINT.md                          # 当前待办（每次开工先读）
 ├── sql/                               # 数据库脚本
 │   └── init.sql                       # 建库建表（23 张表，仅结构）
 ├── docs/                              # 随仓库入库的文档（见下方"文档索引"）
 │   ├── README.md
-│   ├── 问卷系统-端点权限审计表.md
-│   └── ...
+│   ├── ARCHITECTURE.md
+│   ├── AUDIT.md
+│   ├── HISTORY.md
+│   ├── 前端架构与后端契约.md
+│   ├── Redis-键规范与缓存限流设计.md
+│   └── BUG-滑块验证码.md
 │
 ├── survey-backend/                    # 后端服务
 │   ├── mvnw / mvnw.cmd                # Maven Wrapper 3.9.16
@@ -348,12 +353,12 @@ IdeaProjects/
 │   │   ├── aspect/                    # AOP 切面（操作日志、管理员鉴权）
 │   │   ├── common/                    # 通用类（PageResult、OwnershipGuard、枚举、校验器）
 │   │   ├── config/                    # 配置类（Knife4j、CORS、限流、全局异常、SPA 转发）
-│   │   ├── controller/                # 控制器（13 个）
+│   │   ├── controller/                # 控制器（18 个）
 │   │   ├── dto/                       # 请求 DTO（@Valid 校验）
-│   │   ├── entity/                    # 实体类（12 个）
+│   │   ├── entity/                    # 实体类（16 个）
 │   │   ├── filter/                    # 过滤器（JWT、文档保护、请求体上限）
-│   │   ├── mapper/                    # 数据访问层（注解式 Mapper，12 个）
-│   │   ├── service/                   # 业务逻辑层（15 个）
+│   │   ├── mapper/                    # 数据访问层（注解式 Mapper，20 个）
+│   │   ├── service/                   # 业务逻辑层（24 个）
 │   │   └── util/                      # 工具类（JwtUtil、WebUtils）
 │   ├── src/main/resources/
 │   │   ├── application.yaml           # 主配置
@@ -407,7 +412,7 @@ IdeaProjects/
 | **导出** | `GET /api/answer/export/{surveyId}` | 导出 Excel（中文文件名） |
 | **AI** | `POST /api/ai/generate` | AI 生成问卷 |
 
-完整接口请查看 Knife4j 文档，或查阅 [`docs/问卷系统-端点权限审计表.md`](docs/问卷系统-端点权限审计表.md)
+完整接口请查看 Knife4j 文档，或查阅 [`docs/AUDIT.md`](docs/AUDIT.md)
 （**110** 个方法级端点的权限分档与业务前置条件的权威口径）。
 
 ---
@@ -527,10 +532,19 @@ Knife4j（OpenAPI 3）在线文档，覆盖全部 **110** 个方法级端点；�
 
 ### 📖 文档索引
 
+四份主文档按职责分层：`SPRINT` 待办、`ARCHITECTURE` 铁律、`AUDIT` 事实、`HISTORY` 历史。
+
 | 文档 | 说明 |
 |---|---|
-| [`docs/README.md`](docs/README.md) | 文档目录索引与同步规则 |
-| [`docs/问卷系统-端点权限审计表.md`](docs/问卷系统-端点权限审计表.md) | ★ **端点与权限的权威口径**：110 个方法级端点的权限分档、业务前置条件、可复现的审计命令 |
+| [`SPRINT.md`](SPRINT.md) | ★ **当前待办与未决项**：每次开工先读，收工只更新这里的状态 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 架构铁律、唯一口径、关键不变量、环境坑 |
+| [`docs/AUDIT.md`](docs/AUDIT.md) | ★ **事实矩阵**：110 个方法级端点的权限分档、业务前置条件、可复现的审计命令 |
+| [`docs/HISTORY.md`](docs/HISTORY.md) | 历史归档：轮次索引、决策、复盘、回滚（默认不读，按关键词检索） |
+| [`docs/README.md`](docs/README.md) | 文档索引与读取 / 写入规则 |
+| [`docs/前端架构与后端契约.md`](docs/前端架构与后端契约.md) | 前端目录、分层与前后端硬契约 |
+| [`docs/Redis-键规范与缓存限流设计.md`](docs/Redis-键规范与缓存限流设计.md) | Redis key、缓存、限流与降级规范 |
+
+> 文档一致性由 `node tools/check-docs.mjs` 自动核对：端点四处一致、§四权限点、相对链接、README 规模、历史叙事泄漏；CI 的 `docs` 作业会复跑。
 
 ### 数据库表结构
 

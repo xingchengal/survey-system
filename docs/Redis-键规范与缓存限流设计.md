@@ -2,7 +2,7 @@
 
 > 更新时间：**2026-10-13**
 > 定位：**Redis 相关约定的唯一出处**（key 规范、失效策略、降级方向、运维红线）。
-> 配套：`docs/问卷系统-交接文档.md`（怎么跑 / 约定）、`docs/问卷系统-端点权限审计表.md`（端点口径）。
+> 配套：`docs/ARCHITECTURE.md`（怎么跑 / 铁律）、`docs/AUDIT.md`（端点口径）。
 > 代码入口：`common/RedisKeys`（key 唯一出处）、`service/StatsCacheService`（缓存）、
 > `config/RedisRateLimiter`（限流计数）、`common/RedisCircuitBreaker`（熔断）。
 
