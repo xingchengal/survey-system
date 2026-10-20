@@ -3,6 +3,7 @@ package com.survey.service;
 import com.survey.common.BizException;
 import com.survey.common.CollaboratorRole;
 import com.survey.common.CollaboratorStatus;
+import com.survey.common.Role;
 import com.survey.common.WalletFeature;
 import com.survey.dto.CollaboratorView;
 import com.survey.dto.InvitationView;
@@ -70,6 +71,11 @@ public class SurveyCollaboratorService {
             // 文案不区分"不存在"与"已注销"：后者是账号隐私，没必要在接口里透露
             throw new BizException("被邀请的用户不存在或已注销");
         }
+        // 协作者只能是普通用户：管理员对任何问卷本就走模块权限全权，进名单只会把账号暴露给作者、
+        // 被作者改角色/移除，还会占名额计费；管理端与问卷级授权是两套东西，不能混。
+        if (Role.isStaff(target.getRole())) {
+            throw new BizException("不能邀请管理员账号作为协作者");
+        }
         Integer targetUserId = target.getId();
         if (targetUserId.equals(operatorUserId)) {
             throw new BizException("不能把自己加为协作者");
@@ -100,9 +106,15 @@ public class SurveyCollaboratorService {
     /**
      * 接受邀请：PENDING → ACCEPTED；名额费在这一步扣（只有生效的协作者占名额，拒绝/撤销无需退款）。
      * 名额判断与扣费必须同事务，余额不足时邀请保持 PENDING，不会出现"钱扣了没生效"。
+     *
+     * @param role 当前用户的系统角色（X-User-Role）；管理员账号不接受协作邀请，防止存量 PENDING 生效
      */
     @Transactional
-    public void accept(Integer invitationId, Integer userId) {
+    public void accept(Integer invitationId, Integer userId, String role) {
+        // 与 invite 同一口径：管理员账号不能成为协作者，存量 PENDING 也只能撤销/拒绝，不能靠接受洗白。
+        if (Role.isStaff(role)) {
+            throw new BizException("管理员账号不能作为协作者");
+        }
         InvitationView invitation = requirePendingInvitation(invitationId, userId);
         int accepted = collaboratorMapper.countBySurvey(invitation.getSurveyId());
         if (accepted >= WalletFeature.FREE_COLLABORATORS) {

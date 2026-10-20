@@ -2,6 +2,7 @@ package com.survey.service;
 
 import com.survey.common.BizException;
 import com.survey.common.CollaboratorStatus;
+import com.survey.common.Role;
 import com.survey.dto.InvitationView;
 import com.survey.entity.Survey;
 import com.survey.entity.User;
@@ -134,6 +135,35 @@ class SurveyCollaboratorServiceTest {
     }
 
     @Test
+    @DisplayName("★ 管理员账号不能被邀请：超管与次级管理员一律 400，不写库也不发通知")
+    void cannotInviteStaffAccounts() {
+        for (String staffRole : new String[]{Role.ADMIN, Role.SUB_ADMIN}) {
+            User staff = user(TARGET);
+            staff.setRole(staffRole);
+            when(userMapper.findByUsername(TARGET_NAME)).thenReturn(staff);
+
+            assertEquals("不能邀请管理员账号作为协作者", assertThrows(BizException.class,
+                    () -> service.invite(survey(), TARGET_NAME, "editor", OPERATOR)).getMessage());
+        }
+        verify(collaboratorMapper, never()).insert(anyInt(), anyInt(), anyString(), anyInt());
+        verify(notificationService, never()).send(anyInt(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("★ 管理员账号不能接受协作邀请：存量 PENDING 也不生效，不扣费")
+    void staffCannotAcceptInvitation() {
+        when(collaboratorMapper.findInvitationById(INVITATION_ID))
+                .thenReturn(invitation(CollaboratorStatus.PENDING));
+
+        for (String staffRole : new String[]{Role.ADMIN, Role.SUB_ADMIN}) {
+            assertEquals("管理员账号不能作为协作者", assertThrows(BizException.class,
+                    () -> service.accept(INVITATION_ID, TARGET, staffRole)).getMessage());
+        }
+        verify(collaboratorMapper, never()).updateStatus(anyInt(), anyString(), anyString());
+        verify(walletService, never()).chargeCollaborator(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
     @DisplayName("★ 已生效的重复邀请 → 400（提示改用改角色），不覆盖原角色")
     void duplicateAcceptedInviteIsRejected() {
         when(userMapper.findByUsername(TARGET_NAME)).thenReturn(user(TARGET));
@@ -184,7 +214,7 @@ class SurveyCollaboratorServiceTest {
         when(collaboratorMapper.updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
                 CollaboratorStatus.ACCEPTED)).thenReturn(1);
 
-        service.accept(INVITATION_ID, TARGET);
+        service.accept(INVITATION_ID, TARGET, Role.USER);
 
         verify(collaboratorMapper).updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
                 CollaboratorStatus.ACCEPTED);
@@ -200,7 +230,7 @@ class SurveyCollaboratorServiceTest {
         when(collaboratorMapper.updateStatus(INVITATION_ID, CollaboratorStatus.PENDING,
                 CollaboratorStatus.ACCEPTED)).thenReturn(1);
 
-        service.accept(INVITATION_ID, TARGET);
+        service.accept(INVITATION_ID, TARGET, Role.USER);
 
         verify(walletService).chargeCollaborator(SURVEY_ID, OWNER, TARGET);
     }
@@ -212,11 +242,11 @@ class SurveyCollaboratorServiceTest {
         other.setUserId(999);
         when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(other);
         assertEquals("邀请不存在或已失效", assertThrows(BizException.class,
-                () -> service.accept(INVITATION_ID, TARGET)).getMessage());
+                () -> service.accept(INVITATION_ID, TARGET, Role.USER)).getMessage());
 
         when(collaboratorMapper.findInvitationById(INVITATION_ID)).thenReturn(invitation(CollaboratorStatus.ACCEPTED));
         assertEquals("邀请已处理或已失效", assertThrows(BizException.class,
-                () -> service.accept(INVITATION_ID, TARGET)).getMessage());
+                () -> service.accept(INVITATION_ID, TARGET, Role.USER)).getMessage());
 
         verify(collaboratorMapper, never()).updateStatus(anyInt(), anyString(), anyString());
     }
@@ -344,5 +374,47 @@ class SurveyCollaboratorServiceTest {
         // 密码只用于填写人进门，协作者不该看到；hasPassword 保留给前端提示
         assertNull(item.getAccessPassword());
         assertTrue(item.getHasPassword());
+    }
+
+    @Test
+    @DisplayName("★ 申请改角色：只通知作者、不直接改；非协作者 / 同角色 → 400")
+    void applyRoleOnlyNotifiesOwner() {
+        when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn("viewer");
+        User me = user(TARGET);
+        me.setNickname("小五");
+        when(userMapper.findById(TARGET)).thenReturn(me);
+
+        service.applyRole(survey(), TARGET, "editor");
+
+        // 改角色是作者的权力，申请人只能发通知
+        verify(collaboratorMapper, never()).updateRole(anyInt(), anyInt(), anyString());
+        verify(notificationService).send(eq(OWNER), eq("协作者权限申请"), contains("小五"),
+                eq("collaborator"), eq("/my/surveys"));
+
+        when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn(null);
+        assertEquals("你不是这份问卷的协作者", assertThrows(BizException.class,
+                () -> service.applyRole(survey(), TARGET, "editor")).getMessage());
+
+        when(collaboratorMapper.findCollaboratorRole(SURVEY_ID, TARGET)).thenReturn("editor");
+        assertTrue(assertThrows(BizException.class,
+                () -> service.applyRole(survey(), TARGET, "editor")).getMessage().contains("已经是 editor"));
+    }
+
+    @Test
+    @DisplayName("★ 我的问卷角标：一次 GROUP BY 回填，没有协作者的补 0")
+    void fillCollaboratorCountsUsesSingleGroupBy() {
+        Survey a = survey();
+        Survey b = new Survey();
+        b.setId(999);
+        java.util.Map<String, Object> row = new java.util.HashMap<>();
+        row.put("surveyId", SURVEY_ID);
+        row.put("total", 3L);
+        when(collaboratorMapper.countBySurveyIds(List.of(SURVEY_ID, 999))).thenReturn(List.of(row));
+
+        service.fillCollaboratorCounts(List.of(a, b));
+
+        assertEquals(3, a.getCollaboratorCount());
+        assertEquals(0, b.getCollaboratorCount(), "没有协作者的问卷必须补 0，而不是 null");
+        verify(collaboratorMapper).countBySurveyIds(List.of(SURVEY_ID, 999));
     }
 }

@@ -116,12 +116,13 @@ public class SurveyCollaboratorController {
         return collaboratorService.listMyInvitations(userId);
     }
 
-    /** 接受邀请：归属按 invitation.user_id 校验，接口没有可传的 userId。 */
+    /** 接受邀请：归属按 invitation.user_id 校验，接口没有可传的 userId；管理员账号一律拒绝。 */
     @Operation(summary = "接受协作邀请")
     @PostMapping("/api/collaborator/invitations/{id}/accept")
     public String accept(@PathVariable Integer id,
-                         @RequestHeader("X-User-Id") Integer userId) {
-        collaboratorService.accept(id, userId);
+                         @RequestHeader("X-User-Id") Integer userId,
+                         @RequestHeader("X-User-Role") String role) {
+        collaboratorService.accept(id, userId, role);
         return "已接受邀请";
     }
 

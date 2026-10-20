@@ -321,7 +321,7 @@
     <!-- 协作者管理（作者/管理员） -->
     <el-dialog v-model="collabVisible" title="协作者" width="560px">
       <div class="collab-add">
-        <el-input v-model="collabForm.username" placeholder="对方的用户名" style="width: 190px;" />
+        <el-input v-model="collabForm.username" placeholder="对方的用户名（仅普通用户）" style="width: 190px;" />
         <el-select v-model="collabForm.role" style="width: 150px;">
           <el-option label="只读（viewer）" value="viewer" />
           <el-option label="可编辑（editor）" value="editor" />
@@ -361,6 +361,7 @@
         </el-table-column>
       </el-table>
       <p class="collab-hint">只读 = 只能看问卷；可编辑 = 能改内容、不能删除；只看数据 = 只能看统计。<br />
+        <b>只能邀请普通用户</b>：管理员对问卷本就有管理权限，不参与协作者名单。<br />
         被邀请人会收到站内通知，要在「我的问卷」页接受后才会生效；作者也可以撤销未接受的邀请。<br />
         <b>名额计费</b>：每份问卷前 2 名协作者免费，之后每<b>接受</b> 1 名扣 1 点（待接受不占名额，拒绝/撤销不扣费）。</p>
     </el-dialog>
