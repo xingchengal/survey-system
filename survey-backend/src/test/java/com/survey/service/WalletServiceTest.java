@@ -258,4 +258,40 @@ class WalletServiceTest {
         assertEquals(2, types.get("cost"), "进阶题型包 2 点/份");
         assertTrue(String.valueOf(types.get("description")).contains("矩阵题"));
     }
+
+    @Test
+    @DisplayName("导出扣费：每次导出都扣，幂等键带 UUID（不跨请求去重）")
+    void chargeForExport_shouldDebitEveryTime() {
+        when(walletMapper.findBalanceForUpdate(7)).thenReturn(10);
+        when(txMapper.findByIdem(anyString())).thenReturn(null);
+        stubInserted(202L);
+        when(walletMapper.debit(7, WalletService.EXPORT_COST)).thenReturn(1);
+        when(walletMapper.findBalance(7)).thenReturn(9);
+
+        walletService.chargeForExport(5, 7);
+
+        verify(walletMapper).debit(7, WalletService.EXPORT_COST);
+        verify(txMapper).insertIgnore(argThat(tx -> WalletTxType.EXPORT.equals(tx.getType())
+                && tx.getAmount() == -WalletService.EXPORT_COST
+                && tx.getIdempotencyKey().startsWith("export:5:7:")));
+    }
+
+    @Test
+    @DisplayName("进阶题型包：公共资产（ownerId=0）不收费，正常按价目表扣")
+    void chargeForAdvancedTypes_skipsTemplateAndChargesOwner() {
+        walletService.chargeForAdvancedTypes(5, 0);
+        verifyNoInteractions(walletMapper, txMapper);
+
+        when(walletMapper.findBalanceForUpdate(7)).thenReturn(10);
+        when(txMapper.findByIdem("advanced-types:5")).thenReturn(null);
+        stubInserted(203L);
+        when(walletMapper.debit(7, WalletService.ADVANCED_TYPES_COST)).thenReturn(1);
+        when(walletMapper.findBalance(7)).thenReturn(8);
+
+        walletService.chargeForAdvancedTypes(5, 7);
+
+        verify(txMapper).insertIgnore(argThat(tx -> "advanced-types:5".equals(tx.getIdempotencyKey())
+                && WalletTxType.ADVANCED_TYPES.equals(tx.getType())));
+        verify(txMapper).updateBalanceAfter(203L, 8);
+    }
 }
