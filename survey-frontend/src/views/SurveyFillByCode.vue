@@ -218,9 +218,12 @@
             v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
-            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid var(--stroke); border-radius: 8px; width: 100%; box-sizing: border-box;"
+            class="fill-option-row"
           >
-            {{ opt.content }}
+            <span :class="{ 'fill-option-body': opt.imageUrl }">
+              <img v-if="opt.imageUrl" :src="opt.imageUrl" class="fill-option-image" alt="" />
+              <span>{{ opt.content }}</span>
+            </span>
           </el-radio>
         </el-radio-group>
 
@@ -234,9 +237,12 @@
             v-for="opt in usableOptions"
             :key="opt.id"
             :value="opt.content"
-            style="display: block; margin: 10px 0; padding: 10px 14px; border: 1px solid var(--stroke); border-radius: 8px; width: 100%; box-sizing: border-box;"
+            class="fill-option-row"
           >
-            {{ opt.content }}
+            <span :class="{ 'fill-option-body': opt.imageUrl }">
+              <img v-if="opt.imageUrl" :src="opt.imageUrl" class="fill-option-image" alt="" />
+              <span>{{ opt.content }}</span>
+            </span>
           </el-checkbox>
         </el-checkbox-group>
 
@@ -415,6 +421,8 @@ export default {
       loading: true,
       survey: null,
       questions: [],
+      /** 抽题 / 乱序令牌：同一问卷持久化，刷新后仍是同一套题（提交时后端用它重算总分） */
+      attemptToken: '',
       currentOrder: 1,
       history: [],
       answers: {},
@@ -622,6 +630,7 @@ export default {
           return
         }
         this.survey = data
+        this.ensureAttemptToken()
         // 记一次访问量：silent 且不 await（失败不打扰访客，也不拖慢首屏）
         api.survey.view(this.shareCode).catch(() => {})
         // 接龙报名名单：作者开启后异步拉取，失败静默（不影响答题）
@@ -682,11 +691,38 @@ export default {
      * ★ 加载题目：有密码时带 X-Survey-Password 请求头（密码只放请求头，不进 query/URL）。
      */
     async loadQuestions() {
-      const list = await api.question.list(this.survey.id, this.requestOpts())
+      const list = await api.question.list(
+        this.survey.id,
+        { attemptToken: this.attemptToken },
+        this.requestOpts()
+      )
       this.questions = list.map((q, idx) => ({ ...q, _order: idx + 1 }))
       this.initAnswers()
       this.startCountdown()
       this.startTimeLimit()
+    },
+
+    /**
+     * 抽题 / 乱序令牌：同一问卷持久化在 localStorage，刷新后仍是同一套题。
+     * 隐私模式下 localStorage 不可用 → 退化为内存 token（刷新会换题，但不阻断作答）。
+     */
+    ensureAttemptToken() {
+      const surveyId = this.survey && this.survey.id
+      if (!surveyId) return
+      const key = `dsh:attempt:${surveyId}`
+      try {
+        let token = window.localStorage.getItem(key)
+        if (!token) {
+          token = window.crypto && window.crypto.randomUUID
+            ? window.crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+          window.localStorage.setItem(key, token)
+        }
+        this.attemptToken = token
+      } catch {
+        this.attemptToken = this.attemptToken
+          || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+      }
     },
 
     /**
@@ -729,7 +765,7 @@ export default {
       this.verifying = true
       this.passwordError = ''
       try {
-        const list = await api.question.list(this.survey.id, {
+        const list = await api.question.list(this.survey.id, { attemptToken: this.attemptToken }, {
           silent: true,
           headers: { 'X-Survey-Password': pwd }
         })
@@ -1163,8 +1199,9 @@ export default {
         // 返回值带判分结果（普通问卷 graded=false，不渲染成绩卡）。
         // 实名问卷必须走带 token 的 submit：submit-share 的 userId 恒为 null，后端会 400。
         const result = this.loginRequired
-          ? await api.answer.submit(this.survey.id, details, durationMs)
-          : await api.answer.submitByShareCode(this.shareCode, details, durationMs, this.requestOpts())
+          ? await api.answer.submit(this.survey.id, details, durationMs, this.attemptToken)
+          : await api.answer.submitByShareCode(this.shareCode, details, durationMs,
+              this.requestOpts(), this.attemptToken)
         this.submitResult = result && result.graded ? result : null
         this.submitted = true
         this.clearTimeLimit()
@@ -1593,5 +1630,45 @@ html[data-theme="dark"] .fill-nps-btn {
 }
 .report-fab .el-icon {
   font-size: 15px;
+}
+/* 选项行：整行自适应高度。
+   ★ Element Plus 的 radio / checkbox 默认固定 32px 高，56px 配图会顶出边框；
+     内联 display:block 又会让文字与圆点的基线错位 —— 统一改 flex + height:auto。 */
+.fill-options :deep(.el-radio),
+.fill-options :deep(.el-checkbox) {
+  display: flex;
+  align-items: center;
+  height: auto;
+  min-height: 44px;
+  margin: 10px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.fill-options :deep(.el-radio__label),
+.fill-options :deep(.el-checkbox__label) {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  line-height: 1.5;
+  padding-left: 8px;
+  white-space: normal;
+}
+/* 只有带配图的选项才用横向 flex；无图选项保持纯文本，避免被 flex 基线带偏 */
+.fill-option-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fill-option-image {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--stroke);
+  flex-shrink: 0;
 }
 </style>

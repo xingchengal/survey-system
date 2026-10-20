@@ -40,6 +40,12 @@ export default defineConfig(({ mode }) => {
       '/api': {
         target: apiTarget,
         changeOrigin: true
+      },
+      // 选项配图：填写页 / 编辑器直接 <img src="/uploads/...">。
+      // 开发时必须一起代理到后端，否则 5173 会返回 index.html（表现为裂图）。
+      '/uploads': {
+        target: apiTarget,
+        changeOrigin: true
       }
     }
   },

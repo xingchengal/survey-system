@@ -471,7 +471,7 @@ export default {
       this.dialogVisible = true
       try {
         // 带 X-Survey-Editor：管理/编辑视角读取；否则查看设了答题密码的问卷会被 400 拦住
-        this.currentQuestions = await api.question.list(row.id, {
+        this.currentQuestions = await api.question.list(row.id, null, {
           headers: { 'X-Survey-Editor': '1' }
         })
       } catch {

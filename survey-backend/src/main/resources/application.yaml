@@ -23,6 +23,13 @@ spring:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
 
+  # 选项配图上传：单文件 2MB；请求体含 boundary 与其它字段，留 3MB。
+  # 与 LocalStorageService.MAX_BYTES、RequestSizeFilter 的 4MB 上限一起构成三层限制。
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 3MB
+
   # Redis：答卷统计预聚合缓存 + 分布式限流计数（key 规范见 common/RedisKeys）。
   # ★ 连不上 Redis **不会**导致启动失败（Lettuce 是懒连接），也不会让接口 500：
   #   缓存降级为"直查数据库"，限流降级为"进程内计数"（两条链路的降级方向相反，
@@ -121,6 +128,12 @@ app:
   rate-limit:
     # false = 完全走进程内计数（单实例部署够用；多实例下配额会被放大，见 RedisRateLimiter 类注释）
     redis-enabled: ${APP_RATE_LIMIT_REDIS_ENABLED:true}
+
+  # ★ 选项配图上传（实现见 service/LocalStorageService、service/UploadService）。
+  upload:
+    # 图片根目录（相对启动目录）。容器部署时挂 volume 并设 APP_UPLOAD_DIR=/app/uploads；
+    # 换对象存储时只改 StorageService 实现，url 前缀仍是 /uploads/。
+    dir: ${APP_UPLOAD_DIR:./uploads}
 
 # ========== JWT 配置 ==========
 jwt:

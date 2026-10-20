@@ -177,7 +177,7 @@ class EndpointAuthMatrixTest {
             "GET /api/system/statistics"
     );
 
-    /** 全部 127 条（= 审计表的活行；顺序无关）。 */
+    /** 全部 128 条（= 审计表的活行；顺序无关）。 */
     private static final Set<String> ALL_ENDPOINTS = Set.of(
             "GET /api/admin/permissions",
             "GET /api/admin/sub-admins",
@@ -287,6 +287,7 @@ class EndpointAuthMatrixTest {
             "POST /api/survey/{id}/request-restore",
             "POST /api/survey/version/rollback/{versionId}",
             "POST /api/survey/view/{shareCode}",
+            "POST /api/upload/option-image",
             "POST /api/template-seeder/init",
             "POST /api/user/login",
             "POST /api/user/logout",
@@ -484,10 +485,10 @@ class EndpointAuthMatrixTest {
     // ==================== 三、端点清单与分类的自洽性 ====================
 
     @Test
-    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 127；且公开 13 + 管理 40 + 管理端人员 2 + 其余 72")
+    @DisplayName("★ 端点清单 = 实际注册的 /api 映射 = 128；且公开 13 + 管理 40 + 管理端人员 2 + 其余 73")
     void endpointInventory_matchesRegisteredMappings() {
         Set<String> registered = registeredApiEndpoints();
-        assertEquals(127, registered.size(),
+        assertEquals(128, registered.size(),
                 "注册的 /api 端点数变了。请同步 docs/AUDIT.md 与本类 ALL_ENDPOINTS。实际："
                         + registered);
         assertEquals(new TreeSet<>(ALL_ENDPOINTS), new TreeSet<>(registered),
@@ -496,7 +497,7 @@ class EndpointAuthMatrixTest {
         assertEquals(13, PUBLIC.size(), "公开档固定 13 条（新增 GET /api/survey/result/{shareCode}）");
         assertEquals(40, ADMIN.size(), "管理档固定 40 条（@RequireAdmin + @RequirePermission 的模块端点）");
         assertEquals(2, STAFF_ONLY.size(), "管理端人员档固定 2 条（系统总览 + 系统统计）");
-        assertEquals(127 - 13 - 40 - 2,
+        assertEquals(128 - 13 - 40 - 2,
                 ALL_ENDPOINTS.size() - PUBLIC.size() - ADMIN.size() - STAFF_ONLY.size());
         // 三档不能交叉
         for (String p : PUBLIC) {

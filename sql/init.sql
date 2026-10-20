@@ -187,9 +187,25 @@ CREATE TABLE `t_option` (
   `sort_order` int DEFAULT '0' COMMENT '选项顺序',
   `next_question_id` int DEFAULT NULL COMMENT '选中此选项后跳到哪一题（NULL表示下一题）',
   `is_correct` tinyint NOT NULL DEFAULT '0' COMMENT '是否正确答案：0=否，1=是。★ 只有单选/多选/下拉有判分意义；判分按 content 比对（明细表没有 option_id）',
+  `image_url` varchar(500) DEFAULT NULL COMMENT '选项配图：相对路径 /uploads/xxx.webp；NULL=无图',
   PRIMARY KEY (`id`),
   KEY `idx_question_id` (`question_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=8510 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='题目选项表';
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `t_upload` (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '上传ID',
+  `url` varchar(500) NOT NULL COMMENT '相对路径 /uploads/xxx.webp（与 t_option.image_url 同口径）',
+  `original_name` varchar(255) DEFAULT NULL COMMENT '原始文件名（只作审计，不参与存储路径）',
+  `size_bytes` int NOT NULL DEFAULT '0' COMMENT '文件字节数',
+  `mime` varchar(100) DEFAULT NULL COMMENT '内容类型（按文件头探测，不信任请求头）',
+  `created_by` int DEFAULT NULL COMMENT '上传人ID',
+  `created_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间（GC 宽限期从这里算）',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_upload_url` (`url`),
+  KEY `idx_upload_created` (`created_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='上传文件登记（GC 与容量审计）';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
@@ -253,6 +269,9 @@ CREATE TABLE `t_survey` (
   `require_login` tinyint NOT NULL DEFAULT '0' COMMENT '是否仅限登录用户填写：0=匿名可填（默认），1=必须先登录；开启后只收带 token 的 POST /answer/submit',
   `checkin_enabled` tinyint NOT NULL DEFAULT '0' COMMENT '是否启用签到核销：0=否（默认），1=是；作者在答卷列表里打勾',
   `show_participants` tinyint NOT NULL DEFAULT '0' COMMENT '是否公开报名名单：0=否（默认），1=是；开启后填写页显示前 50 位报名者',
+  `shuffle_questions` tinyint NOT NULL DEFAULT '0' COMMENT '题目乱序：0=按 sort_order，1=填写页随机',
+  `shuffle_options` tinyint NOT NULL DEFAULT '0' COMMENT '选项乱序：0=按 sort_order，1=填写页随机',
+  `questions_per_attempt` int NOT NULL DEFAULT '0' COMMENT '每份答卷抽题数：0=不抽，N=从全部题目随机抽 N 道（判分总分按抽到的题算）',
   `ip_limit` tinyint NOT NULL DEFAULT '0' COMMENT 'IP 限制：0=关闭；1=同一 IP 只能提交一次（高级设置包）',
   `is_template` tinyint DEFAULT '0' COMMENT '是否模板：0=否，1=是',
   `template_category` varchar(50) DEFAULT NULL COMMENT '模板分类：调查/报名/反馈等',

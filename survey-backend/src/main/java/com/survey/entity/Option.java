@@ -19,6 +19,12 @@ public class Option {
      */
     private Integer isCorrect;
 
+    /** 选项配图：相对路径 /uploads/xxx.webp；NULL=无图。只用于展示，不参与判分与统计。 */
+    private String imageUrl;
+
+    public String getImageUrl() { return imageUrl; }
+    public void setImageUrl(String imageUrl) { this.imageUrl = imageUrl; }
+
     public Integer getNextQuestionId() { return nextQuestionId; }
     public void setNextQuestionId(Integer nextQuestionId) { this.nextQuestionId = nextQuestionId; }
 

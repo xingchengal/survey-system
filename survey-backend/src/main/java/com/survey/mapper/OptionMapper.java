@@ -13,9 +13,9 @@ import java.util.List;
 @Mapper
 public interface OptionMapper {
 
-    /** 插入选项（含跳转规则与"是否正确答案"），自增 id 回填到实体。 */
-    @Insert("INSERT INTO t_option(question_id, content, sort_order, next_question_id, is_correct) " +
-            "VALUES(#{questionId}, #{content}, #{sortOrder}, #{nextQuestionId}, IFNULL(#{isCorrect}, 0))")
+    /** 插入选项（含跳转规则、正确答案与配图），自增 id 回填到实体。 */
+    @Insert("INSERT INTO t_option(question_id, content, sort_order, next_question_id, is_correct, image_url) " +
+            "VALUES(#{questionId}, #{content}, #{sortOrder}, #{nextQuestionId}, IFNULL(#{isCorrect}, 0), #{imageUrl})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Option option);
 
@@ -38,4 +38,16 @@ public interface OptionMapper {
             "INNER JOIN t_question q ON o.question_id = q.id " +
             "WHERE q.survey_id = #{surveyId}")
     int deleteBySurveyId(@Param("surveyId") Integer surveyId);
+
+    /**
+     * 该问卷是否存在逻辑跳转（任一选项的 next_question_id 非空，含 -1=结束）。
+     * ★ 抽题 / 乱序会改变题目位置，跳转目标会失效，保存设置时用它拒绝开启。
+     */
+    @Select("SELECT COUNT(*) FROM t_option o INNER JOIN t_question q ON o.question_id = q.id "
+            + "WHERE q.survey_id = #{surveyId} AND o.next_question_id IS NOT NULL")
+    int countJumpOptions(@Param("surveyId") Integer surveyId);
+
+    /** 所有被选项引用的配图（每日 GC 的「活跃引用集合」）。 */
+    @Select("SELECT DISTINCT image_url FROM t_option WHERE image_url IS NOT NULL AND image_url <> ''")
+    List<String> findAllImageUrls();
 }

@@ -162,8 +162,13 @@ async function sendRequest(method, url, options = {}) {
 
   const init = { method, headers }
   if (data !== undefined && data !== null) {
-    headers['Content-Type'] = 'application/json'
-    init.body = JSON.stringify(data)
+    if (data instanceof FormData) {
+      // multipart 的 Content-Type（含 boundary）必须交给浏览器生成，手写会丢 boundary
+      init.body = data
+    } else {
+      headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(data)
+    }
   }
 
   // 网络层异常单独区分：这时没有状态码，不能当 HTTP 错误处理

@@ -25,6 +25,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.PrintWriter;
@@ -72,6 +73,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<Map<String, Object>> handleForbidden(ForbiddenException e) {
         return buildResponse(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
+    /**
+     * 上传文件超过 multipart 限制 → 400。
+     * 必须在绑定阶段接住：否则会掉进通用 Exception 变成 500，前端只看到"服务器错误"。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
+        return buildResponse(HttpStatus.BAD_REQUEST, "图片不能超过 2MB");
     }
 
     /**

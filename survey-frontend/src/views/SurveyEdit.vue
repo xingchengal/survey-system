@@ -350,9 +350,21 @@
           </span>
           <el-input v-model="opt.content" class="option-input" placeholder="请输入选项内容" maxlength="500" />
 
-          <!-- 正确答案：只有单选/多选/下拉可判分；单选/下拉只能有一个，由 onCorrectChange 互斥 -->
+          <el-button
+            class="option-image-btn"
+            link
+            type="primary"
+            :loading="optionImageUploading === `${q.id}-${oIndex}`"
+            @click="pickOptionImage(q, oIndex)"
+          >{{ opt.imageUrl ? '换图' : '配图' }}</el-button>
+          <div v-if="opt.imageUrl" class="option-image-wrap">
+            <img :src="opt.imageUrl" class="option-image" alt="" />
+            <span class="option-image-remove" title="删除配图" @click="removeOptionImage(q, oIndex)">×</span>
+          </div>
+
+          <!-- 正确答案：只有「考试模式 + 可判分题型」才有意义；普通问卷不显示，避免无意义勾选 -->
           <el-checkbox
-            v-if="qIsGradable(q.type)"
+            v-if="qIsGradable(q.type) && surveyInfo.gradeEnabled === 1"
             v-model="opt.isCorrect"
             class="option-correct"
             :true-value="1"
@@ -587,6 +599,41 @@
           <div class="setting-hint">
             开启后，填写页会显示"第 N 位 · 称呼 · 报名时间"（接龙场景）。
             称呼取第一道单行文本题的回答；请勿在报名问卷里收集敏感信息后再公开名单。
+          </div>
+        </el-form-item>
+
+        <el-divider content-position="left">作答顺序</el-divider>
+
+        <el-form-item label="题目乱序">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.shuffleQuestions" :active-value="1" :inactive-value="0"
+                       :disabled="hasLogicJump" />
+            <el-tag v-if="hasLogicJump" type="warning" size="small">有逻辑跳转，不能开启</el-tag>
+          </div>
+          <div class="setting-hint">
+            开启后填写页题目顺序随机；编辑器、统计与回看仍按原顺序。
+            存在逻辑跳转（选项跳到指定题）时不可开启。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="选项乱序">
+          <div class="setting-switch-row">
+            <el-switch v-model="surveyInfo.shuffleOptions" :active-value="1" :inactive-value="0"
+                       :disabled="hasLogicJump" />
+          </div>
+          <div class="setting-hint">
+            开启后每题选项顺序随机；判分按选项原文比对，不受顺序影响。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="随机抽题">
+          <el-input-number v-model="surveyInfo.questionsPerAttempt" :min="0" :max="questionCount"
+                           :step="1" controls-position="right" :disabled="hasLogicJump"
+                           style="width: 160px;" />
+          <span class="setting-inline">0 = 不抽；每份答卷从 {{ questionCount }} 道里抽 N 道</span>
+          <div class="setting-hint">
+            ★ 判分总分按抽到的题算；未抽到的题不进统计分母（按「抽到且作答」口径）。
+            同一份答卷刷新不换题，抽到的题请全部答完再交卷（未答按 0 分）。
           </div>
         </el-form-item>
 
@@ -845,6 +892,7 @@ import { ElMessage } from 'element-plus'
 import QRCode from 'qrcode'
 // 请求统一走 src/api/http.js：鉴权、错误提示、成败判断都收口在那里
 import api from '../api'
+import uploadApi from '../api/upload'
 // 价格唯一出处是后端 WalletFeature，编辑器只读不写死
 import walletApi from '../api/wallet'
 // 角色/用户信息统一走 utils/auth，不要裸读 localStorage
@@ -904,7 +952,11 @@ export default {
         requireLogin: 0,
         // 签到核销 / 公开报名名单（0=关闭，默认）
         checkinEnabled: 0,
-        showParticipants: 0
+        showParticipants: 0,
+        // 作答顺序：乱序 / 抽题（0=关闭；questionsPerAttempt=0 表示不抽题）
+        shuffleQuestions: 0,
+        shuffleOptions: 0,
+        questionsPerAttempt: 0
       },
       questions: [],
 
@@ -945,6 +997,8 @@ export default {
       qrDataUrl: '',
       /** 保存门控：保存是「预存 + 正式提交」两次往返，期间放开按钮会连点出第二次全量覆盖 */
       saving: false,
+      /** 正在上传配图的选项（`题目id-选项下标`），按钮 loading 用 */
+      optionImageUploading: '',
       /**
        * 草稿阶段的临时题目 id（从 -1000 递减）：新题没有数据库 id，跳转下拉框又必须有值。
        * ★ 不能从 -1 起：-1 是"结束问卷"的保留值，被新题占用后会静默把跳转改成那道题。
@@ -997,6 +1051,15 @@ export default {
         const score = Number(q.score) || 0
         return sum + (score > 0 ? score : 0)
       }, 0)
+    },
+    /** 题目数：随机抽题的上限 */
+    questionCount() {
+      return (this.questions || []).length
+    },
+    /** 是否存在逻辑跳转（选项 nextQuestionId 非空，含 -1=结束）；有跳转时禁止乱序 / 抽题 */
+    hasLogicJump() {
+      return (this.questions || []).some(q =>
+        (q.options || []).some(o => o.nextQuestionId != null))
     },
     /** 是否在回收站里（后端口径：deleted != 0；NULL 视为未删除） */
     inRecycleBin() {
@@ -1133,6 +1196,10 @@ export default {
           // 签到核销 / 公开报名名单：默认都关
           checkinEnabled: data.checkinEnabled === 1 ? 1 : 0,
           showParticipants: data.showParticipants === 1 ? 1 : 0,
+          // 作答顺序：乱序 / 抽题（老后端不返回时按关闭处理）
+          shuffleQuestions: data.shuffleQuestions === 1 ? 1 : 0,
+          shuffleOptions: data.shuffleOptions === 1 ? 1 : 0,
+          questionsPerAttempt: data.questionsPerAttempt == null ? 0 : data.questionsPerAttempt,
           // H2：后端算好的"我对这份问卷能做什么"（null = 老后端，不拦）
           myPermissions: Array.isArray(data.myPermissions) ? data.myPermissions : null
         }
@@ -1147,7 +1214,7 @@ export default {
       try {
         // 带 X-Survey-Editor 声明"编辑器在读题目"：后端只对编辑器放行作者/管理员免答题密码，
         // 填写页不带这个头，作者自己打开分享链接仍要输密码。
-        const data = await api.question.list(this.surveyId, {
+        const data = await api.question.list(this.surveyId, null, {
           headers: { 'X-Survey-Editor': '1' }
         })
         this.questions = this.normalizeQuestions(data)
@@ -1243,6 +1310,44 @@ export default {
       this.questions[qIndex].options.splice(oIndex, 1)
     },
 
+    // ==================== 选项配图 ====================
+
+    /** 选本地图片：临时 input 避免每个选项各挂一个隐藏 input */
+    pickOptionImage(q, oIndex) {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/png,image/jpeg,image/webp'
+      input.onchange = () => {
+        const file = input.files && input.files[0]
+        if (file) this.uploadOptionImage(q, oIndex, file)
+      }
+      input.click()
+    },
+
+    /** 上传到 /api/upload/option-image，成功后把相对路径写进选项（保存题目时随 options 提交） */
+    async uploadOptionImage(q, oIndex, file) {
+      if (file.size > 2 * 1024 * 1024) {
+        ElMessage.warning('图片不能超过 2MB')
+        return
+      }
+      const key = `${q.id}-${oIndex}`
+      this.optionImageUploading = key
+      try {
+        const { url } = await uploadApi.optionImage(this.surveyId, file)
+        q.options[oIndex].imageUrl = url
+        this.markDirty()
+        ElMessage.success('配图已上传')
+      } catch {
+        // 失败提示由 http.js 统一弹出
+      } finally {
+        this.optionImageUploading = ''
+      }
+    },
+
+    removeOptionImage(q, oIndex) {
+      q.options[oIndex].imageUrl = null
+      this.markDirty()
+    },
 
     /** 任何编辑动作都会走到这里：标记 dirty + 排一次自动草稿 */
     markDirty() {
@@ -1605,7 +1710,11 @@ export default {
           requireLogin: this.surveyInfo.requireLogin === 1 ? 1 : 0,
           // 签到核销 / 公开报名名单
           checkinEnabled: this.surveyInfo.checkinEnabled === 1 ? 1 : 0,
-          showParticipants: this.surveyInfo.showParticipants === 1 ? 1 : 0
+          showParticipants: this.surveyInfo.showParticipants === 1 ? 1 : 0,
+          // 作答顺序：静态 SQL 不传会被写成默认值，关闭时也显式传 0
+          shuffleQuestions: this.surveyInfo.shuffleQuestions === 1 ? 1 : 0,
+          shuffleOptions: this.surveyInfo.shuffleOptions === 1 ? 1 : 0,
+          questionsPerAttempt: this.surveyInfo.questionsPerAttempt || 0
         })
 
         // 保存成功：清 dirty（离开页面不再提示）、更新"已保存 · 刚刚"、丢掉本地自动草稿
@@ -1680,6 +1789,8 @@ export default {
         options: (q.options || []).map(opt => ({
           content: opt.content,
           nextQuestionId: opt.nextQuestionId,
+          // 配图是上传端点返回的相对路径；没图传 null，避免把 undefined 写进 JSON
+          imageUrl: opt.imageUrl || null,
           // 正确答案标记：只有可判分题型保留（排序题也有 options，但正确答案没有意义）
           isCorrect: this.qIsGradable(q.type) && opt.isCorrect === 1 ? 1 : 0
         }))
@@ -2776,5 +2887,40 @@ html[data-theme="dark"] .pv-nps-btn {
   .option-row {
     flex-wrap: wrap;
   }
+}
+
+/* 选项配图：文字按钮 + 40px 缩略图（右上角删除） */
+.option-image-btn {
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.option-image-wrap {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.option-image {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--stroke);
+  display: block;
+}
+.option-image-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 50%;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
 }
 </style>

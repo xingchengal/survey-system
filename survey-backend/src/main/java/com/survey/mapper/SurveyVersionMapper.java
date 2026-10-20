@@ -47,4 +47,12 @@ public interface SurveyVersionMapper {
     /** 彻底删除问卷时清空它的版本快照：快照是完整题目 JSON，留着等于"删了但没删干净"。 */
     @Delete("DELETE FROM t_survey_version WHERE survey_id = #{surveyId}")
     int deleteBySurveyId(@Param("surveyId") Integer surveyId);
+
+    /**
+     * 所有含配图的快照 JSON（上传文件 GC 用）。
+     * ★ 快照里的 imageUrl 也算「这张图还有人用」：回滚会把它们写回 t_option，
+     *   漏掉快照会让回滚后的选项图裂开。
+     */
+    @Select("SELECT questions_json FROM t_survey_version WHERE questions_json LIKE '%\"imageUrl\"%'")
+    List<String> findAllQuestionsJson();
 }

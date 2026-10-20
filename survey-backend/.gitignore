@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### 上传文件（选项配图）：文件本体在磁盘，不进 git；容器部署挂 volume ###
+uploads/

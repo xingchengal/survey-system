@@ -24,7 +24,7 @@ services:
       - "3307:3306"
     volumes:
       - survey-mysql-data:/var/lib/mysql
-      # 首次启动自动建表（12 张表 + 唯一索引 uk_survey_user）
+      # 首次启动自动建表（26 张表 + 唯一索引 uk_survey_user）
       - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -83,8 +83,13 @@ services:
       # 覆盖 application.yaml 里默认的 localhost —— 容器内走服务名 redis
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      # 选项配图存这里；必须挂 volume，否则重建容器丢图
+      APP_UPLOAD_DIR: /app/uploads
     ports:
       - "8080:8080"
+    volumes:
+      - survey-uploads:/app/uploads
 
 volumes:
   survey-mysql-data:
+  survey-uploads:
