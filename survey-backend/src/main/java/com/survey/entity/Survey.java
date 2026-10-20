@@ -80,6 +80,15 @@ public class Survey {
     /** 是否公开报名名单：0=否（默认），1=是。开启后填写页显示前 50 位报名者。 */
     private Integer showParticipants;
 
+    /** 填写页题目乱序：0=按 sort_order（默认），1=随机。只影响填写页；编辑器/统计/回看仍按原顺序。 */
+    private Integer shuffleQuestions;
+
+    /** 填写页选项乱序：0=按 sort_order（默认），1=随机。判分按选项原文，不受顺序影响。 */
+    private Integer shuffleOptions;
+
+    /** 每份答卷抽题数：0=不抽（默认），N=从全部题目随机抽 N 道；判分总分按抽到的题算。 */
+    private Integer questionsPerAttempt;
+
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createdTime;
 
@@ -228,6 +237,15 @@ public class Survey {
 
     public Integer getShowParticipants() { return showParticipants; }
     public void setShowParticipants(Integer showParticipants) { this.showParticipants = showParticipants; }
+
+    public Integer getShuffleQuestions() { return shuffleQuestions; }
+    public void setShuffleQuestions(Integer shuffleQuestions) { this.shuffleQuestions = shuffleQuestions; }
+
+    public Integer getShuffleOptions() { return shuffleOptions; }
+    public void setShuffleOptions(Integer shuffleOptions) { this.shuffleOptions = shuffleOptions; }
+
+    public Integer getQuestionsPerAttempt() { return questionsPerAttempt; }
+    public void setQuestionsPerAttempt(Integer questionsPerAttempt) { this.questionsPerAttempt = questionsPerAttempt; }
 
     /** IP 限制：0=关闭，1=同一 IP 只能提交一次；NULL 按 0 处理（不意外开启限制）。 */
     private Integer ipLimit;

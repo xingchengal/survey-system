@@ -7,6 +7,7 @@ import com.survey.dto.QuestionIdItem;
 import com.survey.dto.SurveySnapshot;
 import com.survey.entity.Option;
 import com.survey.entity.Question;
+import com.survey.entity.Survey;
 import com.survey.entity.SurveyVersion;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
@@ -157,6 +158,17 @@ public class QuestionService {
      */
     private List<QuestionIdItem> doSaveQuestions(Integer surveyId, List<Question> questions,
                                                  Integer userId, String note, boolean validateOptions) {
+        // 乱序 / 抽题与逻辑跳转互斥：跳转按题目位置解析，打乱或抽掉目标会让流程失效。
+        // 设置页保存时已拒绝“先有跳转再开乱序”，这里挡住反向顺序（先开乱序、后加跳转）。
+        Survey surveyForOrder = surveyMapper.findById(surveyId);
+        boolean orderChanged = surveyForOrder != null
+                && ((surveyForOrder.getShuffleQuestions() != null && surveyForOrder.getShuffleQuestions() == 1)
+                || (surveyForOrder.getShuffleOptions() != null && surveyForOrder.getShuffleOptions() == 1)
+                || (surveyForOrder.getQuestionsPerAttempt() != null && surveyForOrder.getQuestionsPerAttempt() > 0));
+        if (orderChanged && hasJumpRule(questions)) {
+            throw new BizException("问卷已开启乱序 / 随机抽题，请先在设置里关闭，再设置逻辑跳转");
+        }
+
         // 题目与选项条数必须有上限：请求体 4MB 而一道题只有几十字节，一次能塞几万道题，
         // 而公开的题目接口（1+N SQL）、Excel 导出（列上限 16384）、提交答卷都会因此被放大。
         if (questions.size() > MAX_QUESTIONS_PER_SURVEY) {
@@ -291,6 +303,7 @@ public class QuestionService {
                         opt.setId(null);
                         opt.setQuestionId(q.getId());
                         opt.setSortOrder(optOrder++);
+                        opt.setImageUrl(normalizeImageUrl(opt.getImageUrl()));
                         TextLimits.requireWithin(opt.getContent(), TextLimits.OPTION_CONTENT, "选项内容");
                         optionMapper.insert(opt);
                     }
@@ -372,5 +385,39 @@ public class QuestionService {
             }
         }
         return questions;
+    }
+
+    /** 入参里是否存在逻辑跳转（next_question_id 非空，含 -1=结束）。 */
+    private static boolean hasJumpRule(List<Question> questions) {
+        if (questions == null) {
+            return false;
+        }
+        for (Question q : questions) {
+            if (q == null || q.getOptions() == null) {
+                continue;
+            }
+            for (Option o : q.getOptions()) {
+                if (o != null && o.getNextQuestionId() != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 选项配图只接受本系统上传的相对路径：外链会绕过类型校验与 GC，一律拒绝。
+     * 空串 / 空白统一成 null（库里"无图"只有一种表示）。
+     */
+    private static String normalizeImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+        String url = imageUrl.trim();
+        // 500 = t_option.image_url 的列宽；超长会在 MySQL 层被拒成 500，这里提前转 400。
+        if (!url.startsWith("/uploads/") || url.length() > 500) {
+            throw new BizException("选项图片地址不合法，请重新上传");
+        }
+        return url;
     }
 }

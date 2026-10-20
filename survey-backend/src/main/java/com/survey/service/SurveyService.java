@@ -307,6 +307,25 @@ public class SurveyService {
         // 签到核销 / 公开报名名单默认关闭。
         survey.setCheckinEnabled(survey.getCheckinEnabled() != null && survey.getCheckinEnabled() == 1 ? 1 : 0);
         survey.setShowParticipants(survey.getShowParticipants() != null && survey.getShowParticipants() == 1 ? 1 : 0);
+
+        // 作答顺序：只认 0/1；抽题数 0=不抽，N 必须在 1..题数。
+        int shuffleQuestions = survey.getShuffleQuestions() != null && survey.getShuffleQuestions() == 1 ? 1 : 0;
+        int shuffleOptions = survey.getShuffleOptions() != null && survey.getShuffleOptions() == 1 ? 1 : 0;
+        Integer rawPerAttempt = survey.getQuestionsPerAttempt();
+        int perAttempt = rawPerAttempt == null || rawPerAttempt < 0 ? 0 : rawPerAttempt;
+        if (shuffleQuestions == 1 || shuffleOptions == 1 || perAttempt > 0) {
+            int total = survey.getId() == null ? 0 : questionMapper.findBySurveyId(survey.getId()).size();
+            if (perAttempt > total) {
+                throw new BizException("抽题数量不能超过题目总数（当前 " + total + " 题）");
+            }
+            // 跳转目标按题目位置解析：抽掉或打乱目标会让流程直接失效，所以有跳转就整体禁用。
+            if (survey.getId() != null && optionMapper.countJumpOptions(survey.getId()) > 0) {
+                throw new BizException("问卷设置了逻辑跳转，不能开启题目乱序 / 选项乱序 / 随机抽题");
+            }
+        }
+        survey.setShuffleQuestions(shuffleQuestions);
+        survey.setShuffleOptions(shuffleOptions);
+        survey.setQuestionsPerAttempt(perAttempt);
     }
 
     /** 去空白；空串返回 null（"清空"在库里统一表示为 NULL） */
@@ -550,8 +569,9 @@ public class SurveyService {
                 newOpt.setQuestionId(newQuestionId);
                 newOpt.setContent(opt.getContent());
                 newOpt.setSortOrder(opt.getSortOrder());
-                // 漏拷 nextQuestionId 会静默丢掉全部跳转规则。
+                // 漏拷 nextQuestionId 会静默丢掉全部跳转规则；漏拷 imageUrl 则副本里选项图全丢。
                 newOpt.setNextQuestionId(remapNextQuestionId(opt.getNextQuestionId(), questionIdMap));
+                newOpt.setImageUrl(opt.getImageUrl());
                 optionMapper.insert(newOpt);
             }
         }

@@ -1,5 +1,6 @@
 package com.survey.controller;
 
+import com.survey.common.AttemptShuffle;
 import com.survey.common.BizException;
 import com.survey.common.Permission;
 import com.survey.dto.QuestionIdItem;
@@ -77,7 +78,8 @@ public class QuestionController {
                                        @RequestHeader(value = "X-User-Id", required = false) Integer userId,
                                        @RequestHeader(value = "X-User-Role", required = false) String role,
                                        @RequestHeader(value = "X-Survey-Password", required = false) String password,
-                                       @RequestHeader(value = "X-Survey-Editor", required = false) String editor) {
+                                       @RequestHeader(value = "X-Survey-Editor", required = false) String editor,
+                                       @RequestParam(value = "attemptToken", required = false) String attemptToken) {
         Survey survey = surveyService.getById(surveyId);
         if (survey == null) {
             throw new BizException("问卷不存在");
@@ -97,6 +99,37 @@ public class QuestionController {
             surveyService.requireAccessPassword(survey, password);
         }
 
-        return questionService.getQuestionsBySurveyId(surveyId);
+        List<Question> questions = questionService.getQuestionsBySurveyId(surveyId);
+        // 编辑器永远拿全量原序：乱序 / 抽题只影响填写页（统计与回看也按全量）。
+        if (EDITOR_HEADER.equals(editor)) {
+            return questions;
+        }
+        return forFill(survey, questions, attemptToken);
+    }
+
+    /**
+     * 填写页的题目视图：按问卷设置抽题 / 乱序；两者都没开时原样返回。
+     * attemptToken 由前端生成并持久化，保证刷新后仍是同一套题（提交时后端用同一 token 重算总分）。
+     */
+    private List<Question> forFill(Survey survey, List<Question> questions, String attemptToken) {
+        boolean shuffleQuestions = survey.getShuffleQuestions() != null && survey.getShuffleQuestions() == 1;
+        boolean shuffleOptions = survey.getShuffleOptions() != null && survey.getShuffleOptions() == 1;
+        int perAttempt = survey.getQuestionsPerAttempt() == null ? 0 : survey.getQuestionsPerAttempt();
+        if (!shuffleQuestions && !shuffleOptions && perAttempt <= 0) {
+            return questions;
+        }
+        if (attemptToken == null || attemptToken.isBlank()) {
+            throw new BizException("请刷新页面后再作答（缺少作答令牌）");
+        }
+        String token = attemptToken.trim();
+        if (token.length() > 64) {
+            throw new BizException("作答令牌过长");
+        }
+        List<Question> arranged = AttemptShuffle.arrange(survey.getId(), questions, perAttempt,
+                shuffleQuestions, token);
+        if (shuffleOptions) {
+            AttemptShuffle.shuffleOptions(survey.getId(), arranged, token);
+        }
+        return arranged;
     }
 }

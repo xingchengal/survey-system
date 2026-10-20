@@ -1,6 +1,7 @@
 package com.survey.service;
 
 import com.survey.common.AnswerDisplay;
+import com.survey.common.AttemptShuffle;
 import com.survey.common.BizException;
 import com.survey.common.DateRanges;
 import com.survey.common.Grader;
@@ -115,7 +116,7 @@ public class AnswerService {
      */
     @Transactional
     public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details) {
-        return doSubmit(surveyId, userId, details, null, null);
+        return doSubmit(surveyId, userId, details, null, null, null);
     }
 
     /**
@@ -125,22 +126,30 @@ public class AnswerService {
      */
     @Transactional
     public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details, Integer durationMs) {
-        return doSubmit(surveyId, userId, details, durationMs, null);
+        return doSubmit(surveyId, userId, details, durationMs, null, null);
+    }
+
+    /** 兼容旧调用（不带作答令牌）：问卷未开随机抽题时与原行为一致。 */
+    @Transactional
+    public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details,
+                       Integer durationMs, String clientIp) {
+        return doSubmit(surveyId, userId, details, durationMs, clientIp, null);
     }
 
     /**
      * 提交答卷（带耗时 + 客户端 IP）：两个 HTTP 入口用这个重载。
      *
-     * @param clientIp 连接 IP（不看 X-Forwarded-For）；问卷开 IP 限制时必须非空
+     * @param clientIp     连接 IP（不看 X-Forwarded-For）；问卷开 IP 限制时必须非空
+     * @param attemptToken 填写页的作答令牌；问卷开了随机抽题时必须带，用于重算抽到的题与总分
      */
     @Transactional
     public SubmitResult submit(Integer surveyId, Integer userId, List<AnswerDetail> details,
-                       Integer durationMs, String clientIp) {
-        return doSubmit(surveyId, userId, details, durationMs, clientIp);
+                       Integer durationMs, String clientIp, String attemptToken) {
+        return doSubmit(surveyId, userId, details, durationMs, clientIp, attemptToken);
     }
 
     private SubmitResult doSubmit(Integer surveyId, Integer userId, List<AnswerDetail> details,
-                          Integer durationMs, String clientIp) {
+                          Integer durationMs, String clientIp, String attemptToken) {
         if (details == null || details.isEmpty()) {
             throw new BizException("答卷内容不能为空");
         }
@@ -277,11 +286,32 @@ public class AnswerService {
             }
         }
 
+        // 抽题：填写页拿到的题集由 attemptToken 决定，提交时必须用同一 token 重算，
+        // 否则判分总分按全题库算，会多算没抽到的题；同时挡住“塞一道没抽到的题刷分”。
+        List<Question> effectiveQuestions = surveyQuestions;
+        int perAttempt = survey.getQuestionsPerAttempt() == null ? 0 : survey.getQuestionsPerAttempt();
+        boolean shuffleQuestions = survey.getShuffleQuestions() != null && survey.getShuffleQuestions() == 1;
+        if (perAttempt > 0) {
+            if (attemptToken == null || attemptToken.isBlank()) {
+                throw new BizException("请刷新页面后再作答（缺少作答令牌）");
+            }
+            effectiveQuestions = AttemptShuffle.arrange(surveyId, surveyQuestions, perAttempt,
+                    shuffleQuestions, attemptToken.trim());
+            Set<Integer> drawnIds = effectiveQuestions.stream()
+                    .map(Question::getId)
+                    .collect(Collectors.toSet());
+            for (AnswerDetail d : details) {
+                if (!drawnIds.contains(d.getQuestionId())) {
+                    throw new BizException("答卷包含本次未抽到的题目，请刷新页面后重试");
+                }
+            }
+        }
+
         // 判分在写库前完成，与 t_answer 同一条 INSERT 落库；分数是提交时快照，事后改分值不影响已提交答卷。
         // 只查设了分值的题，不构成 N+1；普通问卷完全跳过。
         Grader.Result grading = null;
         if (survey.getGradeEnabled() != null && survey.getGradeEnabled() == 1) {
-            List<Integer> gradableQuestionIds = surveyQuestions.stream()
+            List<Integer> gradableQuestionIds = effectiveQuestions.stream()
                     .filter(q -> q.getId() != null && q.getScore() != null && q.getScore() > 0)
                     .filter(q -> Grader.isGradable(q.getType()))
                     .map(Question::getId)
@@ -292,7 +322,8 @@ public class AnswerService {
                     gradableOptions.computeIfAbsent(opt.getQuestionId(), k -> new ArrayList<>()).add(opt);
                 }
             }
-            grading = Grader.grade(survey, surveyQuestions, gradableOptions, details);
+            // 总分只按本次抽到的题算（未抽到的不进分母）
+            grading = Grader.grade(survey, effectiveQuestions, gradableOptions, details);
         }
 
         Answer answer = new Answer();

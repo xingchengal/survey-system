@@ -17,7 +17,8 @@ export default {
   /**
    * 查某问卷的题目（含选项）。
    * 半公开：已发布的问卷任何人不登录都能读（匿名答题页依赖它），草稿只有作者或管理员能读。
+   * params 可传 { attemptToken }：填写页用它抽题 / 乱序；编辑器不传（始终全量原序）。
    * opts 可传 { silent: true }：匿名答题页未登录时不该触发"登录过期跳转"。
    */
-  list: (surveyId, opts) => http.get(`/api/question/list/${surveyId}`, null, opts)
+  list: (surveyId, params, opts) => http.get(`/api/question/list/${surveyId}`, params, opts)
 }

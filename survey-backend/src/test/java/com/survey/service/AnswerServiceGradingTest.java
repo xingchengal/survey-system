@@ -1,5 +1,6 @@
 package com.survey.service;
 
+import com.survey.common.AttemptShuffle;
 import com.survey.common.BizException;
 import com.survey.common.SurveyStatus;
 import com.survey.dto.SubmitResult;
@@ -338,5 +339,64 @@ class AnswerServiceGradingTest {
         SubmitResult without = answerService.submit(SURVEY_ID, null,
                 List.of(answer(11, "A")), 3000, "127.0.0.1");
         assertNull(without.questions());
+    }
+
+    @Test
+    @DisplayName("★ 随机抽题：总分只按抽到的题算，未抽到的题不拉高总分")
+    void randomDrawScoresOnlyDrawnQuestions() {
+        Survey s = survey(1, null);
+        s.setQuestionsPerAttempt(2);
+        Question q1 = single(11, 10);
+        q1.setSortOrder(1);
+        Question q2 = single(12, 20);
+        q2.setSortOrder(2);
+        Question q3 = single(13, 30);
+        q3.setSortOrder(3);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(s);
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(q1, q2, q3));
+        when(optionMapper.findByQuestionIds(anyList())).thenReturn(List.of(
+                option(11, "A", true), option(12, "B", true), option(13, "C", true)));
+
+        String token = "draw-token-1";
+        List<Question> drawn = AttemptShuffle.arrange(SURVEY_ID, List.of(q1, q2, q3), 2, false, token);
+        List<AnswerDetail> details = drawn.stream()
+                .map(q -> answer(q.getId(), q.getId() == 11 ? "A" : q.getId() == 12 ? "B" : "C"))
+                .toList();
+
+        SubmitResult result = answerService.submit(SURVEY_ID, null, details, 3000, "127.0.0.1", token);
+
+        int expected = drawn.stream().mapToInt(Question::getScore).sum();
+        assertEquals(expected, result.totalScore());
+        assertEquals(expected, result.earnedScore());
+    }
+
+    @Test
+    @DisplayName("★ 随机抽题：提交一道没抽到的题 → 400")
+    void randomDrawRejectsQuestionOutsideDrawnSet() {
+        Survey s = survey(1, null);
+        s.setQuestionsPerAttempt(2);
+        Question q1 = single(11, 10);
+        q1.setSortOrder(1);
+        Question q2 = single(12, 20);
+        q2.setSortOrder(2);
+        Question q3 = single(13, 30);
+        q3.setSortOrder(3);
+        when(surveyMapper.findById(SURVEY_ID)).thenReturn(s);
+        when(questionMapper.findBySurveyId(SURVEY_ID)).thenReturn(List.of(q1, q2, q3));
+        when(optionMapper.findByQuestionIds(anyList())).thenReturn(List.of(
+                option(11, "A", true), option(12, "B", true), option(13, "C", true)));
+
+        String token = "draw-token-2";
+        List<Question> drawn = AttemptShuffle.arrange(SURVEY_ID, List.of(q1, q2, q3), 2, false, token);
+        List<Integer> drawnIds = drawn.stream().map(Question::getId).toList();
+        Question outside = List.of(q1, q2, q3).stream()
+                .filter(q -> !drawnIds.contains(q.getId()))
+                .findFirst()
+                .orElseThrow();
+        String content = outside.getId() == 11 ? "A" : outside.getId() == 12 ? "B" : "C";
+
+        assertTrue(assertThrows(BizException.class, () -> answerService.submit(SURVEY_ID, null,
+                List.of(answer(outside.getId(), content)), 3000, "127.0.0.1", token))
+                .getMessage().contains("未抽到"));
     }
 }

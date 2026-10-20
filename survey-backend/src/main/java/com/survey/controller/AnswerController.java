@@ -121,6 +121,7 @@ public class AnswerController {
                          @RequestHeader(value = "X-User-Id", required = false) Integer userId,
                          @RequestHeader(value = "X-Survey-Password", required = false) String password,
                          @RequestParam(value = "durationMs", required = false) Long durationMs,
+                         @RequestParam(value = "attemptToken", required = false) String attemptToken,
                          HttpServletRequest request) {
         // 与匿名入口一致：只有已发布才收答卷；回收站/题目归属等硬守卫在 AnswerService.submit。
         Survey survey = surveyService.getById(surveyId);
@@ -130,7 +131,7 @@ public class AnswerController {
         surveyService.requireAccessPassword(survey, password);
         // IP 限制用连接 IP，不看 X-Forwarded-For，防止换个请求头绕过。
         return answerService.submit(surveyId, userId, details, clampDuration(durationMs),
-                WebUtils.getConnectionIp(request));
+                WebUtils.getConnectionIp(request), attemptToken);
     }
 
     @Operation(summary = "提交答卷（匿名访客，通过分享码）")
@@ -139,6 +140,7 @@ public class AnswerController {
                                     @RequestBody List<AnswerDetail> details,
                                     @RequestHeader(value = "X-Survey-Password", required = false) String password,
                                     @RequestParam(value = "durationMs", required = false) Long durationMs,
+                                    @RequestParam(value = "attemptToken", required = false) String attemptToken,
                                     HttpServletRequest request) {
         Survey survey = surveyService.getByShareCode(shareCode);
         if (survey == null) throw new BizException("问卷不存在");
@@ -146,7 +148,7 @@ public class AnswerController {
         surveyService.requireAccessPassword(survey, password);
         // 匿名提交同样判分，成绩随返回体返回（匿名没有 user_id，之后无法再查）。
         return answerService.submit(survey.getId(), null, details, clampDuration(durationMs),
-                WebUtils.getConnectionIp(request));
+                WebUtils.getConnectionIp(request), attemptToken);
     }
 
     @Operation(summary = "查询某问卷的答卷数量")

@@ -22,10 +22,11 @@ public interface SurveyMapper {
      */
     @Insert("INSERT INTO t_survey(user_id, title, description, status, share_code, deleted, " +
             "start_time, end_time, is_template, template_category, view_count, " +
-            "checkin_enabled, show_participants) " +
+            "checkin_enabled, show_participants, shuffle_questions, shuffle_options, questions_per_attempt) " +
             "VALUES(#{userId}, #{title}, #{description}, #{status}, #{shareCode}, 0, " +
             "#{startTime}, #{endTime}, #{isTemplate}, #{templateCategory}, IFNULL(#{viewCount}, 0), " +
-            "IFNULL(#{checkinEnabled}, 0), IFNULL(#{showParticipants}, 0))")
+            "IFNULL(#{checkinEnabled}, 0), IFNULL(#{showParticipants}, 0), " +
+            "IFNULL(#{shuffleQuestions}, 0), IFNULL(#{shuffleOptions}, 0), IFNULL(#{questionsPerAttempt}, 0))")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Survey survey);
 
@@ -60,7 +61,10 @@ public interface SurveyMapper {
             "show_answer_after_submit=IFNULL(#{showAnswerAfterSubmit}, 0), " +
             "require_login=IFNULL(#{requireLogin}, 0), " +
             "checkin_enabled=IFNULL(#{checkinEnabled}, 0), " +
-            "show_participants=IFNULL(#{showParticipants}, 0) WHERE id=#{id}")
+            "show_participants=IFNULL(#{showParticipants}, 0), " +
+            "shuffle_questions=IFNULL(#{shuffleQuestions}, 0), " +
+            "shuffle_options=IFNULL(#{shuffleOptions}, 0), " +
+            "questions_per_attempt=IFNULL(#{questionsPerAttempt}, 0) WHERE id=#{id}")
     int update(Survey survey);
 
     /** 只把 updated_time 推到当前时刻（保存题目、版本回滚这类不改本表字段的入口用）。 */

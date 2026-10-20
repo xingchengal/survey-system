@@ -7,6 +7,7 @@ import com.survey.entity.Question;
 import com.survey.entity.SurveyVersion;
 import com.survey.mapper.OptionMapper;
 import com.survey.mapper.QuestionMapper;
+import com.survey.mapper.SurveyMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,6 +43,8 @@ class QuestionServiceRollbackTest {
     private QuestionMapper questionMapper;
     @Mock
     private OptionMapper optionMapper;
+    @Mock
+    private SurveyMapper surveyMapper;
     @Mock
     private SurveyVersionService surveyVersionService;
 

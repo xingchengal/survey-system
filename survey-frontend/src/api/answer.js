@@ -93,9 +93,10 @@ export default {
    * 返回 SubmitResult 对象：`{ message, graded, totalScore, earnedScore, passScore, passed, questions }`
    * —— graded=false 时判分字段全为 null；questions 仅在开启「提交后显示答案」时有值。
    * durationMs 只用于限时校验与质控提示，可伪造。
+   * attemptToken：问卷开了随机抽题时必须带，后端用它重算抽到的题与总分。
    */
-  submit: (surveyId, details, durationMs) => {
-    const query = durationMs == null ? '' : `?durationMs=${durationMs}`
+  submit: (surveyId, details, durationMs, attemptToken) => {
+    const query = buildSubmitQuery(durationMs, attemptToken)
     return http.post(`/api/answer/submit/${surveyId}${query}`, details)
   },
 
@@ -105,9 +106,18 @@ export default {
    * 接口在白名单里不会 401，所以不传 silent 是安全的；失败原因由 400 + message 给出。
    * durationMs 只用于质控（"答题过快"判定），可伪造，不是安全边界。
    * opts 可传 { headers }：有答题密码时带 X-Survey-Password（密码只放请求头，不进 query）。
+   * attemptToken 同 submit：抽题问卷必带。
    */
-  submitByShareCode: (shareCode, details, durationMs, opts) => {
-    const query = durationMs == null ? '' : `?durationMs=${durationMs}`
+  submitByShareCode: (shareCode, details, durationMs, opts, attemptToken) => {
+    const query = buildSubmitQuery(durationMs, attemptToken)
     return http.post(`/api/answer/submit-share/${shareCode}${query}`, details, opts)
   }
+}
+
+/** 提交类接口的 query：durationMs 与 attemptToken 都可选，避免出现 `?&` 这种空参数。 */
+function buildSubmitQuery(durationMs, attemptToken) {
+  const parts = []
+  if (durationMs != null) parts.push(`durationMs=${durationMs}`)
+  if (attemptToken) parts.push(`attemptToken=${encodeURIComponent(attemptToken)}`)
+  return parts.length ? `?${parts.join('&')}` : ''
 }
