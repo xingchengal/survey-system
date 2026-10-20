@@ -1,6 +1,8 @@
 package com.survey.service;
 
+import com.github.pagehelper.PageHelper;
 import com.survey.common.BizException;
+import com.survey.common.PageResult;
 import com.survey.dto.FeedbackDetail;
 import com.survey.dto.FeedbackView;
 import com.survey.entity.Feedback;
@@ -158,9 +160,10 @@ class FeedbackServiceTest {
     }
 
     @Test
-    @DisplayName("★ 管理员回复：记处理人并通知用户")
+    @DisplayName("★ 管理员回复反馈：记处理人、通知用户，并立即结单")
     void adminReplyNotifiesUser() {
         when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_OPEN, null));
+        when(feedbackMapper.countAdminMessages(9)).thenReturn(0);
         when(feedbackMapper.insertMessage(any())).thenAnswer(inv -> {
             ((FeedbackMessage) inv.getArgument(0)).setId(44L);
             return 1;
@@ -171,8 +174,24 @@ class FeedbackServiceTest {
         service.adminReply(ADMIN, 9, "已处理", "cid-4");
 
         verify(feedbackMapper).assignHandler(9, ADMIN);
+        // 反馈回复即结单：不保留来回对话
+        verify(feedbackMapper).close(9);
         verify(notificationService).send(eq(USER), eq("客服回复"), anyString(), eq("feedback"),
                 eq("/feedback?ticket=9"));
+    }
+
+    @Test
+    @DisplayName("★ 反馈只允许回复一次：已回复再回复 → 400，不写消息、不重复通知")
+    void feedbackReplyIsRejectedWhenAlreadyReplied() {
+        when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_OPEN, null));
+        when(feedbackMapper.countAdminMessages(9)).thenReturn(1);
+
+        assertEquals("该反馈已回复并结单，不能重复回复", assertThrows(BizException.class,
+                () -> service.adminReply(ADMIN, 9, "再回一次", "cid-9")).getMessage());
+
+        verify(feedbackMapper, never()).insertMessage(any());
+        verify(feedbackMapper, never()).close(anyInt());
+        verify(notificationService, never()).send(anyInt(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -223,6 +242,8 @@ class FeedbackServiceTest {
 
         service.adminReply(ADMIN, 9, "已协助处理", "cid-7");
 
+        // 客服工单可以继续对话，回复不应结单
+        verify(feedbackMapper, never()).close(anyInt());
         verify(notificationService).send(eq(USER), eq("客服回复"), anyString(), eq("feedback"),
                 eq("/support?ticket=9"));
     }
@@ -244,5 +265,77 @@ class FeedbackServiceTest {
 
         verify(notificationService).send(eq(ADMIN), eq("新的反馈消息"), anyString(), eq("feedback"),
                 eq("/admin/feedback?type=SERVICE&id=9"));
+    }
+
+    @Test
+    @DisplayName("★ 管理端列表：type/status 空串归一为 null 再透传，分页参数夹紧")
+    void adminPageNormalizesFiltersAndPages() {
+        when(feedbackMapper.findForAdmin(null, null)).thenReturn(List.of(view(9)));
+        try {
+            PageResult<FeedbackView> page = service.adminPage("  ", "", 1, 12);
+
+            assertEquals(1, page.getTotal());
+            assertEquals(1, page.getList().size());
+            assertEquals(1, page.getPageNum());
+            assertEquals(12, page.getPageSize());
+            verify(feedbackMapper).findForAdmin(null, null);
+        } finally {
+            // PageHelper 用 ThreadLocal 存分页参数，不清会污染后续用例
+            PageHelper.clearPage();
+        }
+    }
+
+    @Test
+    @DisplayName("★ 管理员直接结单：记处理人、关闭、通知用户落在反馈详情")
+    void closeByAdminNotifiesUser() {
+        when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_OPEN, null));
+        when(feedbackMapper.close(9)).thenReturn(1);
+
+        service.closeByAdmin(ADMIN, 9);
+
+        verify(feedbackMapper).assignHandler(9, ADMIN);
+        verify(feedbackMapper).close(9);
+        verify(notificationService).send(eq(USER), eq("工单已关闭"), anyString(), eq("feedback"),
+                eq("/feedback?ticket=9"));
+    }
+
+    @Test
+    @DisplayName("★ 管理员结单：工单已关闭 / 不存在 → 400，不写库")
+    void closeByAdminRejectsClosedOrMissing() {
+        when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_CLOSED, null));
+        assertTrue(assertThrows(BizException.class, () -> service.closeByAdmin(ADMIN, 9))
+                .getMessage().contains("已关闭"));
+        verify(feedbackMapper, never()).close(anyInt());
+
+        when(feedbackMapper.findById(9)).thenReturn(null);
+        assertEquals("工单不存在", assertThrows(BizException.class,
+                () -> service.closeByAdmin(ADMIN, 9)).getMessage());
+    }
+
+    @Test
+    @DisplayName("★ 未读数：普通用户只算自己的，staff 额外带管理端总数")
+    void unreadCountsOnlyRequestedScopes() {
+        when(feedbackMapper.countUserUnread(USER)).thenReturn(3);
+        when(feedbackMapper.countAdminUnread()).thenReturn(5);
+
+        var userOnly = service.unread(USER, false);
+        assertEquals(3, userOnly.get("userUnread"));
+        assertFalse(userOnly.containsKey("adminUnread"), "普通用户不该看到管理端未读数");
+
+        var staff = service.unread(USER, true);
+        assertEquals(3, staff.get("userUnread"));
+        assertEquals(5, staff.get("adminUnread"));
+    }
+
+    @Test
+    @DisplayName("已读水位推进到 lastMessageId；我的列表直接透传 mapper")
+    void markReadAndMyListDelegate() {
+        when(feedbackMapper.findById(9)).thenReturn(feedback(9, FeedbackService.STATUS_OPEN, null));
+
+        service.markUserRead(9, USER);
+        verify(feedbackMapper).updateUserRead(9, USER, 10L);
+
+        when(feedbackMapper.findMyList(USER)).thenReturn(List.of(view(9)));
+        assertEquals(1, service.myList(USER).size());
     }
 }

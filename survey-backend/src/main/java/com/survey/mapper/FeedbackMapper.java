@@ -79,6 +79,11 @@ public interface FeedbackMapper {
                                        @Param("afterId") Long afterId,
                                        @Param("limit") int limit);
 
+    /** 管理员回复条数：反馈只允许回复一次（回复即结单），用它判断是否已经回复过。 */
+    @Select("SELECT COUNT(*) FROM t_feedback_message WHERE feedback_id = #{feedbackId} "
+            + "AND sender_role = 'admin'")
+    int countAdminMessages(@Param("feedbackId") Integer feedbackId);
+
     /** 幂等查询：同一工单同一 client_msg_id 只应有一条。 */
     @Select("SELECT * FROM t_feedback_message WHERE feedback_id = #{feedbackId} "
             + "AND client_msg_id = #{clientMsgId} LIMIT 1")

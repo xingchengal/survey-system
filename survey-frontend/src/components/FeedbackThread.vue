@@ -27,6 +27,36 @@
       <!-- 消息区独立滚动：header 与 composer 都不随消息变长 -->
       <div ref="scroller" class="thread-body">
         <el-skeleton v-if="!ticket" :rows="6" animated />
+        <!-- 反馈：一次性回执，不用聊天气泡（与客服工单在视觉上明确区分） -->
+        <template v-else-if="isFeedback">
+          <div class="receipt">
+            <div class="receipt-block">
+              <div class="receipt-label">
+                反馈内容
+                <span v-if="ticket.subject" class="receipt-subject">{{ ticket.subject }}</span>
+              </div>
+              <div class="receipt-text">{{ feedbackContent || '（无内容）' }}</div>
+              <div v-if="firstUserTime" class="receipt-time">{{ firstUserTime }}</div>
+            </div>
+
+            <div v-if="adminReply" class="receipt-block is-reply">
+              <div class="receipt-label">
+                管理员回复
+                <el-tag size="small" type="success" effect="plain">已结单</el-tag>
+              </div>
+              <div class="receipt-text">{{ adminReply }}</div>
+              <div v-if="adminReplyTime" class="receipt-time">{{ adminReplyTime }}</div>
+            </div>
+            <div v-else-if="ticket.status === 'CLOSED'" class="receipt-block is-reply">
+              <div class="receipt-label">处理结果</div>
+              <div class="receipt-text">管理员已结单，未附带回复。</div>
+            </div>
+            <div v-else class="receipt-pending">
+              反馈已收到，管理员处理后会在消息中心通知你。
+            </div>
+          </div>
+        </template>
+        <!-- 客服：对话气泡 -->
         <template v-else>
           <div v-if="messages.length === 0" class="thread-empty">暂无消息</div>
 
@@ -50,9 +80,7 @@
             </div>
           </section>
 
-          <div v-if="ticket.status === 'CLOSED'" class="system-divider">
-            {{ isFeedback ? '已标记为已处理' : '工单已关闭' }}
-          </div>
+          <div v-if="ticket.status === 'CLOSED'" class="system-divider">工单已关闭</div>
         </template>
       </div>
 
@@ -65,12 +93,14 @@
             maxlength="2000"
             show-word-limit
             resize="none"
-            :placeholder="isAdmin ? '回复用户（Enter 发送，Shift+Enter 换行）' : '继续补充（Enter 发送，Shift+Enter 换行）'"
+            :placeholder="isFeedback
+              ? '回复并结单（Enter 发送，Shift+Enter 换行）'
+              : (isAdmin ? '回复用户（Enter 发送，Shift+Enter 换行）' : '继续补充（Enter 发送，Shift+Enter 换行）')"
             @keydown="handleKeydown"
           />
           <div class="foot-actions">
             <el-button type="danger" plain :loading="closing" @click="closeTicket">
-              {{ isFeedback ? '标记已处理' : '关闭工单' }}
+              {{ isFeedback ? '直接结单' : '关闭工单' }}
             </el-button>
             <el-button
               type="primary"
@@ -78,18 +108,20 @@
               :disabled="sending || !reply.trim()"
               @click="sendReply"
             >
-              {{ isAdmin ? '回复' : '发送' }}
+              {{ isFeedback ? '回复并结单' : (isAdmin ? '回复' : '发送') }}
             </el-button>
           </div>
         </template>
         <div v-else-if="ticket && readonly" class="foot-note">
-          {{ ticket.status === 'CLOSED'
-            ? (isFeedback ? '该反馈已处理。' : '工单已关闭。')
-            : '反馈已提交，管理员回复后会显示在这里，并通过消息中心通知你。' }}
+          {{ isFeedback
+            ? (ticket.status === 'CLOSED'
+              ? '该反馈已回复并结单。'
+              : '反馈已提交，管理员回复后会显示在这里，并通过消息中心通知你。')
+            : (ticket.status === 'CLOSED' ? '工单已关闭。' : '客服会尽快回复。') }}
         </div>
         <div v-else-if="ticket" class="closed-tip">
           {{ isFeedback
-            ? '该反馈已标记为已处理。'
+            ? '该反馈已结单。'
             : `工单已关闭，${isAdmin ? '如需继续请让用户重新提交。' : '如有新问题请重新提交一条。'}` }}
         </div>
         <div v-else class="foot-placeholder">正在加载工单…</div>
@@ -196,12 +228,34 @@ export default {
     isFeedback() {
       return this.variant === 'feedback'
     },
-    /** 反馈是意见箱，状态只有「待处理 / 已处理」；客服才是工单状态 */
+    /** 反馈是意见箱，状态只有「待处理 / 已结单」；客服才是工单状态 */
     statusText() {
       if (!this.ticket) return ''
       const open = this.ticket.status === 'OPEN'
-      if (this.isFeedback) return open ? '待处理' : '已处理'
+      if (this.isFeedback) return open ? '待处理' : '已结单'
       return open ? '处理中' : '已关闭'
+    },
+    /** 回执用：用户提交的内容（历史多段用空行分隔） */
+    feedbackContent() {
+      return this.messages
+        .filter(m => m.senderRole === 'user')
+        .map(m => m.content)
+        .join('\n\n')
+    },
+    /** 回执用：管理员回复（后端限制反馈只能回复一次，历史多段也照实展示） */
+    adminReply() {
+      return this.messages
+        .filter(m => m.senderRole === 'admin')
+        .map(m => m.content)
+        .join('\n\n')
+    },
+    firstUserTime() {
+      const msg = this.messages.find(m => m.senderRole === 'user')
+      return msg ? formatTimeLabel(parseTime(msg.createdTime)) : ''
+    },
+    adminReplyTime() {
+      const msg = this.messages.find(m => m.senderRole === 'admin')
+      return msg ? formatTimeLabel(parseTime(msg.createdTime)) : ''
     },
     drawerSize() {
       return this.viewportWidth < 768 ? '100%' : '560px'
@@ -403,6 +457,8 @@ export default {
         this.reply = ''
         this.applyDetail(data)
         this.$emit('updated', data)
+        // 反馈回复后后端会直接结单，返回的 status 已是 CLOSED
+        if (this.isFeedback) ElMessage.success('已回复并结单')
       } catch {
         // 失败提示由 api/http 统一弹出；输入内容保留，方便重试
       } finally {
@@ -412,9 +468,9 @@ export default {
 
     async closeTicket() {
       if (!this.closer || !this.ticket) return
-      const title = this.isFeedback ? '标记已处理' : '关闭工单'
+      const title = this.isFeedback ? '直接结单' : '关闭工单'
       const message = this.isFeedback
-        ? '标记后该反馈归入已处理，确定？'
+        ? '不回复直接结单？结单后用户会从消息中心收到通知。'
         : (this.isAdmin ? '关闭后用户不能再回复，确定关闭？' : '关闭后不能再发消息，确定关闭这个工单？')
       try {
         await this.$confirm(message, title, { type: 'warning' })
@@ -427,7 +483,7 @@ export default {
         this.ticket = { ...this.ticket, status: 'CLOSED' }
         this.stopPolling()
         this.$emit('closed', this.ticket.id)
-        ElMessage.success(this.isFeedback ? '已标记为已处理' : '工单已关闭')
+        ElMessage.success(this.isFeedback ? '已结单' : '工单已关闭')
         this.scrollToBottom()
       } catch {
         // 失败提示由 api/http 统一弹出
@@ -656,5 +712,61 @@ export default {
 html[data-theme="dark"] .is-peer .msg-avatar {
   background: #223a5e;
   color: #9ed0ff;
+}
+/* 反馈回执：不用聊天气泡，与客服工单在视觉上明确区分 */
+.receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.receipt-block {
+  padding: 14px 16px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.receipt-block.is-reply {
+  border-color: var(--sky-200);
+  background: var(--sky-50);
+}
+.receipt-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.receipt-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--ink-3);
+}
+.receipt-text {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.receipt-time {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.receipt-pending {
+  padding: 12px;
+  border: 1px dashed var(--stroke);
+  border-radius: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+html[data-theme="dark"] .receipt-block.is-reply {
+  background: #16243a;
+  border-color: #22314a;
 }
 </style>

@@ -156,7 +156,10 @@ public class FeedbackService {
         return detail;
     }
 
-    /** 管理员回复：写入 admin 消息并把自己记为处理人。 */
+    /**
+     * 管理员回复：写入 admin 消息并把自己记为处理人。
+     * ★ 反馈是一次性意见箱：只允许回复一次，回复后立即结单（不再来回对话）；客服工单可多次回复。
+     */
     @Transactional
     public FeedbackDetail adminReply(Integer adminId, Integer feedbackId, String content, String clientMsgId) {
         Feedback feedback = feedbackMapper.findById(feedbackId);
@@ -164,8 +167,15 @@ public class FeedbackService {
             throw new BizException("工单不存在");
         }
         requireOpen(feedback);
+        boolean feedbackType = TYPE_FEEDBACK.equals(feedback.getType());
+        if (feedbackType && feedbackMapper.countAdminMessages(feedbackId) > 0) {
+            throw new BizException("该反馈已回复并结单，不能重复回复");
+        }
         appendMessage(feedback, adminId, "admin", requireContent(content), clientMsgId);
         feedbackMapper.assignHandler(feedbackId, adminId);
+        if (feedbackType) {
+            feedbackMapper.close(feedbackId);
+        }
         return adminDetail(feedbackId, 0L);
     }
 
