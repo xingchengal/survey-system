@@ -21,10 +21,10 @@ public class Knife4jConfig {
                 .info(new Info()
                         .title("问卷调查系统 API 文档")
                         .description("基于 Spring Boot 4.0.8 + MyBatis 的问卷调查系统接口文档"
-                                + " · **98** 个方法级端点（公开 12 / 需登录 31 / 需登录+归属 25 / 管理员 30）"
-                                + " · 21 张表 · 339 个后端用例。"
+                                + " · **128** 个方法级端点（公开 13 / 需登录 42 / 需登录+归属 33 / 管理员 40）"
+                                + " · 26 张表 · 505 个后端用例（55 类）。"
                                 + "权限分档与业务前置条件的权威口径见仓库 docs/AUDIT.md")
-                        .version("2.3.0")
+                        .version("2.4.0")
                         .contact(new Contact()
                                 .name("开发者")
                                 .email("dev@example.com")));

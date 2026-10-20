@@ -6,7 +6,7 @@
       <div class="app-logo">
         <BrandLogo class="logo-mark" :size="34" />
         <span class="logo-text">问卷系统</span>
-        <span class="logo-badge">v2.2</span>
+        <span class="logo-badge">v2.4.0</span>
       </div>
 
       <!-- 菜单（可滚动） -->

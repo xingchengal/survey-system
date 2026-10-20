@@ -160,33 +160,38 @@
           <el-collapse-item name="info">
             <template #title>
               <span class="text-bold">🧩 技术栈与系统信息</span>
-              <span class="panel-hint sys-version">v2.3.0 · 115 端点 · 456 测试 · 23 张表</span>
+              <span class="panel-hint sys-version">v2.4.0 · 128 端点 · 505 测试（55 类）· 26 张表</span>
             </template>
 
             <el-descriptions :column="2" border size="small">
               <el-descriptions-item label="前端">
-                Vue 3.5（全 Options API）· Vite · Element Plus · ECharts · qrcode · Vue Router
+                Vue 3.5（全 Options API）· Vite 8 · Element Plus 2.14 · ECharts 6 · qrcode · Vue Router 4 · ESLint 10
               </el-descriptions-item>
               <el-descriptions-item label="后端">
-                Spring Boot 4 · MyBatis · PageHelper · OkHttp · JJWT · Redis（Lettuce）
+                Spring Boot 4.0.8 · Java 17 · MyBatis 4（注解式，无 XML）· PageHelper 2.1 ·
+                OkHttp 4.12 · JJWT 0.12 · Redis（Lettuce）· Spring AOP（@Scheduled / @Async）
               </el-descriptions-item>
               <el-descriptions-item label="数据库">
-                MySQL 8.x（survey_db · 23 张表 · utf8mb4）
+                MySQL 8.x（survey_db · 26 张表 · utf8mb4）· HikariCP
               </el-descriptions-item>
               <el-descriptions-item label="缓存 / 限流">
-                Redis 5：统计缓存 + 分布式限流 + 熔断降级（不可用时回退进程内计数）
+                Redis 5：统计预聚合缓存 + 分布式限流 + 熔断降级（不可用时回退进程内计数）
               </el-descriptions-item>
               <el-descriptions-item label="安全机制" :span="2">
                 JWT 双 token（access 12h + refresh 7d）· RBAC 权限点 + AOP 切面 · PBKDF2 加盐哈希 ·
-                滑块验证码 · token_valid_after 吊销 · HttpOnly + SameSite Cookie
+                滑块验证码 · token_valid_after 吊销 · HttpOnly + SameSite Cookie · 请求体上限 / CORS 白名单
               </el-descriptions-item>
               <el-descriptions-item label="进阶能力" :span="2">
-                Spring AOP · @Scheduled 定时发布/截止 · @Async 站内通知 · 版本快照/回滚 · 答卷质控 ·
-                矩阵/排序/NPS 统计 · 条件跳转 · 额度钱包
+                Spring AOP · @Scheduled 定时发布/截止/GC · @Async 站内通知 · 版本快照/回滚 · 答卷质控 ·
+                矩阵/排序/NPS 统计 · 条件跳转 · 额度钱包 · 作答乱序 / 随机抽题 · 选项配图上传 ·
+                考试判分 · 签到核销 / 公开名单 · 反馈 / 客服轮询 · 协作邀请确认
+              </el-descriptions-item>
+              <el-descriptions-item label="测试 / CI" :span="2">
+                JUnit 5 · Mockito · MockMvc 全栈权限矩阵 · Maven Surefire · JaCoCo（行覆盖 67.15%）·
+                GitHub Actions 4 个作业（backend / backend-integration / frontend / docs）
               </el-descriptions-item>
               <el-descriptions-item label="AI / 工具" :span="2">
-                Qwen2.5-7B-Instruct（SiliconFlow）· Knife4j（OpenAPI 3）· EasyExcel ·
-                Docker Compose · GitHub Actions（3 个 CI 作业）
+                Qwen2.5-7B-Instruct（SiliconFlow）· Knife4j（OpenAPI 3）· EasyExcel · Docker Compose · Maven Wrapper
               </el-descriptions-item>
             </el-descriptions>
 
@@ -221,9 +226,18 @@ export default {
       /** 项目当前能力标签（与 README 功能特性同步；只作展示，不参与逻辑） */
       featureTags: [
         '十种题型',
+        '逻辑跳转',
         '矩阵/排序/NPS',
+        '考试判分',
+        '实名问卷',
+        '签到核销',
+        '作答乱序',
+        '随机抽题',
+        '选项配图',
         'RBAC 权限',
+        '次级管理员',
         '协作者',
+        '反馈 / 客服',
         '举报审核',
         '额度钱包',
         '模板热度',

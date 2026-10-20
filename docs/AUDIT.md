@@ -1,4 +1,4 @@
-# AUDIT · 端点权限与事实矩阵（全量 **127** 个方法级端点）
+# AUDIT · 端点权限与事实矩阵（全量 **128** 个方法级端点）
 
 > **定位**：四份主文档之一，**项目数字的唯一出处**（端点 / 表 / 测试 / 页面）。
 > **用途**：动任何 Controller 之前，先在下面四张明细表里找到那个端点，
@@ -7,7 +7,7 @@
 > （问卷是否已发布 / 是否在回收站 / 是否已结束……）。
 > **端点变更历史**（哪一轮加了哪几条、分档怎么订正）见 `HISTORY.md`；本文件只写**现状**。
 >
-> **当前口径（2026-10-19 按代码重核，四处一致）**：**127** 端点 = 公开 **13** + 需登录 **42** + 归属 **32** + 管理 **40**；
+> **当前口径（2026-10-20 按代码重核，四处一致）**：**128** 端点 = 公开 **13** + 需登录 **42** + 归属 **33** + 管理 **40**；
 > Controller **18**；复核命令见 §八，**改动端点后必须重跑**。
 >
 > ★ 改这张表时必须守的规矩：
@@ -41,13 +41,13 @@
 
 | 项 | 值 | 复核方式 |
 |---|---|---|
-| 方法级端点 | **127** | §八 注解计数 |
-| 分档 | 公开 **13** / 需登录 **42** / 归属 **32** / 管理 **40** | §三~§六 活行 |
-| Controller | **20** | `controller/*.java` |
-| 数据库表 | **25** | `sql/init.sql` 的 `CREATE TABLE` |
-| 后端测试 | **473 例 / 51 类** | `mvnw -o test` |
+| 方法级端点 | **128** | §八 注解计数 |
+| 分档 | 公开 **13** / 需登录 **42** / 归属 **33** / 管理 **40** | §三~§六 活行 |
+| Controller | **21** | `controller/*.java` |
+| 数据库表 | **26** | `sql/init.sql` 的 `CREATE TABLE` |
+| 后端测试 | **505 例 / 55 类** | `mvnw -o test` |
 | 前端页面 | **27** | `src/views/**/*.vue` |
-| 前端 API 模块 | **18** | `src/api/*.js` |
+| 前端 API 模块 | **19** | `src/api/*.js` |
 | 具名路由 | **29** | `router/index.js` |
 
 ### 2.2 端点分档
@@ -56,9 +56,9 @@
 |---|---|
 | 公开（白名单，不需登录） | **13** |
 | 需要登录（只能碰自己的数据） | **42** |
-| 需要登录 **+ 归属校验** | **32** |
+| 需要登录 **+ 归属校验** | **33** |
 | 需要**管理员** | **40** |
-| **合计** | **127** |
+| **合计** | **128** |
 
 > ★ 历史分档订正（“总数对、分档错”、明细表漏登记 12 条等）见 `HISTORY.md` 的「审计」条目；
 >   本表只写当前口径。
@@ -142,12 +142,12 @@
 | `GET /api/wallet/admin/reconcile` | `@RequirePermission("wallet:manage")` | ✅ 对账（余额 ≠ 流水汇总 的钱包）。★ 只报告不自动修，确认原因后用 `adjust` 补账 |
 | `GET /api/feedback/admin/page` | `@RequirePermission("feedback:handle")` | ✅ 反馈 / 工单列表（分页，`type` / `status` 可选）。★ 有 `feedback:handle` 即可看全部工单，不复用 `review:handle` |
 | `GET /api/feedback/admin/{id}` | `@RequirePermission("feedback:handle")` | ✅ 工单详情（`afterId` 增量，单次最多 50 条 + `hasMore`）；进入即推进管理端已读水位 |
-| `POST /api/feedback/admin/{id}/reply` | `@RequirePermission("feedback:handle")` | ✅ 回复工单：写入 admin 消息、记 `handled_by`、通知用户；POST 限 20 次/分/用户 |
+| `POST /api/feedback/admin/{id}/reply` | `@RequirePermission("feedback:handle")` | ✅ 回复工单：写入 admin 消息、记 `handled_by`、通知用户；POST 限 20 次/分/用户。★ **反馈（FEEDBACK）只允许回复一次，回复后立即结单**（再回复 400）；客服（SERVICE）可多次回复 |
 | `POST /api/feedback/admin/{id}/close` | `@RequirePermission("feedback:handle")` | ✅ 关闭工单：只改 `status`（不删除），通知用户 |
 
 ---
 
-## 五、需要登录 + 归属校验（**32 个**）
+## 五、需要登录 + 归属校验（**33 个**）
 
 > ★ 第十九轮订正：表头原写 16，表体活行是 **15** —— 表头与表体不一致时**以表体为准**（同样要复核）。
 > ★ 第二十四轮：新增 `GET /api/answer/statistics/survey/{surveyId}`（整份问卷统计，一次取回）⇒ 15 → **16**。
@@ -251,6 +251,7 @@
 | `GET /api/wallet` | 我的钱包余额（没有钱包时自动建 0 余额包）。★ 只取 `X-User-Id`，没有任何查别人的参数 | ✅ |
 | `GET /api/wallet/transactions` | 我的额度流水（分页）。金额**有符号**：入账正、出账负 | ✅ |
 | `POST /api/wallet/recharge` | 模拟充值（演示用，不接真实支付；1~1000 点，必须带幂等键，重复提交只到账一次） | ✅ |
+| `POST /api/upload/option-image` | 上传选项配图（multipart，带 `surveyId`）。★ 按问卷编辑权校验（作者 / editor 协作者），只验登录会变成免费图床；下架问卷拒传。校验 2MB + 文件头魔数（JPG/PNG/WebP），文件名 UUID、存 `app.upload.dir`，返回相对路径 `/uploads/...` | ✅ |
 
 ---
 

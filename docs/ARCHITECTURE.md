@@ -111,6 +111,9 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 - **协作者只有 ACCEPTED 生效。** `t_survey_collaborator.status` 的 PENDING / REJECTED / REVOKED
   都不参与权限判定；`findCollaboratorRole` 是唯一权限入口，名单、共享列表与名额计数也一律只认
   ACCEPTED。名额费在**接受时**扣，邀请不扣、拒绝/撤销因此不需要退款。
+- **协作者只能邀请普通用户，管理员账号不进协作者表。** `invite` 与 `accept` 都拒绝 `Role.isStaff`
+  （超管 / 次级管理员）；管理员对任何问卷本就走模块权限或全权，协作者身份只会把管理员账号暴露给
+  普通作者、被作者改角色 / 移除，还会占协作者名额。存量行只能撤销或退出，不能靠「接受」生效。
 - **作者对自己问卷全权，不查权限点表。** 为什么：作者对自己数据的支配权不该由一张配置表决定，
   配置漏了会变成"作者删不了自己的问卷"。
 - **身份只从 `X-User-Id` / `X-User-Role` 取。** 所有"我的"类接口绝不允许由请求体指定归属。
@@ -125,6 +128,7 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 - **反馈 / 客服只认 `feedback:handle`，用户侧按工单归属。** 管理侧 4 个端点全部挂
   `@RequirePermission(feedback:handle)`，不复用 `review:handle` / `system:view`；用户侧不挂权限点，
   但每条读写都校验 `feedback.user_id == 当前用户`。工单只关闭、不物理删除。
+  **反馈是一次性意见箱**：管理员回复即结单，且只允许回复一次（再回复 400）；客服工单可多次回复。
 - **伪实时轮询的固定口径**：详情打开 3s（管理端 5s）、`afterId` 增量、单次最多 50 条 + `hasMore`、
   页面隐藏暂停、失败 3/5/10/20 秒退避；发送带 `clientMsgId`（UUID）幂等。不要改成 WebSocket 或
   无上限全量拉取。
@@ -132,6 +136,10 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
   `t_user.token_valid_after` 并吊销该用户全部 refresh token。只做一半会出现
   “旧 access token 还能用”或“用 refresh token 续出一张新票”，被降级的人仍留在管理端、
   前端菜单与后端权限也对不上。前端拿到 401 后续期失败会清登录态并跳登录。
+- **JWT 白名单按前缀放行时，新增同前缀子路径必须显式排除。** 无子路径的端点用 `equals`；
+  整棵子树才用 `startsWith`，且新增子路径时先问“它该不该公开”。`/api/answer/participants/`
+  放行公开名单后，作者端 `/participants/manage/` 被一起放行，未登录拿到 400 而不是 401
+  （`EndpointAuthMatrixTest` 会红，但它只钉已登记的端点）。
 
 ### 3.3 事务
 
@@ -295,9 +303,12 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 | **协作者边界** | `viewer` 只能看问卷结构；`editor` 可改内容且可看数据、不能删；`analyst` 只能看数据；作者与管理员全权，作者不依赖权限点表 |
 | **钱包幂等** | 每一笔业务带 `idempotencyKey`（如 `publish:{surveyId}`），靠唯一键保证只扣一次；发布扣点、移入回收站退款；进阶题型包按问卷只扣一次，删掉不退款 |
 | **考试判分** | 提交时算分并连同总分一起写进 `t_answer`（快照），事后改分值不影响历史答卷；多选全对才得分、不做部分得分；统计只算 `earned_score IS NOT NULL` 的行 |
+| **作答乱序 / 随机抽题** | 只作用于填写页：题目 / 选项用 `attemptToken` 派生种子确定性打乱，刷新不换题；抽题统计按「抽到且作答」（未抽到的不进分母），判分总分只按抽到的题算；编辑器、统计、回看始终全量原序；存在逻辑跳转（`next_question_id` 非空）时禁止开启，保存设置与保存题目两处都拦 |
+| **选项配图** | 只存相对路径 `/uploads/...`；只接受 JPG/PNG/WebP（按**文件头魔数**，不信任扩展名与 Content-Type）且 ≤2MB；上传必须带 `surveyId` 并校验问卷编辑权（只验登录 = 免费图床）；删除不同步删文件——每日 GC 按「活跃选项 ∪ **版本快照**」引用集合 + 30 天宽限清理；`copySurvey` 必须一起复制 `imageUrl`，否则模板/副本丢图 |
 | **Excel 导出** | 单元格渲染走 `AnswerDisplay`（多选 `A、B、C`、矩阵 `行：列`、排序带名次）；导出上限见 3.5；文件名同时给 `filename` 与 `filename*`，前端优先解析后者 |
 | **个人中心两页** | `UserProfile.vue` 与 `AdminProfile.vue` 是同一份复制品，改一边必须同步另一边 |
 | **无效样本两套缓存** | `qstats` 与 `qstats-valid` 是两套 key，失效时必须一起删 |
+| **问卷字段的两条写路径** | 新建走 `SurveyMapper.insert`、编辑走 `update`；新增问卷字段必须**两处都加**。只改 `update` 时创建（含场景模板）永远落成默认值——`checkin_enabled` / `show_participants` 就因此没在创建时生效过 |
 
 ---
 
@@ -348,6 +359,7 @@ MySQL 是唯一事实来源，Redis **只**承担统计预聚合缓存与跨实�
 | 新增 `@SpringBootTest` 会连上活库 | MockMvc 用例把**全部 Mapper + `DataSource`** 都 `@MockitoBean`；漏一个就会真查库；别把 `datasource.url` 指向 `localhost:3306` |
 | 真库集成测试有独立库 | 只认 `survey_db_test`，口令走环境变量；绝不指向活库 `survey_db`；跑完自清数据 |
 | 本机无外网 | 别删 `node_modules`（装不回来）；Maven 用 `-o` 离线；新增依赖需联网一次，可用工作区临时本地仓库避免写 `~/.m2` |
+| 上传目录默认相对启动目录 | `app.upload.dir`（默认 `./uploads`，可用 `APP_UPLOAD_DIR` 覆盖）。单机 Docker **必须挂 volume**，否则重建容器丢图；多副本 / 云原生要换 `StorageService` 的 OSS 实现——`LocalStorageService` 只适用单机 |
 | `.java` 是 CRLF，且不能带 BOM | 脚本替换前先 `replace(/\r\n/g,'\n')` 归一；写 Java 用 `UTF8Encoding($false)`，不要用会加 BOM 的 `Set-Content -Encoding UTF8` |
 | PowerShell 重定向会改编码 | 生成 `.sql` 等给别的程序吃的文件用 `cmd /c "... > file"` 或 Node 的 `writeFileSync`；BOM 会让 `mysql < init.sql` 语法报错 |
 | MySQL 中文乱码 | `mysql.exe` 加 `--default-character-set=utf8mb4`，pwsh 里设 `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` |
